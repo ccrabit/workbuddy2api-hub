@@ -32,6 +32,11 @@ os.makedirs(os.environ["ACCOUNTS_DIR"], exist_ok=True)
 
 import wb_proxy as P
 
+# Same reason as run_all.py's PYTHONIOENCODING: run directly on Windows and
+# the labels below (they quote the panel) would raise UnicodeEncodeError.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 PASS = FAIL = 0
 
 

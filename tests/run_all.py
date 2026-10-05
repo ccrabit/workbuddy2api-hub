@@ -53,6 +53,11 @@ def main(argv):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [ROOT] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    # Windows gives a suite a cp1252 stdout, and a suite that prints a label
+    # from the panel's own Chinese text then dies with UnicodeEncodeError -
+    # which is how _test_model_credit.py turned the whole Windows job red.
+    # The labels are worth keeping, so the child is told to speak UTF-8.
+    env["PYTHONIOENCODING"] = "utf-8"
     have_node = shutil.which("node") is not None
 
     selected = suites(pattern)
