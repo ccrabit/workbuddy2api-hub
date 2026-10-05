@@ -313,8 +313,10 @@ validate_package() {
             || die "app.tgz does not contain ${entry}"
     done
 
-    # The two copies of the port have to agree, or the desktop icon opens a
-    # port the gateway never listened on.
+    # The desktop entry has to reach the app one way or the other: either
+    # through the port it names (an "url" entry) or through the gateway socket
+    # (an "iframe" entry, which carries no port at all). A port that is named
+    # must be the manifest's, or the entry opens something nobody listens on.
     local manifest_port ui_port sc_port
     manifest_port="$(awk -F'=' '/^service_port/ {gsub(/[[:space:]]/, "", $2); print $2}' "${PKG_DIR}/manifest")"
     ui_port="$(awk 'match($0, /"port"[[:space:]]*:[[:space:]]*"[0-9]+"/) {
@@ -322,7 +324,12 @@ validate_package() {
     }' "${PKG_DIR}/ui/config")"
     sc_port="$(sed -n 's/.*src\.ports="\([0-9][0-9]*\)\/tcp".*/\1/p' "${PKG_DIR}/WorkBuddy2API.sc")"
     [ -n "$manifest_port" ] || die "manifest has no service_port"
-    [ "$manifest_port" = "$ui_port" ] || die "port mismatch: manifest ${manifest_port} vs ui/config ${ui_port}"
+    if [ -n "$ui_port" ]; then
+        [ "$manifest_port" = "$ui_port" ] || die "port mismatch: manifest ${manifest_port} vs ui/config ${ui_port}"
+    else
+        grep -q '"gatewaySocket"' "${PKG_DIR}/ui/config" \
+            || die "ui/config is neither an url entry with a port nor an iframe entry with a gateway socket"
+    fi
     [ "$manifest_port" = "$sc_port" ] || die "port mismatch: manifest ${manifest_port} vs WorkBuddy2API.sc ${sc_port}"
 
     local checksum_declared checksum_actual

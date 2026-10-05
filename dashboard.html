@@ -2,11 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f8fafc">
 <title>WorkBuddy 用量看板</title>
 <style>
 :root{
   --bg:#f8fafc; --panel:#ffffff; --panel2:#f1f5f9; --panel3:#e2e8f0;
+  --surface:#ffffff; --surface-trans:rgba(255,255,255,.94);
   --line:#e2e8f0; --line-hover:#cbd5e1;
   --fg:#0f172a; --dim:#64748b; --dim-light:#94a3b8;
   --accent:#2563eb; --accent-hover:#1d4ed8; --accent-soft:rgba(37,99,235,.08);
@@ -17,14 +19,83 @@
   --shadow-sm:0 1px 2px 0 rgba(15,23,42,.05);
   --shadow:0 1px 3px 0 rgba(15,23,42,.06),0 1px 2px -1px rgba(15,23,42,.04);
   --shadow-md:0 4px 6px -2px rgba(15,23,42,.06),0 2px 4px -2px rgba(15,23,42,.04);
+  /* Hover washes live in variables: the light values are a slate film that
+     turns into a glaring white block on the dark palette. */
+  --row-hover:rgba(241,245,249,.6); --surface-hover:rgba(15,23,42,.04);
+  /* Log console palette (rules .log-* plus #logTerminalBody). Light set is a
+     light console, not a black terminal dropped into a white page. */
+  --log-bg:#f6f8fa; --log-bar:#eef1f4; --log-border:#d8dee4;
+  --log-fg:#334155; --log-ts:#94a3b8; --log-hover:rgba(15,23,42,.05);
+  --log-info-fg:#1d4ed8; --log-info-bg:rgba(37,99,235,.10);
+  --log-warn-fg:#b45309; --log-warn-bg:rgba(217,119,6,.12);
+  --log-error-fg:#b91c1c; --log-error-bg:rgba(220,38,38,.10);
+  --log-debug-fg:#475569; --log-debug-bg:rgba(100,116,139,.12);
+  --log-tag-fg:#475569; --log-tag-bg:rgba(100,116,139,.12);
+  --tag-chat-fg:#7c3aed; --tag-chat-bg:rgba(124,58,237,.10);
+  --tag-scheduler-fg:#15803d; --tag-scheduler-bg:rgba(22,163,74,.12);
+  --tag-tasks-fg:#a16207; --tag-tasks-bg:rgba(234,179,8,.14);
+  --tag-accounts-fg:#0369a1; --tag-accounts-bg:rgba(14,165,233,.12);
+  --tag-auth-fg:#be123c; --tag-auth-bg:rgba(244,63,94,.10);
+  --tag-system-fg:#475569; --tag-system-bg:rgba(100,116,139,.12);
+  --tag-gateway-fg:#4338ca; --tag-gateway-bg:rgba(99,102,241,.12);
 }
+/* Dark palette. The pre-paint script in <head> resolves the stored preference
+   ("auto" follows the system) into data-theme on <html>, so this block needs no
+   media query and there is no flash of the wrong theme. */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0b1220; --panel:#121b2c; --panel2:#182238; --panel3:#1f2b45;
+  --surface:#121b2c; --surface-trans:rgba(18,27,44,.9);
+  --line:#243149; --line-hover:#33415c;
+  --fg:#e6edf7; --dim:#94a3b8; --dim-light:#64748b;
+  --accent:#60a5fa; --accent-hover:#93c5fd; --accent-soft:rgba(96,165,250,.14);
+  --accent2:#4ade80; --accent2-soft:rgba(74,222,128,.14);
+  --warn:#fbbf24; --warn-soft:rgba(251,191,36,.14);
+  --think:#a78bfa; --think-soft:rgba(167,139,250,.14);
+  --bad:#f87171; --bad-soft:rgba(248,113,113,.14);
+  --shadow-sm:0 1px 2px 0 rgba(0,0,0,.4);
+  --shadow:0 1px 3px 0 rgba(0,0,0,.45),0 1px 2px -1px rgba(0,0,0,.4);
+  --shadow-md:0 4px 6px -2px rgba(0,0,0,.45),0 2px 4px -2px rgba(0,0,0,.4);
+  /* A low-alpha white film reads as "this row is under the cursor" without
+     the glare of a lighter surface -- the same trick GitHub Primer uses for
+     its transparent hover tokens (rgba(177,186,196,.12)), only dimmer
+     because these rows are wide. */
+  --row-hover:rgba(148,163,184,.10); --surface-hover:rgba(255,255,255,.07);
+  /* The console stays dark here; this is the palette it always had. */
+  --log-bg:#090d16; --log-bar:#0f172a; --log-border:#1e293b;
+  --log-fg:#cbd5e1; --log-ts:#64748b; --log-hover:rgba(255,255,255,.05);
+  --log-info-fg:#60a5fa; --log-info-bg:rgba(37,99,235,.2);
+  --log-warn-fg:#fbbf24; --log-warn-bg:rgba(217,119,6,.2);
+  --log-error-fg:#f87171; --log-error-bg:rgba(220,38,38,.25);
+  --log-debug-fg:#94a3b8; --log-debug-bg:rgba(148,163,184,.2);
+  --log-tag-fg:#94a3b8; --log-tag-bg:rgba(148,163,184,.12);
+  --tag-chat-fg:#c084fc; --tag-chat-bg:rgba(124,58,237,.18);
+  --tag-scheduler-fg:#4ade80; --tag-scheduler-bg:rgba(22,163,74,.18);
+  --tag-tasks-fg:#facc15; --tag-tasks-bg:rgba(234,179,8,.18);
+  --tag-accounts-fg:#38bdf8; --tag-accounts-bg:rgba(14,165,233,.18);
+  --tag-auth-fg:#fb7185; --tag-auth-bg:rgba(244,63,94,.18);
+  --tag-system-fg:#94a3b8; --tag-system-bg:rgba(100,116,139,.18);
+  --tag-gateway-fg:#a5b4fc; --tag-gateway-bg:rgba(99,102,241,.18);
+}
+/* Pills and badges draw saturated text on a translucent wash of the same
+   hue: correct on white, muddy on near-black. Re-state the foregrounds. */
+:root[data-theme="dark"] .badge.ok{color:#4ade80;border-color:rgba(34,197,94,.4)}
+:root[data-theme="dark"] .badge.s{color:#93c5fd;border-color:rgba(37,99,235,.45)}
+:root[data-theme="dark"] .badge.warn{color:#fbbf24;border-color:rgba(245,158,11,.45)}
+:root[data-theme="dark"] .badge.bad{color:#f87171;border-color:rgba(239,68,68,.45)}
+:root[data-theme="dark"] .realm-badge-intl{color:#7dd3fc;border-color:rgba(2,132,199,.45)}
+:root[data-theme="dark"] .realm-badge-cn{color:#fca5a5;border-color:rgba(220,38,38,.45)}
+:root[data-theme="dark"] .step.active .n{background:var(--accent-soft);color:var(--accent)}
+:root[data-theme="dark"] .step.done .n{background:var(--accent2-soft);color:var(--accent2)}
+:root[data-theme="dark"] .modal-x{color:var(--dim)}
 *{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--fg);
   font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased}
 header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;
   align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
-  position:sticky;top:0;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);z-index:10;box-shadow:var(--shadow-sm)}
+  position:sticky;top:0;background:var(--surface-trans);backdrop-filter:blur(10px);z-index:10;box-shadow:var(--shadow-sm)}
 h1{margin:0;font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--fg)}
 h1 span{color:var(--dim);font-weight:400;font-size:13px;margin-left:8px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent2);
@@ -60,7 +131,7 @@ th:first-child{border-top-left-radius:8px;border-bottom-left-radius:8px}
 th:last-child{border-top-right-radius:8px;border-bottom-right-radius:8px}
 th:first-child,td:first-child{text-align:left}
 tbody tr:last-child td{border-bottom:none}
-tbody tr:hover{background:rgba(241,245,249,.6)}
+tbody tr:hover{background:var(--row-hover)}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
 /* 输入 / 输出 / 思考：三个数字应该在一行内读完，不拆行 */
 .triple{white-space:nowrap}
@@ -68,6 +139,35 @@ tbody tr:hover{background:rgba(241,245,249,.6)}
 .bar-fill.think{background:var(--think)}
 .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%;border-radius:8px}
 .table-wrap table{min-width:720px}
+#panelPwdInput{font-size:13px;min-height:38px}
+
+/* Toasts live in the palette, not in inline styles: a dark page needs dark
+   toasts, and the panel is used inside the fnOS mobile app where a fixed
+   380px box would run off the screen. */
+.toast-box{position:fixed;right:20px;bottom:20px;z-index:9999;display:flex;
+  flex-direction:column;gap:10px;align-items:flex-end;pointer-events:none}
+.toast-item{background:var(--panel);border:1px solid var(--line);
+  border-left:4px solid var(--accent);border-radius:8px;padding:10px 16px;
+  font-size:13px;font-weight:500;color:var(--fg);pointer-events:auto;
+  max-width:min(380px,calc(100vw - 40px));word-break:break-all;
+  box-shadow:var(--shadow-md);transition:all .2s ease}
+.toast-item.t-ok{border-left-color:var(--accent2);color:var(--accent2)}
+.toast-item.t-warn{border-left-color:var(--warn);color:var(--warn)}
+.toast-item.t-bad{border-left-color:var(--bad);color:var(--bad)}
+@media (max-width: 640px){
+  .toast-box{left:12px;right:12px;align-items:stretch;bottom:calc(12px + env(safe-area-inset-bottom))}
+  .toast-item{max-width:none}
+}
+
+/* Settings -> 使用说明: the addresses a client needs, each on its own row. */
+.usage-note{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.usage-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.usage-k{font-size:12px;color:var(--dim);min-width:74px}
+.usage-row code{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 9px;font-size:12px;font-family:Consolas,Monaco,'Courier New',monospace;color:var(--fg);word-break:break-all}
+.usage-hint{font-size:11px;color:var(--dim)}
+.usage-row button{padding:3px 10px;font-size:11px}
+
+/* ===== Tablet: ≤860px ===== */
 @media (max-width: 860px){
   header{padding:12px 16px}
   main{padding:16px 12px 60px}
@@ -82,7 +182,7 @@ tbody tr:hover{background:rgba(241,245,249,.6)}
   background:var(--panel2);border:1px solid var(--line);color:var(--dim);white-space:nowrap;font-weight:600}
 .badge.ok{color:#15803d;background:rgba(34,197,94,.14);border-color:rgba(34,197,94,.32)}
 .badge.s{color:#1d4ed8;background:rgba(37,99,235,.1);border-color:rgba(37,99,235,.25)}
-.badge.off{color:#64748b;background:#e2e8f0;border-color:#cbd5e1}
+.badge.off{color:var(--dim);background:var(--panel3);border-color:var(--line-hover)}
 .badge.warn{color:#b45309;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.35)}
 .badge.bad{color:#b91c1c;background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.35)}
 .badge.mini{padding:1px 6px;font-size:10px}
@@ -97,7 +197,7 @@ button{cursor:pointer;font:inherit;font-size:12px;font-weight:500;padding:6px 14
   border:1px solid var(--accent);background:var(--accent);color:#fff;box-shadow:var(--shadow-sm);transition:all .15s ease}
 button:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 button:disabled{opacity:.45;cursor:not-allowed}
-button.sec{background:#fff;border-color:var(--line);color:var(--fg);box-shadow:var(--shadow-sm)}
+button.sec{background:var(--surface);border-color:var(--line);color:var(--fg);box-shadow:var(--shadow-sm)}
 button.sec:hover{background:var(--panel2);border-color:var(--line-hover)}
 button.danger{border-color:rgba(220,38,38,.3);background:rgba(220,38,38,.06);color:var(--bad)}
 button.danger:hover{background:var(--bad);color:#fff;border-color:var(--bad)}
@@ -115,7 +215,7 @@ button.mini{padding:3px 9px;font-size:11px}
 .modal-mask{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);
   backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px;z-index:100}
 .modal-mask.show{display:flex}
-.modal{background:#fff;border:1px solid var(--line);border-radius:14px;
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:14px;
   width:min(620px,100%);max-height:88vh;overflow:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,.1),0 8px 10px -6px rgba(0,0,0,.05)}
 .modal-hd{display:flex;align-items:center;justify-content:space-between;
   padding:16px 20px;border-bottom:1px solid var(--line)}
@@ -128,7 +228,7 @@ button.mini{padding:3px 9px;font-size:11px}
 .login-link{display:block;word-break:break-all;background:var(--panel2);
   border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:12px 0;
   color:var(--accent);text-decoration:none;font-size:12px}
-.login-link:hover{border-color:var(--accent);background:#fff}
+.login-link:hover{border-color:var(--accent);background:var(--surface)}
 .hint{color:var(--dim);font-size:12px;margin:8px 0}
 .step{display:flex;gap:10px;align-items:flex-start;margin:10px 0}
 .step .n{flex:0 0 20px;height:20px;border-radius:50%;background:var(--panel2);
@@ -145,19 +245,19 @@ a:hover{text-decoration:underline}
 .realm-pill:hover{color:var(--fg)}
 .realm-pill.active{background:var(--accent);color:#fff;font-weight:600;box-shadow:var(--shadow-sm)}
 .key-card{
-  background:#ffffff;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
   padding:16px 20px;margin-bottom:12px;box-shadow:var(--shadow);
   transition:all .15s ease;
 }
 .key-card:hover{border-color:var(--line-hover);box-shadow:var(--shadow-md)}
-.key-card.disabled{opacity:.75;background:rgba(241,245,249,.5)}
+.key-card.disabled{opacity:.75;background:var(--row-hover)}
 .key-card-main{
   display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
 }
 .key-action-btn{
   display:inline-flex;align-items:center;gap:5px;padding:5px 14px;border-radius:20px;
   font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--line);
-  background:#ffffff;color:var(--fg);transition:all .15s ease;box-shadow:var(--shadow-sm);
+  background:var(--surface);color:var(--fg);transition:all .15s ease;box-shadow:var(--shadow-sm);
 }
 .key-action-btn:hover{background:var(--panel2);border-color:var(--line-hover)}
 .key-action-btn.danger{
@@ -171,7 +271,7 @@ a:hover{text-decoration:underline}
 .badge-effort{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;line-height:1.4;white-space:nowrap;margin:1px 2px;background:rgba(124,58,237,.12);color:var(--think);border:1px solid rgba(124,58,237,.3);font-weight:600}
 .realm-filter{display:inline-flex;gap:6px;margin-left:8px}
 .realm-filter button{background:var(--panel2);border:1px solid var(--line);color:var(--dim);padding:3px 9px;font-size:11px}
-.realm-filter button.active{border-color:var(--accent);color:var(--accent);background:#fff}
+.realm-filter button.active{border-color:var(--accent);color:var(--accent);background:var(--surface)}
 
 .realm-card{
   background:var(--panel);border:1px solid var(--line);border-radius:12px;
@@ -180,7 +280,7 @@ a:hover{text-decoration:underline}
 }
 .realm-card:hover{border-color:var(--line-hover);transform:translateY(-1px);box-shadow:var(--shadow-md)}
 .realm-card.active{
-  border-color:var(--accent);background:#ffffff;
+  border-color:var(--accent);background:var(--surface);
   box-shadow:0 0 0 1px var(--accent), var(--shadow-md);
 }
 .realm-card.active#tabCn{
@@ -191,21 +291,21 @@ a:hover{text-decoration:underline}
 }
 .realm-card.gateway-ctrl:hover{transform:none;border-color:var(--line);box-shadow:var(--shadow)}
 .toggle-realm-btn{
-  background:#fff;border:1px solid var(--accent);color:var(--accent);
+  background:var(--surface);border:1px solid var(--accent);color:var(--accent);
   padding:8px 18px;font-size:13px;font-weight:600;border-radius:8px;box-shadow:var(--shadow-sm);cursor:pointer;
   transition:all .15s ease;
 }
-.toggle-realm-btn:hover{background:rgba(0,0,0,.04);box-shadow:var(--shadow-md)}
+.toggle-realm-btn:hover{background:var(--surface-hover);box-shadow:var(--shadow-md)}
 .realm-endpoint-info{font-size:12px;color:var(--dim)}
 
 .main-nav{display:inline-flex;gap:4px;background:var(--panel2);padding:4px;border-radius:10px;border:1px solid var(--line)}
 .main-nav-btn{background:transparent;border:1px solid transparent;color:var(--dim);padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s ease}
-.main-nav-btn:hover{color:var(--fg);background:#fff}
-.main-nav-btn.active{background:#fff;color:var(--fg);border-color:var(--line);box-shadow:var(--shadow-sm);font-weight:600}
+.main-nav-btn:hover{color:var(--fg);background:var(--surface)}
+.main-nav-btn.active{background:var(--surface);color:var(--fg);border-color:var(--line);box-shadow:var(--shadow-sm);font-weight:600}
 /* 项目仓库入口：与顶部导航同行，但不作为一个 Tab 标签。 */
 .gh-link{display:inline-flex;align-items:center;justify-content:center;
   width:34px;height:32px;border-radius:8px;border:1px solid var(--line);
-  background:#fff;color:var(--dim);box-shadow:var(--shadow-sm);
+  background:var(--surface);color:var(--dim);box-shadow:var(--shadow-sm);
   transition:all .15s ease}
 .gh-link:hover{color:var(--fg);border-color:var(--line-hover);
   background:var(--panel2);text-decoration:none;box-shadow:var(--shadow-md)}
@@ -219,31 +319,43 @@ a:hover{text-decoration:underline}
 .range-btn:hover{color:var(--fg)}
 .range-btn.active{background:var(--accent);color:#fff;font-weight:600;box-shadow:var(--shadow-sm)}
 #analyticsKpiCards{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
-#analyticsKpiCards .card{padding:12px 16px;min-width:0;overflow:hidden;border-radius:12px;background:#fff;border:1px solid var(--line);box-shadow:var(--shadow)}
+#analyticsKpiCards .card{padding:12px 16px;min-width:0;overflow:hidden;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
 #analyticsKpiCards .card .v{font-size:19px;font-weight:700;white-space:nowrap}
 #analyticsKpiCards .card .k{font-size:11px;white-space:nowrap;margin-bottom:3px;font-weight:600;color:var(--dim)}
 #analyticsKpiCards .card .s{font-size:10px;white-space:normal;line-height:1.35;margin-top:2px;color:var(--dim)}
-.model-pill{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;white-space:nowrap}
+/* One box per model, two lines inside it: name/requests/tokens on top, the
+   price rate underneath. The frame stays unbroken so a model is never read as
+   two models. */
+.model-pill{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:11px;margin:2px 4px 2px 0}
+.model-pill .mp-main{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.model-pill .mp-rate{font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
 .log-line{display:flex;align-items:flex-start;gap:8px;padding:3px 6px;border-radius:4px;font-family:Consolas,Monaco,'Courier New',monospace;font-size:12px;line-height:1.55;transition:background .1s}
-.log-line:hover{background:rgba(255,255,255,.05)}
-.log-ts{color:#64748b;font-variant-numeric:tabular-nums;flex-shrink:0;user-select:none}
+.log-line:hover{background:var(--log-hover)}
+.log-ts{color:var(--log-ts);font-variant-numeric:tabular-nums;flex-shrink:0;user-select:none}
 .log-lvl{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;flex-shrink:0;text-align:center;min-width:46px;user-select:none}
-.log-lvl.lvl-INFO{background:rgba(37,99,235,.2);color:#60a5fa}
-.log-lvl.lvl-WARN{background:rgba(217,119,6,.2);color:#fbbf24}
-.log-lvl.lvl-ERROR{background:rgba(220,38,38,.25);color:#f87171}
-.log-lvl.lvl-DEBUG{background:rgba(148,163,184,.2);color:#94a3b8}
-.log-tag{font-size:11px;font-weight:600;padding:1px 5px;border-radius:3px;flex-shrink:0;background:rgba(148,163,184,.12);color:#94a3b8;user-select:none}
-.log-tag.tag-chat{background:rgba(124,58,237,.18);color:#c084fc}
-.log-tag.tag-scheduler{background:rgba(22,163,74,.18);color:#4ade80}
-.log-tag.tag-tasks{background:rgba(234,179,8,.18);color:#facc15}
-.log-tag.tag-accounts{background:rgba(14,165,233,.18);color:#38bdf8}
-.log-tag.tag-auth{background:rgba(244,63,94,.18);color:#fb7185}
-.log-tag.tag-system{background:rgba(100,116,139,.18);color:#94a3b8}
-.log-msg{color:#cbd5e1;flex:1;word-break:break-all;white-space:pre-wrap}
-.log-empty{padding:48px 24px;text-align:center;color:#64748b;font-size:13px;font-family:inherit}
+.log-lvl.lvl-INFO{background:var(--log-info-bg);color:var(--log-info-fg)}
+.log-lvl.lvl-WARN{background:var(--log-warn-bg);color:var(--log-warn-fg)}
+.log-lvl.lvl-ERROR{background:var(--log-error-bg);color:var(--log-error-fg)}
+.log-lvl.lvl-DEBUG{background:var(--log-debug-bg);color:var(--log-debug-fg)}
+.log-tag{font-size:11px;font-weight:600;padding:1px 5px;border-radius:3px;flex-shrink:0;background:var(--log-tag-bg);color:var(--log-tag-fg);user-select:none}
+.log-tag.tag-chat{background:var(--tag-chat-bg);color:var(--tag-chat-fg)}
+.log-tag.tag-scheduler{background:var(--tag-scheduler-bg);color:var(--tag-scheduler-fg)}
+.log-tag.tag-tasks{background:var(--tag-tasks-bg);color:var(--tag-tasks-fg)}
+.log-tag.tag-accounts{background:var(--tag-accounts-bg);color:var(--tag-accounts-fg)}
+.log-tag.tag-auth{background:var(--tag-auth-bg);color:var(--tag-auth-fg)}
+.log-tag.tag-system{background:var(--tag-system-bg);color:var(--tag-system-fg)}
+.log-tag.tag-gateway{background:var(--tag-gateway-bg);color:var(--tag-gateway-fg)}
+.log-msg{color:var(--log-fg);flex:1;word-break:break-all;white-space:pre-wrap}
+.log-window{background:var(--log-bg);border:1px solid var(--log-border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow-md)}
+.log-window-bar{background:var(--log-bar);border-bottom:1px solid var(--log-border);padding:8px 14px;display:flex;align-items:center;justify-content:space-between}
+.log-window-title{font-size:11px;color:var(--log-ts);font-family:monospace;margin-left:8px}
+#logTerminalStatus{font-size:11px;color:var(--log-ts);font-family:monospace}
+#logTerminalBody{height:620px;overflow-y:auto;padding:10px 12px;background:var(--log-bg);color:var(--log-fg)}
+.log-empty{padding:48px 24px;text-align:center;color:var(--log-ts);font-size:13px;font-family:inherit}
 /* ===== Phone: ≤640px ===== */
 @media (max-width: 640px){
-  header{padding:10px 12px;gap:8px}
+  header{padding:calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+                 10px calc(12px + env(safe-area-inset-left));gap:8px}
   header > div:first-child{width:100%;gap:8px}
   h1{font-size:15px;flex:1;min-width:0}
   h1 span{font-size:11px;margin-left:6px}
@@ -295,8 +407,12 @@ a:hover{text-decoration:underline}
   table.account-cards .slot-select{max-width:none;width:100%;min-height:40px}
   /* Forms stack */
   #pageSettings section > div[style*="display:flex"]{flex-wrap:wrap}
-  #pageSettings input:not([type=checkbox]), #pageSettings select{min-height:40px;font-size:13px}
-  #pageSettings .slot-input{font-size:13px}
+  /* iOS zooms the whole page when a focused field renders under 16px, and
+     this panel is opened inside the fnOS mobile app: every control gets a
+     comfortable size. Inline styles would otherwise win, hence !important. */
+  input:not([type=checkbox]):not([type=radio]), select, textarea{font-size:16px!important}
+  input:not([type=checkbox]):not([type=radio]), select{min-height:40px}
+  #panelPwdInput{min-height:44px}
   table.data-cards td[data-label="启用"]{justify-content:space-between}
   table.data-cards td[data-label="启用"] input[type=checkbox]{width:20px;height:20px}
   /* Logs */
@@ -332,6 +448,45 @@ a:hover{text-decoration:underline}
   .log-ts{font-size:11px}
 }
 </style>
+<script>
+/* Pick the palette before the first paint: the stored preference, or the
+   system setting when it says "auto". Inline for the same reason as the tab
+   script below - anything deferred would paint the wrong theme first. */
+(function(){
+  var MODE_KEY = 'wb-proxy-theme';
+  var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function stored(){
+    try { return localStorage.getItem(MODE_KEY) || 'auto'; } catch (e) { return 'auto'; }
+  }
+  var theme = {
+    mode: stored(),
+    labels: {auto:'跟随系统', light:'浅色', dark:'深色'},
+    apply: function(){
+      var dark = theme.mode === 'dark' || (theme.mode === 'auto' && !!(mq && mq.matches));
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      // Mobile browsers tint their own chrome with this, so it has to follow
+      // the manual toggle too, not only prefers-color-scheme.
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if(meta) meta.setAttribute('content', dark ? '#0b1220' : '#f8fafc');
+    },
+    set: function(mode){
+      theme.mode = mode;
+      try { localStorage.setItem(MODE_KEY, mode); } catch (e) {}
+      theme.apply();
+    },
+    cycle: function(){
+      var order = ['auto','light','dark'];
+      theme.set(order[(order.indexOf(theme.mode) + 1) % order.length]);
+      return theme.mode;
+    }
+  };
+  window.__WB_THEME__ = theme;
+  theme.apply();
+  if (mq && mq.addEventListener) {
+    mq.addEventListener('change', function(){ if (theme.mode === 'auto') theme.apply(); });
+  }
+})();
+</script>
 <script>
 /* Runs before <body> is parsed, so the page the user last had is the
    first one painted. Kept inline and dependency-free on purpose: an
@@ -374,6 +529,10 @@ a:hover{text-decoration:underline}
         设置
       </button>
     </nav>
+<button class="gh-link" id="themeBtn" type="button" onclick="cycleTheme()"
+        title="切换主题：跟随系统 / 浅色 / 深色" aria-label="切换主题">
+  <span id="themeIcon" aria-hidden="true">◐</span>
+</button>
 <a class="gh-link" href="https://github.com/ardeyouxipianyi/workbuddy2api-hub" target="_blank" rel="noopener noreferrer"
        title="查看 GitHub 项目仓库" aria-label="GitHub 项目仓库">
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -388,15 +547,30 @@ a:hover{text-decoration:underline}
   <div style="width:min(380px,100%);background:var(--panel);border:1px solid var(--line);
               border-radius:14px;padding:26px 24px;box-shadow:0 10px 30px rgba(15,23,42,.12)">
     <div style="font-size:16px;font-weight:700;margin-bottom:6px">WorkBuddy 网关看板</div>
-    <div style="font-size:12px;color:var(--dim);margin-bottom:18px">请输入面板访问密码</div>
-    <input id="panelPwdInput" type="password" placeholder="面板密码" autocomplete="current-password"
-           onkeydown="if(event.key==='Enter') submitPanelLogin()"
-           style="width:100%;background:var(--panel2);border:1px solid var(--line);
-                  border-radius:8px;padding:9px 12px;color:var(--fg);font:inherit">
-    <div id="panelLoginMsg" style="font-size:12px;color:var(--bad);min-height:17px;margin:8px 0 12px"></div>
-    <button onclick="submitPanelLogin()" style="width:100%;padding:9px 12px;font-size:13px">进入面板</button>
-    <div id="panelDefaultHint" style="display:none;font-size:11px;color:var(--warn);margin-top:12px">
-      当前仍在使用默认密码 <b>admin</b>，登录后请在「设置」中修改。
+    <div id="gateDirect" style="display:none">
+      <div style="font-size:12px;color:var(--dim);margin-bottom:14px">
+        从<b style="color:var(--fg)">飞牛OS 应用中心</b>打开时可以免密码进入，由系统统一登录。
+      </div>
+      <div style="font-size:12px;color:var(--dim);line-height:1.9;margin-bottom:16px">
+        1. 打开飞牛OS 桌面，或手机里的飞牛 App<br>
+        2. 进入「应用中心 → 已安装」<br>
+        3. 点 WorkBuddy2API 的「打开」
+      </div>
+      <button class="sec" style="width:100%;padding:9px 12px;font-size:13px" onclick="showPasswordLogin()">
+        仍要输入面板密码
+      </button>
+    </div>
+    <div id="gatePassword" style="display:none">
+      <div style="font-size:12px;color:var(--dim);margin-bottom:18px">请输入面板访问密码</div>
+      <input id="panelPwdInput" type="password" placeholder="面板密码" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') submitPanelLogin()"
+             style="width:100%;background:var(--panel2);border:1px solid var(--line);
+                    border-radius:8px;padding:9px 12px;color:var(--fg);font-family:inherit">
+      <div id="panelLoginMsg" style="font-size:12px;color:var(--bad);min-height:17px;margin:8px 0 12px"></div>
+      <button onclick="submitPanelLogin()" style="width:100%;padding:9px 12px;font-size:13px">进入面板</button>
+      <div id="panelDefaultHint" style="display:none;font-size:11px;color:var(--warn);margin-top:12px">
+        当前仍在使用默认密码 <b>admin</b>，登录后请在「设置」中修改。
+      </div>
     </div>
   </div>
 </div>
@@ -706,6 +880,33 @@ a:hover{text-decoration:underline}
       <h2 style="margin:0;font-size:16px;color:var(--fg)">网关设置</h2>
     </div>
 
+    <section id="usageNotesSection">
+      <h2>使用说明 <em>地址填什么</em></h2>
+      <div style="font-size:12px;color:var(--dim);line-height:1.7">
+        OpenAI 兼容的客户端填下面的 <b>API 地址</b>，Key 用「API Key 与出口绑定」里的任意一个。
+        看板本身有两条路：应用中心 / 桌面图标是内嵌打开（已登录飞牛时免密码），
+        「直连看板」是应急入口，要输面板密码。
+      </div>
+      <div class="usage-note">
+        <div class="usage-row">
+          <span class="usage-k">API 地址</span>
+          <code id="usageApi">—</code>
+          <button class="sec" onclick="copyUsage('usageApi', this)">复制</button>
+        </div>
+        <div class="usage-row">
+          <span class="usage-k">直连看板</span>
+          <code id="usagePanel">—</code>
+          <button class="sec" onclick="copyUsage('usagePanel', this)">复制</button>
+        </div>
+        <div class="usage-row">
+          <span class="usage-k">内嵌入口</span>
+          <code id="usageGateway">—</code>
+          <span class="usage-hint" id="usageGatewayHint"></span>
+        </div>
+      </div>
+      <div id="usageNote" style="font-size:11px;color:var(--dim);margin-top:10px"></div>
+    </section>
+
     <section>
       <h2>面板访问密码 <em id="setPwdState"></em></h2>
       <div style="font-size:12px;color:var(--dim);margin-bottom:12px">用于打开本看板。默认密码为 <b>admin</b>，建议立即修改。</div>
@@ -916,17 +1117,17 @@ a:hover{text-decoration:underline}
     </div>
 
     <!-- 终端视窗 -->
-    <div style="background:#090d16;border:1px solid #1e293b;border-radius:12px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.15)">
-      <div style="background:#0f172a;border-bottom:1px solid #1e293b;padding:8px 14px;display:flex;align-items:center;justify-content:space-between">
+    <div class="log-window">
+      <div class="log-window-bar">
         <div style="display:flex;align-items:center;gap:7px">
           <span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block"></span>
           <span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block"></span>
           <span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block"></span>
-          <span style="font-size:11px;color:#94a3b8;font-family:monospace;margin-left:8px">wb-proxy-console.log</span>
+          <span class="log-window-title">wb-proxy-console.log</span>
         </div>
-        <div id="logTerminalStatus" style="font-size:11px;color:#64748b;font-family:monospace">就绪</div>
+        <div id="logTerminalStatus">就绪</div>
       </div>
-      <div id="logTerminalBody" style="height:620px;overflow-y:auto;padding:10px 12px;background:#090d16;color:#cbd5e1" onscroll="handleLogTerminalScroll()">
+      <div id="logTerminalBody" onscroll="handleLogTerminalScroll()">
         <div class="log-empty">正在拉取网关日志...</div>
       </div>
     </div>
@@ -1586,17 +1787,38 @@ async function doDailyChatWeb(btn){
 }
 
 const fmt = n => (n ?? 0).toLocaleString('en-US');
+// Token counts grow without bound, so they switch unit instead of printing an
+// ever-longer digit string: 9,999 / 12.3 K / 4.56 M / 1.20 B / 3.40 T. The
+// exact number stays reachable in the cell's title attribute (tokTitle).
+const fmtTok = n => {
+  const v = Number(n || 0);
+  const a = Math.abs(v);
+  if(a < 1e4) return fmt(v);
+  if(a < 1e6) return (v/1e3).toFixed(1) + ' K';
+  if(a < 1e9) return (v/1e6).toFixed(2) + ' M';
+  if(a < 1e12) return (v/1e9).toFixed(2) + ' B';
+  return (v/1e12).toFixed(2) + ' T';
+};
+const tokTitle = n => ' title="' + fmt(n || 0) + ' token"';
+// 每 M tokens 多少积分. Only realms that bill in credits report `credit` (the
+// international realm returns a quota instead), so a missing rate prints "—"
+// rather than a number computed from nothing.
+const modelRate = (credit, tokens) => {
+  const c = Number(credit || 0), t = Number(tokens || 0);
+  if(!(c > 0) || !(t > 0)) return '—';
+  return (c / t * 1e6).toFixed(2);
+};
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ms = v => v == null ? '—' : (v >= 1000 ? (v/1000).toFixed(2) + ' s' : Math.round(v) + ' ms');
 const pct = v => v == null ? '—' : v.toFixed(1) + '%';
 // 输入 / 输出 / 思考 三个数字，各自一色，斜杠分隔。思考为 0 也写出来，
 // 列的形状因此固定，不会因某个模型不推理就缩短。
 const tripleTokens = (inp, out, think) =>
-  '<span style="color:var(--accent)">' + fmt(inp || 0) + '</span>' +
+  '<span style="color:var(--accent)"' + tokTitle(inp) + '>' + fmtTok(inp || 0) + '</span>' +
   ' <span style="color:var(--dim-light)">/</span> ' +
-  '<span style="color:var(--accent2)">' + fmt(out || 0) + '</span>' +
+  '<span style="color:var(--accent2)"' + tokTitle(out) + '>' + fmtTok(out || 0) + '</span>' +
   ' <span style="color:var(--dim-light)">/</span> ' +
-  '<span style="color:var(--think)">' + fmt(think || 0) + '</span>';
+  '<span style="color:var(--think)"' + tokTitle(think) + '>' + fmtTok(think || 0) + '</span>';
 
 function perfRow(label, b, unit, fmtFn, color){
   if(!b) return '<tr><td>' + label + '</td><td colspan="5" style="color:var(--dim)">暂无数据</td></tr>';
@@ -1649,6 +1871,16 @@ function usableKey(value){
   return value && /^[\x20-\x7e]+$/.test(value) ? value : '';
 }
 
+/* The panel is served from "/" when the port is opened directly, but from
+   "/app/workbuddy2api/..." when it comes in through the fnOS App Center
+   gateway (the gateway strips its prefix before routing). The server tells
+   the page which of the two it is, so every request path goes through here. */
+function wbUrl(path){
+  if(typeof path !== 'string' || path.charAt(0) !== '/') return path;
+  const base = (window.__WB_BASE__ || '').replace(/\/+$/, '');
+  return base ? base + path : path;
+}
+
 function authHeaders(base){
   const h = Object.assign({}, base || {});
   const key = usableKey(API_KEY);
@@ -1658,13 +1890,13 @@ function authHeaders(base){
 }
 
 async function getJSON(url){
-  const r = await fetch(url, {cache:'no-store', headers: authHeaders()});
+  const r = await fetch(wbUrl(url), {cache:'no-store', headers: authHeaders()});
   if(r.status === 401 || r.status === 403){ panelSessionLost(); throw new Error('unauthorized'); }
   if(!r.ok) throw new Error(r.status);
   return r.json();
 }
 async function postJSON(url, body){
-  const r = await fetch(url, {method:'POST', headers: authHeaders({'Content-Type':'application/json'}),
+  const r = await fetch(wbUrl(url), {method:'POST', headers: authHeaders({'Content-Type':'application/json'}),
                               body: JSON.stringify(body || {})});
   const t = await r.text();
   let parsed = {};
@@ -1682,25 +1914,15 @@ function toast(msg, kind){
   if(!box){
     box = document.createElement('div');
     box.id = 'toastBox';
-    box.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9999;'
-      + 'display:flex;flex-direction:column;gap:10px;align-items:flex-end;pointer-events:none';
+    box.className = 'toast-box';
     document.body.appendChild(box);
   }
   const item = document.createElement('div');
   const isBad = (kind === 'bad' || kind === 'err' || kind === 'error');
   const isWarn = (kind === 'warn' || kind === 'warning');
   const isOk = (kind === 'ok' || kind === 'success');
-  const borderColor = isBad ? 'var(--bad)' : (isWarn ? 'var(--warn)' : (isOk ? 'var(--accent2)' : 'var(--accent)'));
-  const textColor = isBad ? '#b91c1c' : (isWarn ? '#b45309' : (isOk ? '#15803d' : 'var(--fg)'));
-  const icon = '';
-  const bg = isBad ? 'rgba(254,242,242,.98)' : (isWarn ? 'rgba(255,251,235,.98)' : 'var(--panel)');
-
-  item.textContent = icon + msg;
-  item.style.cssText = 'background:' + bg + ';border:1px solid var(--line);'
-    + 'border-left:4px solid ' + borderColor + ';'
-    + 'border-radius:8px;padding:10px 16px;font-size:13px;font-weight:500;color:' + textColor + ';'
-    + 'box-shadow:0 10px 25px -5px rgba(0,0,0,.15),0 8px 10px -6px rgba(0,0,0,.1);'
-    + 'max-width:380px;word-break:break-all;pointer-events:auto;transition:all .2s ease;';
+  item.className = 'toast-item' + (isBad ? ' t-bad' : isWarn ? ' t-warn' : isOk ? ' t-ok' : '');
+  item.textContent = msg;
   box.appendChild(item);
   setTimeout(() => {
     item.style.opacity = '0';
@@ -1744,7 +1966,7 @@ function accountRow(a){
   const usage = USAGE_BY_ACCOUNT[a.uid] || {};
   const state = !a.enabled ? '<span class="badge off">已停用</span>'
               : a.reserveBlocked ? '<span class="badge warn">保留积分</span>'
-              : a.dailyLimitBlocked ? '<span class="badge warn" title="今日已用 ' + fmt(a.dailyTokensToday || 0) + ' / ' + fmt(a.dailyTokenLimit || 0) + ' token，暂停接单（本地 0 点恢复）">日限额</span>'
+              : a.dailyLimitBlocked ? '<span class="badge warn" title="今日已用 ' + fmtTok(a.dailyTokensToday || 0) + ' / ' + fmtTok(a.dailyTokenLimit || 0) + ' token，暂停接单（本地 0 点恢复）">日限额</span>'
               : a.inCooldown ? '<span class="badge warn">冷却 ' + (a.cooldownFor||0) + 's</span>'
               : a.expiresIn === 'expired' ? '<span class="badge bad">已过期</span>'
               : '<span class="badge ok">可用</span>';
@@ -1764,8 +1986,8 @@ function accountRow(a){
     + '<td style="text-align:center" data-label="出口">' + slotSelectHtml(a) + '</td>'
     + '<td style="text-align:left;white-space:nowrap" data-label="积分">' + credText + '</td>'
     + '<td style="text-align:right" data-label="请求">' + fmt(usage.requests) + '</td>'
-    + '<td style="text-align:right" data-label="总 token">' + fmt(usage.total_tokens) + '</td>'
-    + '<td style="text-align:right" data-label="缓存">' + fmt(usage.cached_tokens) + '</td>'
+    + '<td style="text-align:right" data-label="总 token"' + tokTitle(usage.total_tokens) + '>' + fmtTok(usage.total_tokens) + '</td>'
+    + '<td style="text-align:right" data-label="缓存"' + tokTitle(usage.cached_tokens) + '>' + fmtTok(usage.cached_tokens) + '</td>'
     + '<td class="acct-actions" style="text-align:center;white-space:nowrap;vertical-align:middle">'
     + '<div class="acct-actions-col">'
     +   '<div class="acct-actions-row">'
@@ -1964,7 +2186,7 @@ async function downloadExport(query, fallbackLabel){
   // Fetch through the authorised JSON API and save the blob client-side.
   // A plain <a href> would not carry the X-Panel-Token header, so a
   // password-only session would be rejected.
-  const r = await fetch('/accounts/export' + (query || ''), {cache:'no-store', headers: authHeaders()});
+  const r = await fetch(wbUrl('/accounts/export') + (query || ''), {cache:'no-store', headers: authHeaders()});
   if(r.status === 401 || r.status === 403){ panelSessionLost(); throw new Error('unauthorized'); }
   if(r.status === 404){
     let msg = '账号不存在';
@@ -2336,7 +2558,7 @@ async function refreshInner(){
   document.getElementById('cards').innerHTML =
     card('可用账号池', activeAccts + ' <span style="font-size:13px;font-weight:400;color:var(--dim)">/ ' + totalAccts + ' 正常</span>', poolSub, 'accent') +
     card('积分余额', hasCreds ? (fmt(totRemain) + ' <span style="font-size:13px;font-weight:400;color:var(--dim)">积分</span>') : '正常可用', subCredit, 'accent2') +
-    card('网关调用量', fmt(t.requests) + ' <span style="font-size:13px;font-weight:400;color:var(--dim)">次</span>', '本出口累计消耗 ' + fmt(t.total_tokens) + ' Token · ' + Number(t.credit || 0).toFixed(2) + ' 积分', '') +
+    card('网关调用量', fmt(t.requests) + ' <span style="font-size:13px;font-weight:400;color:var(--dim)">次</span>', '本出口累计消耗 ' + fmtTok(t.total_tokens) + ' Token · ' + Number(t.credit || 0).toFixed(2) + ' 积分', '') +
     card('请求成功率', succStr, errSub, perf.errors ? 'warn' : 'accent2');
 
   const total = recent.total || 0;
@@ -2394,11 +2616,11 @@ async function refreshInner(){
         + '<td data-label="耗时">' + (r.elapsed_ms!=null ? fmt(r.elapsed_ms)+' ms' : '—') + '</td>'
         + '<td data-label="首字">' + (r.ttft_ms!=null ? fmt(r.ttft_ms)+' ms' : '—') + '</td>'
         + '<td data-label="速度">' + (r.tokens_per_sec ? r.tokens_per_sec.toFixed(1) : '—') + '</td>'
-        + '<td data-label="输入">' + fmt(r.prompt_tokens) + '</td>'
-        + '<td data-label="输出">' + fmt(r.completion_tokens) + '</td>'
-        + '<td style="color:var(--think)" data-label="思考">' + fmt(r.reasoning_tokens) + '</td>'
+        + '<td data-label="输入"' + tokTitle(r.prompt_tokens) + '>' + fmtTok(r.prompt_tokens) + '</td>'
+        + '<td data-label="输出"' + tokTitle(r.completion_tokens) + '>' + fmtTok(r.completion_tokens) + '</td>'
+        + '<td style="color:var(--think)" data-label="思考"' + tokTitle(r.reasoning_tokens) + '>' + fmtTok(r.reasoning_tokens) + '</td>'
         + '<td data-label="缓存">' + (r.cache_hit_pct!=null ? r.cache_hit_pct+'%' : '—') + '</td>'
-        + '<td data-label="总 token"><b>' + fmt(r.total_tokens) + '</b></td>'
+        + '<td data-label="总 token"' + tokTitle(r.total_tokens) + '><b>' + fmtTok(r.total_tokens) + '</b></td>'
         + '<td data-label="积分" style="color:var(--accent2)">' + (r.credit != null ? Number(r.credit).toFixed(2) : '—') + '</td>'
       + '</tr>').join('') + '</tbody></table>'
     : '<div class="empty">还没有请求记录</div>';
@@ -2484,11 +2706,98 @@ function isAuthError(err){
   return !!err && String(err.message) === 'unauthorized';
 }
 
+/* Two ways in, and which one is offered is a server-side fact, not a guess:
+ *
+ *  - through the fnOS App Center gateway the system has already identified
+ *    the user and the gateway vouches for them, so the panel opens straight
+ *    away (the server marks those requests via_gateway);
+ *  - the port is also reachable directly on the LAN, where anyone could
+ *    knock, so that path keeps the password. Someone who lands there and has
+ *    the password can still get in through the button below.
+ */
+// The settings page prints the addresses a client needs. The panel port is
+// configurable, so it comes from /panel/status (direct_port) rather than being
+// hard-coded here; the host is whatever this page was opened with, which is by
+// construction this NAS.
+function renderUsageNotes(){
+  const host = location.hostname || 'localhost';
+  const port = (PANEL_STATUS && PANEL_STATUS.direct_port) || 8788;
+  const scheme = location.protocol === 'https:' ? 'https' : 'http';
+  const base = window.__WB_BASE__ || '';
+  const api = scheme + '://' + host + ':' + port + '/v1';
+  const panel = scheme + '://' + host + ':' + port + '/';
+  const set = (id, text) => { const el = document.getElementById(id); if(el) el.textContent = text; };
+  set('usageApi', api);
+  set('usagePanel', panel);
+  set('usageGateway', base ? location.origin + base + '/' : '从应用中心 / 桌面图标打开');
+  const hint = document.getElementById('usageGatewayHint');
+  if(hint) hint.textContent = base
+    ? '（现在就是从这里打开的，已自动登录）'
+    : '（内嵌打开，已登录飞牛则免密码）';
+  const note = document.getElementById('usageNote');
+  if(note) note.textContent =
+    '在别的机器上访问时，把 ' + host + ' 换成这台飞牛的局域网 IP 或域名。'
+    + '直连端口 ' + port + ' 和内嵌入口是同一个应用、同一份数据。';
+}
+
+// One-click copy for the address rows. Clipboard API needs a secure context;
+// over plain http on a LAN address it is missing in some browsers, so fall
+// back to telling the user to select the text.
+function copyUsage(id, btn){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const text = (el.textContent || '').trim();
+  const flash = () => {
+    if(!btn) return;
+    const old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(flash, () => toast('浏览器拒绝了复制，请手动选中', 'warn'));
+  } else {
+    toast('这个浏览器不给一键复制，请手动选中', 'warn');
+  }
+}
+
 function panelNeedsLogin(){
   const gate = document.getElementById('panelGate');
   if(gate) gate.style.display = 'flex';
-  const input = document.getElementById('panelPwdInput');
-  if(input){ input.focus(); }
+  const direct = !(PANEL_STATUS && PANEL_STATUS.via_gateway);
+  setGateMode(direct ? 'direct' : 'password');
+}
+
+function setGateMode(mode){
+  const direct = document.getElementById('gateDirect');
+  const password = document.getElementById('gatePassword');
+  if(direct) direct.style.display = (mode === 'direct') ? 'block' : 'none';
+  if(password) password.style.display = (mode === 'password') ? 'block' : 'none';
+  if(mode === 'password'){
+    const input = document.getElementById('panelPwdInput');
+    if(input) input.focus();
+  }
+}
+
+function showPasswordLogin(){ setGateMode('password'); }
+
+/* The palette follows the system unless the user pinned one, and the button
+   cycles 跟随系统 → 浅色 → 深色. The heavy lifting is in the inline head
+   script, which has to run before the first paint. */
+function paintThemeButton(){
+  const theme = window.__WB_THEME__;
+  const icon = document.getElementById('themeIcon');
+  const btn = document.getElementById('themeBtn');
+  if(!theme || !icon) return;
+  icon.textContent = theme.mode === 'dark' ? '\u263e' : (theme.mode === 'light' ? '\u2600' : '\u25d0');
+  if(btn) btn.title = '切换主题（当前：' + theme.labels[theme.mode] + '）';
+}
+
+function cycleTheme(){
+  const theme = window.__WB_THEME__;
+  if(!theme) return;
+  const mode = theme.cycle();
+  paintThemeButton();
+  toast('主题：' + theme.labels[mode], 'ok');
 }
 
 function panelSessionLost(){
@@ -2519,7 +2828,7 @@ async function submitPanelLogin(){
   if(!password){ if(msg) msg.textContent = '请输入面板密码'; return; }
   if(msg) msg.textContent = '';
   try {
-    const r = await fetch('/panel/login', {
+    const r = await fetch(wbUrl('/panel/login'), {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({password: password})
@@ -2554,14 +2863,22 @@ async function panelLogout(){
 }
 
 async function bootPanel(){
+  paintThemeButton();
   try {
-    const r = await fetch('/panel/status', {cache: 'no-store', headers: authHeaders()});
+    const r = await fetch(wbUrl('/panel/status'), {cache: 'no-store', headers: authHeaders()});
     PANEL_STATUS = await r.json().catch(() => ({}));
   } catch(e) { PANEL_STATUS = {}; }
+  // The addresses need direct_port, so they wait for /panel/status.
+  renderUsageNotes();
   const hint = document.getElementById('panelDefaultHint');
   if(hint && PANEL_STATUS.panel_password_is_default) hint.style.display = 'block';
   if(PANEL_STATUS.authenticated){
     panelHideGate();
+    if(PANEL_STATUS.via_gateway && PANEL_STATUS.gateway_user){
+      // Say who the system logged in as: it is the account every action in
+      // this panel will be attributed to, and it is not visible anywhere else.
+      toast('已通过飞牛OS 统一登录进入（' + PANEL_STATUS.gateway_user + '）', 'ok');
+    }
     await startDashboard();
   } else {
     const pwdFromUrl = new URLSearchParams(window.location.search).get('pwd');
@@ -2633,7 +2950,7 @@ async function loadSettings(showToast){
       if(dailyTokInput) dailyTokInput.value = String(dailyTokValue);
       const dailyTokState = document.getElementById('setDailyTokenState');
       if(dailyTokState){
-        dailyTokState.textContent = dailyTokValue > 0 ? ('(每账号每天 ' + fmt(dailyTokValue) + ' token)') : '(不限)';
+        dailyTokState.textContent = dailyTokValue > 0 ? ('(每账号每天 ' + fmtTok(dailyTokValue) + ' token)') : '(不限)';
         dailyTokState.style.color = dailyTokValue > 0 ? 'var(--accent2)' : 'var(--dim)';
       }
       const autoSwitch = data.auto_switch_product === true;
@@ -2736,7 +3053,7 @@ async function saveDailyTokenLimit(btn){
   if(btn) btn.disabled = true;
   try {
     await postJSON('/settings/save', {daily_token_limit: value});
-    toast(value > 0 ? ('已启用：账号当日超过 ' + fmt(value) + ' token 后暂停接单') : '已设为不限（0 = 不限额）', 'ok');
+    toast(value > 0 ? ('已启用：账号当日超过 ' + fmtTok(value) + ' token 后暂停接单') : '已设为不限（0 = 不限额）', 'ok');
     loadSettings();
   } catch(e) {
     toast('保存失败: ' + e.message, 'bad');
@@ -2835,7 +3152,7 @@ function renderKeyRows(){
       const options = REALM_CHOICES.map(([val, lbl]) =>
         '<option value="' + val + '"' + ((row.realm || '') === val ? ' selected' : '') + '>' + lbl + '</option>'
       ).join('');
-      return '<div class="key-card" style="border-color:var(--accent);background:#ffffff;box-shadow:0 0 0 1px var(--accent), var(--shadow-md)">'
+      return '<div class="key-card" style="border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 1px var(--accent), var(--shadow-md)">'
         + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
         +   '<div style="font-size:14px;font-weight:700;color:var(--fg)">' + (row.id ? '编辑 API Key' : '新建 API Key') + '</div>'
         +   '<span class="badge s mini">设置出口</span>'
@@ -3904,7 +4221,7 @@ function renderPerfMatrix(usage, perf){
       + '<td data-label="失败">' + (sumErr
           ? ('<span style="color:var(--bad)">' + fmt(sumErr) + '</span>')
           : '<span style="color:var(--dim)">0</span>') + '</td>'
-      + '<td data-label="总 Token"><b style="color:var(--accent)">' + fmt(sumTok) + '</b></td>'
+      + '<td data-label="总 Token"' + tokTitle(sumTok) + '><b style="color:var(--accent)">' + fmtTok(sumTok) + '</b></td>'
       + '<td class="triple" data-label="输入 / 输出 / 思考">' + tripleTokens(sumP, sumC, sumR) + '</td>'
       + '<td data-label="首字延迟">' + totTtft + '</td>'
       + '<td data-label="生成速度"><b style="color:var(--accent2)">' + totTps + '</b></td>'
@@ -3985,7 +4302,7 @@ function renderPerfMatrix(usage, perf){
         + '<td style="text-align:left" data-label="账号">' + acctCell + '</td>'
         + '<td data-label="请求数">' + fmt(m.requests) + '</td>'
         + '<td data-label="失败">' + errCell + '</td>'
-        + '<td data-label="总 Token"><b>' + fmt(m.total_tokens) + '</b></td>'
+        + '<td data-label="总 Token"' + tokTitle(m.total_tokens) + '><b>' + fmtTok(m.total_tokens) + '</b></td>'
         + '<td class="triple" data-label="输入 / 输出 / 思考">' + tripleTokens(m.prompt_tokens, m.completion_tokens, m.reasoning_tokens) + '</td>'
         + '<td data-label="首字延迟">' + m_ttft + '</td>'
         + '<td data-label="生成速度">' + m_tps + '</td>'
@@ -4042,20 +4359,26 @@ function renderAnalytics(data){
   const elTodayDetail = document.getElementById('kpiTodayTokensDetail');
   const elTodayTitle = document.getElementById('kpiRangeTokenTitle');
   if(elTodayTitle) elTodayTitle.textContent = rangeLabel() + '消耗 Token';
-  if(elTodayTok) elTodayTok.textContent = fmt(currentSum.total_tokens || 0);
+  if(elTodayTok){
+    elTodayTok.textContent = fmtTok(currentSum.total_tokens || 0);
+    elTodayTok.title = fmt(currentSum.total_tokens || 0) + ' token';
+  }
   if(elTodayDetail) elTodayDetail.innerHTML =
-    '<span style="color:var(--accent)">输入 ' + fmt(currentSum.prompt_tokens || 0) + '</span>' +
-    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--accent2)">输出 ' + fmt(currentSum.completion_tokens || 0) + '</span>' +
-    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--think)">思考 ' + fmt(currentSum.reasoning_tokens || 0) + '</span>';
+    '<span style="color:var(--accent)"' + tokTitle(currentSum.prompt_tokens) + '>输入 ' + fmtTok(currentSum.prompt_tokens || 0) + '</span>' +
+    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--accent2)"' + tokTitle(currentSum.completion_tokens) + '>输出 ' + fmtTok(currentSum.completion_tokens || 0) + '</span>' +
+    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--think)"' + tokTitle(currentSum.reasoning_tokens) + '>思考 ' + fmtTok(currentSum.reasoning_tokens || 0) + '</span>';
 
   // KPI 2: always the all-time figure, as the stable reference next to KPI 1.
   const elTotalTok = document.getElementById('kpiTotalTokens');
   const elTotalDetail = document.getElementById('kpiTotalTokensDetail');
-  if(elTotalTok) elTotalTok.textContent = fmt(sumAll.total_tokens || 0);
+  if(elTotalTok){
+    elTotalTok.textContent = fmtTok(sumAll.total_tokens || 0);
+    elTotalTok.title = fmt(sumAll.total_tokens || 0) + ' token';
+  }
   if(elTotalDetail) elTotalDetail.innerHTML =
-    '<span style="color:var(--accent)">输入 ' + fmt(sumAll.prompt_tokens || 0) + '</span>' +
-    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--accent2)">输出 ' + fmt(sumAll.completion_tokens || 0) + '</span>' +
-    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--think)">思考 ' + fmt(sumAll.reasoning_tokens || 0) + '</span>' +
+    '<span style="color:var(--accent)"' + tokTitle(sumAll.prompt_tokens) + '>输入 ' + fmtTok(sumAll.prompt_tokens || 0) + '</span>' +
+    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--accent2)"' + tokTitle(sumAll.completion_tokens) + '>输出 ' + fmtTok(sumAll.completion_tokens || 0) + '</span>' +
+    ' <span style="color:var(--dim-light)">/</span> ' + '<span style="color:var(--think)"' + tokTitle(sumAll.reasoning_tokens) + '>思考 ' + fmtTok(sumAll.reasoning_tokens || 0) + '</span>' +
     // Two cards showing the same number reads as a broken counter rather than
     // as "there is nothing older to show", so say which case it is.
     ((analyticsRange === 'all' && (sumAll.total_tokens || 0) > 0)
@@ -4106,9 +4429,14 @@ function renderAnalytics(data){
         let pills = '<span style="color:var(--dim)">无调用</span>';
         if(entries.length){
           pills = entries.map(([mid, ms]) => {
+            // Two lines, one box: the model, its requests and its tokens on
+            // the first line; the price rate on the second. A model is one
+            // pill even when the rate is unknown.
+            const rate = modelRate(ms.credit, ms.tokens);
             return '<span class="model-pill">'
-              + '<b style="color:var(--fg)">' + esc(mid) + '</b>: '
-              + ms.requests + '次 · <b style="color:var(--accent)">' + fmt(ms.tokens) + '</b> tok'
+              + '<span class="mp-main"><b style="color:var(--fg)">' + esc(mid) + '</b>: '
+              + fmt(ms.requests) + '次 · <b style="color:var(--accent)"' + tokTitle(ms.tokens) + '>' + fmtTok(ms.tokens) + '</b> tok</span>'
+              + '<span class="mp-rate">' + (rate === '—' ? '单价未知（该账号不按积分计费）' : '每 M tok ' + rate + ' 积分') + '</span>'
               + '</span>';
           }).join('');
         }
@@ -4134,7 +4462,7 @@ function renderAnalytics(data){
           + '<td>' + realmBadge + '</td>'
           + '<td>' + creditStr + '</td>'
           + '<td>' + fmt(st.requests || 0) + '</td>'
-          + '<td><b style="color:var(--accent)">' + fmt(st.total_tokens || 0) + '</b></td>'
+          + '<td' + tokTitle(st.total_tokens) + '><b style="color:var(--accent)">' + fmtTok(st.total_tokens || 0) + '</b></td>'
           + '<td><b style="color:var(--accent2)">' + (st.credit != null ? Number(st.credit).toFixed(2) : '0.00') + '</b></td>'
           + '<td style="text-align:left;max-width:440px">' + pills + '</td>'
           + '</tr>';

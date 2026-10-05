@@ -29,6 +29,8 @@ MAX_PAYLOAD_BYTES = int(os.environ.get("WB_MAX_PAYLOAD_BYTES", 50 * 1024 * 1024)
 MAX_CONCURRENT_CHAT = int(os.environ.get("WB_MAX_CONCURRENT_CHAT", 32))
 CHAT_SLOT_WAIT_SECONDS = float(os.environ.get("WB_CHAT_SLOT_WAIT", 30))
 import socket
+import socketserver
+import struct
 import sys
 import threading
 import time
@@ -199,6 +201,10 @@ USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "reasoning_tokens",
 # "admin"), independent of the /v1 API key. Sessions live in memory only, so a
 # restart forces browsers to log in again.
 PANEL = wb_settings.PanelSessions()
+# The TCP port the panel is served on. `_serve_forever` overwrites it with the
+# port actually in use (--port / TRIM_SERVICE_PORT); the default only matters
+# to callers that inspect /panel/status without starting the server.
+DIRECT_PORT = 8788
 API_KEY_FILE_SET = False
 def configured_keys():
     """Panel-managed API keys, always read fresh so panel edits apply at once."""
@@ -1435,15 +1441,23 @@ def _scan_usage_log(all_summary, window_summary, acct_map, model_map, since=None
                     if in_window:
                         feed(acct_map[acct_uid]["window"], is_err)
                     if not is_err:
-                        tm = acct_map[acct_uid]["all_models"].setdefault(m_id, {"requests": 0, "tokens": 0, "reasoning": 0})
+                        # `credit` rides along so the panel can price a model
+                        # without a second pass over the log: credits per
+                        # token is the rate the model breakdown prints
+                        # ("每 M tokens 多少积分").
+                        tm = acct_map[acct_uid]["all_models"].setdefault(
+                            m_id, {"requests": 0, "tokens": 0, "reasoning": 0, "credit": 0.0})
                         tm["requests"] += 1
                         tm["tokens"] += (r.get("total_tokens") or 0)
                         tm["reasoning"] += (r.get("reasoning_tokens") or 0)
+                        tm["credit"] += (r.get("credit") or 0)
                         if in_window:
-                            tdm = acct_map[acct_uid]["window_models"].setdefault(m_id, {"requests": 0, "tokens": 0, "reasoning": 0})
+                            tdm = acct_map[acct_uid]["window_models"].setdefault(
+                                m_id, {"requests": 0, "tokens": 0, "reasoning": 0, "credit": 0.0})
                             tdm["requests"] += 1
                             tdm["tokens"] += (r.get("total_tokens") or 0)
                             tdm["reasoning"] += (r.get("reasoning_tokens") or 0)
+                            tdm["credit"] += (r.get("credit") or 0)
                     if m_id not in model_map:
                         model_map[m_id] = {"model": m_id, "window": _new_analytics_stat(), "all_time": _new_analytics_stat()}
                     feed(model_map[m_id]["all_time"], is_err)
@@ -4948,6 +4962,124 @@ def stream_responses_events(upstream, model, holder):
     yield from _finalize()
 
 # ---------------------------------------------------------------------------
+# fnOS unified gateway ("统一网关")
+#
+# An App Center entry with "type": "iframe" is opened inside the NAS desktop /
+# mobile app: nginx sends /app/<appname>/... to trim_http_cgi, which connects to
+# <TRIM_APPDEST>/<gatewaySocket> and forwards the request with the prefix
+# intact, plus the identity of the user it has already authenticated:
+#
+#     X-Trim-Username, X-Trim-Userid, X-Trim-Isadmin
+#
+# Navidrome's official template is the reference for the arrangement
+# (ND_ADDRESS=unix:$TRIM_APPDEST/app.sock, ND_BASEURL=/app/Navidrome,
+# ND_UNIX_SOCKET_PERM=0666, ND_EXTAUTH_TRUSTEDSOURCES=@,
+# ND_EXTAUTH_USERHEADER=X-Trim-Username); Filebrowser does the same with
+# --auth.method=proxy. So: a request that arrives on the gateway socket and
+# carries X-Trim-Username is an authenticated NAS user, and the panel does not
+# ask for its own password again.
+#
+# Those headers mean nothing on the TCP listener - any LAN client can send
+# them - so they are only honoured on the gateway socket, and only from the
+# gateway itself (root; see _gateway_user). Direct access to the panel still
+# needs the panel password, which is the escape hatch when the gateway is not
+# available.
+GATEWAY_HEADER_USER = "X-Trim-Username"
+# World-writable like Navidrome's socket: the gateway is not guaranteed to run
+# as this app's user, and the peer check below is what actually guards the
+# trusted headers.
+GATEWAY_SOCKET_MODE = 0o666
+
+#: Peer uids already reported, with the verdict that was reached for them.
+_GATEWAY_PEERS_REPORTED = set()
+_GATEWAY_PEERS_LOCK = threading.Lock()
+
+
+def report_gateway_peer(uid, verdict):
+    """Log the first request per peer uid with the verdict it was given.
+
+    Whether the App Center gateway reaches this socket as root or as this
+    app's own user decides if single sign-on can be trusted at all, and
+    nothing outside the process can observe it. Say it once per uid, then
+    stay quiet instead of logging every request.
+    """
+    key = (uid, verdict)
+    with _GATEWAY_PEERS_LOCK:
+        if key in _GATEWAY_PEERS_REPORTED:
+            return
+        _GATEWAY_PEERS_REPORTED.add(key)
+    log("gateway: peer uid %s, %s" % (uid, verdict), "INFO", "gateway")
+
+def unix_peer_uid(connection):
+    """uid of the process on the other end of a unix socket, or None."""
+    if connection is None or not hasattr(socket, "SO_PEERCRED"):
+        return None
+    try:
+        raw = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                    struct.calcsize("3i"))
+        return struct.unpack("3i", raw)[1]
+    except Exception:
+        return None
+
+def dashboard_context_script(base_path="", gateway_user="", via_gateway=False):
+    """The <script> that tells dashboard.html where it is mounted.
+
+    The same file is served at "/" (direct) and under "/app/<appname>/" (the
+    App Center entry). <base href> keeps every relative URL pointing at the
+    same prefix, __WB_BASE__ lets the API calls follow it, and the other two
+    flags decide what the login gate shows.
+    """
+    def js(value):
+        # JSON strings are valid JS; "</" is escaped so a value can never
+        # close the <script> tag it is embedded in.
+        return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+    base = (base_path or "").rstrip("/")
+    return ("<script>window.__WB_BASE__=%s;window.__WB_VIA_GATEWAY__=%s;"
+            "window.__WB_GATEWAY_USER__=%s;</script>\n"
+            % (js(base), "true" if via_gateway else "false", js(gateway_user))).encode("utf-8")
+
+def inject_dashboard_context(body, base_path="", gateway_user="", via_gateway=False):
+    """Insert <base href> + the mount-point script into dashboard.html.
+
+    A file that cannot be rewritten is served unchanged rather than breaking
+    the panel: it then just behaves like a direct request.
+    """
+    # Only a mounted app needs <base>: behind the gateway the document lives at
+    # /app/<appname>/ and relative URLs have to resolve there. A direct visit
+    # already resolves against the root, and rewriting that would break the
+    # panel for anyone fronting the port with their own sub-path proxy.
+    base_href = ((base_path or "").rstrip("/") + "/") if base_path else ""
+    injection = b""
+    if base_href:
+        injection += b'<base href="' + base_href.encode("utf-8") + b'">\n'
+    injection += dashboard_context_script(base_path, gateway_user, via_gateway)
+    marker = b"</head>"
+    if marker in body:
+        return body.replace(marker, injection + marker, 1)
+    return body
+
+class GatewayUnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Serves the App Center iframe entry over <TRIM_APPDEST>/app.sock."""
+    daemon_threads = True
+    allow_reuse_address = True
+    is_gateway = True
+
+    def server_bind(self):
+        # A socket file left behind by a killed process makes bind() fail with
+        # EADDRINUSE even though nothing is listening; drop it first, exactly
+        # like Filebrowser's cmd/main does.
+        try:
+            if os.path.exists(self.server_address):
+                os.unlink(self.server_address)
+        except OSError:
+            pass
+        socketserver.UnixStreamServer.server_bind(self)
+        try:
+            os.chmod(self.server_address, GATEWAY_SOCKET_MODE)
+        except OSError:
+            pass
+
+# ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
@@ -5001,6 +5133,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self.parse_request():
             return
+        self._apply_base_path()
         mname = 'do_' + self.command
         if not hasattr(self, mname):
             self.send_error(501, "Unsupported method (%r)" % self.command)
@@ -5279,6 +5412,54 @@ class Handler(BaseHTTPRequestHandler):
             return ""
         except Exception:
             return ""
+    def _active_base_path(self):
+        """The gateway prefix this request is served under, or "".
+
+        The prefix belongs to the transport, not to the app: it exists because
+        the App Center opens "/app/<appname>/". A visitor who reached the port
+        directly is not under it, so the dashboard must not be told to resolve
+        its URLs through a prefix that nobody is routing.
+        """
+        if not getattr(self.server, "is_gateway", False):
+            return ""
+        return (getattr(self.server, "base_path", "") or "").rstrip("/")
+
+    def _apply_base_path(self):
+        """Take the fnOS gateway prefix off self.path before routing.
+
+        The gateway forwards "/app/<appname>/accounts" unchanged, so the prefix
+        has to come off here; a direct request has no prefix and is untouched.
+        """
+        base = self._active_base_path()
+        if not base:
+            return
+        if (self.path == base or self.path.startswith(base + "/")
+                or self.path.startswith(base + "?")):
+            rest = self.path[len(base):]
+            if not rest.startswith("/") and not rest.startswith("?"):
+                rest = "/" + rest
+            if rest.startswith("?"):
+                rest = "/" + rest
+            self.path = rest
+    def _gateway_user(self):
+        """The fnOS user this request was authenticated as, or "".
+
+        Only a connection on the gateway socket counts, and only from the
+        gateway process itself: the header is trivially forged over TCP, and
+        the socket is world-writable so the gateway can reach it whatever user
+        it runs as. Anything else falls back to the panel password.
+        """
+        if not getattr(self.server, "is_gateway", False):
+            return ""
+        uid = unix_peer_uid(getattr(self, "connection", None))
+        own = getattr(os, "getuid", lambda: None)()
+        if uid is not None and uid != 0 and uid != own:
+            report_gateway_peer(uid, "sign-on ignored: peer is not the gateway")
+            return ""
+        user = (self.headers.get(GATEWAY_HEADER_USER) or "").strip()
+        report_gateway_peer(uid, "sign-on accepted: %s" % user if user
+                            else "no X-Trim-Username header")
+        return user
     def _key_ok(self):
         """True when the request carries a right key (or no key is needed)."""
         # An authenticated panel session also unlocks the management APIs,
@@ -5373,6 +5554,11 @@ class Handler(BaseHTTPRequestHandler):
         token = (self.headers.get("X-Panel-Token") or "").strip()
         return token
     def _panel_ok(self):
+        # Opened from the App Center, fnOS has already authenticated the user
+        # and says so in X-Trim-Username; asking for the panel password again
+        # would be a second login for the same person.
+        if self._gateway_user():
+            return True
         return PANEL.valid(self._panel_token())
     @staticmethod
     def _is_panel_route(path):
@@ -5462,6 +5648,17 @@ class Handler(BaseHTTPRequestHandler):
             "panel_password_required": True,
             "panel_password_is_default": wb_settings.panel_password_is_default(ACCOUNTS_DIR),
             "authenticated": self._panel_ok(),
+            # How this request arrived, so the login gate can tell "the App
+            # Center sent me and fnOS vouched for the user" (enter straight
+            # away) from "somebody opened the port directly" (ask to come in
+            # through the App Center, with the panel password as the way in
+            # when the gateway is not available).
+            "via_gateway": bool(getattr(self.server, "is_gateway", False)),
+            "gateway_user": self._gateway_user(),
+            # The settings page prints the client-facing API address and the
+            # emergency dashboard address; both are this TCP port, which is
+            # configurable, so the page asks instead of assuming 8788.
+            "direct_port": DIRECT_PORT,
         }
         # Whether a key exists is not a secret; its value never leaves the
         # process, and the settings endpoint only reports a masked form.
@@ -5703,6 +5900,12 @@ class Handler(BaseHTTPRequestHandler):
                 body = fh.read()
         except Exception as exc:
             return self._error(500, f"dashboard.html unavailable: {exc}")
+        body = inject_dashboard_context(
+            body,
+            base_path=self._active_base_path(),
+            gateway_user=self._gateway_user(),
+            via_gateway=bool(getattr(self.server, "is_gateway", False)),
+        )
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -6990,6 +7193,14 @@ def _parse_cli_args():
                     help="where to store usage.jsonl (default: ./usage)")
     ap.add_argument("--accounts-dir", default=os.environ.get("ACCOUNTS_DIR") or None,
                     help="where the per-account credential files live (default: ./accounts)")
+    ap.add_argument("--unix-socket", default=os.environ.get("WB_UNIX_SOCKET") or None,
+                    help="also serve the web panel on this unix socket - the fnOS App "
+                         "Center opens the app through a socket like this, and requests "
+                         "arriving there carry the NAS user fnOS already authenticated")
+    ap.add_argument("--base-path", default=os.environ.get("WB_BASE_PATH") or "",
+                    help="URL prefix the panel is mounted under (fnOS uses "
+                         "/app/<appname>); the gateway forwards it, so it is stripped "
+                         "here and handed to the page")
     ap.add_argument("--import-desktop", action="store_true",
                     help="import the desktop app credential as an account, then exit")
     ap.add_argument("--panel-password", default=None,
@@ -7003,6 +7214,9 @@ def _apply_cli_overrides(args):
     # ACCOUNTS_DIR is resolved, so it can be persisted and reused.
     if args.lan and args.host == "127.0.0.1":
         args.host = "0.0.0.0"
+    args.base_path = (args.base_path or "").strip().rstrip("/")
+    if args.base_path and not args.base_path.startswith("/"):
+        args.base_path = "/" + args.base_path
     if args.user_agent:
         wb_accounts.USER_AGENT = args.user_agent.strip()
         log("user-agent : %s (override)" % wb_accounts.USER_AGENT)
@@ -7219,10 +7433,23 @@ def _serve_forever(args):
         _key_state = "off"
     log(f"listening  : http://{args.host}:{args.port}/v1  (api key: {_key_state})")
     log(f"dashboard  : http://{args.host}:{args.port}/")
+    server.base_path = args.base_path
+    server.is_gateway = False
+    global DIRECT_PORT
+    DIRECT_PORT = args.port
+    # The App Center entry talks to this socket instead of the TCP port. It is
+    # optional: without it the panel is still reachable directly, so a failure
+    # here is reported and the API keeps serving.
+    gateway = None
+    if args.unix_socket:
+        gateway = _open_gateway_socket(args, Handler)
     # Keep the handler referenced for the process lifetime: SetConsoleCtrlHandler
     # stores a raw pointer, so a collected callback would crash on close.
     _ctrl_handler = install_console_close_handler()
     try:
+        if gateway is not None:
+            threading.Thread(target=gateway.serve_forever, name="gateway",
+                             daemon=True).start()
         server.serve_forever()
     except KeyboardInterrupt:
         log("bye")
@@ -7231,6 +7458,33 @@ def _serve_forever(args):
             server.server_close()
         except Exception:
             pass
+        _close_gateway_socket(gateway)
+
+def _open_gateway_socket(args, handler_cls):
+    """Bind the fnOS gateway socket, or explain why the entry will not open."""
+    try:
+        gateway = GatewayUnixHTTPServer(args.unix_socket, handler_cls)
+    except OSError as exc:
+        log(f"gateway    : NOT listening on {args.unix_socket} - {exc}")
+        log("             the App Center entry will show a connection error;")
+        log("             the panel stays reachable through the port above.")
+        return None
+    gateway.base_path = args.base_path
+    log(f"gateway    : unix:{args.unix_socket}  (path prefix: {args.base_path or '/'})")
+    return gateway
+
+def _close_gateway_socket(gateway):
+    if gateway is None:
+        return
+    try:
+        gateway.server_close()
+    except Exception:
+        pass
+    try:
+        if os.path.exists(gateway.server_address):
+            os.unlink(gateway.server_address)
+    except OSError:
+        pass
 
 if __name__ == "__main__":
     try:

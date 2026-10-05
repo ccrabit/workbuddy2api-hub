@@ -93,6 +93,16 @@ assert "the payload carries the 256px icon" test -f "${APP}/target/ui/images/256
 assert "the payload carries config/privilege" test -f "${APP}/target/config/privilege"
 assert "the payload carries config/resource" test -f "${APP}/target/config/resource"
 
+# The App Center entry is an iframe over a unix socket inside the payload: an
+# url/port entry would open the panel in a new tab and skip fnOS sign-on, which
+# is the whole point of the entry.
+ENTRY="${APP}/target/ui/config"
+assert "the desktop entry is a gateway iframe" grep -q '"type": "iframe"' "$ENTRY"
+assert "  ...reaching the payload socket" grep -q '"gatewaySocket": "app.sock"' "$ENTRY"
+assert "  ...mounted at the app's own prefix" grep -q '"gatewayPrefix": "/app/workbuddy2api"' "$ENTRY"
+assert "cmd/main listens on that socket" grep -q -- '--unix-socket' "${APP}/cmd/main"
+assert "cmd/main serves that prefix" grep -q -- '--base-path' "${APP}/cmd/main"
+
 PORT="$("$PYTHON" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
 # What appcenter hands to the lifecycle scripts. TRIM_USERNAME is the package
@@ -243,13 +253,65 @@ while True:
 PY
 }
 
+# What the fnOS gateway does: connect to <payload>/app.sock, hand over the
+# authenticated NAS user in a header, and expect the panel to let them in.
+real_gateway_signon() {
+    "$PYTHON" - "${REAL_PAYLOAD}/app.sock" <<'PY'
+import json
+import socket
+import sys
+import time
+
+sock_path = sys.argv[1]
+USER = "deepseek.harness"
+deadline = time.time() + 20
+problem = "no answer"
+while True:
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(10)
+        conn.connect(sock_path)
+        conn.sendall(b"GET /panel/status HTTP/1.1\r\nHost: workbuddy2api\r\n"
+                     b"X-Trim-Username: " + USER.encode() + b"\r\n"
+                     b"Connection: close\r\n\r\n")
+        chunks = []
+        while True:
+            data = conn.recv(65536)
+            if not data:
+                break
+            chunks.append(data)
+        conn.close()
+        head, _, body = b"".join(chunks).partition(b"\r\n\r\n")
+        status = int(head.split(b" ")[1])
+        info = json.loads(body.decode("utf-8"))
+        problem = ("status=%s via_gateway=%r gateway_user=%r authenticated=%r"
+                   % (status, info.get("via_gateway"), info.get("gateway_user"),
+                      info.get("authenticated")))
+        if (status == 200 and info.get("via_gateway")
+                and info.get("gateway_user") == USER and info.get("authenticated")):
+            print(problem)
+            raise SystemExit(0)
+        break
+    except Exception as exc:
+        problem = str(exc)
+        if time.time() > deadline:
+            break
+        time.sleep(0.5)
+raise SystemExit("the gateway socket did not sign the NAS user in: %s" % problem)
+PY
+}
+
 run 0 "install_init accepts a payload-shaped TRIM_APPDEST" real_hook install_init
 run 0 "install_callback accepts a payload-shaped TRIM_APPDEST" real_hook install_callback
 assert "the data directories were created there too" test -d "${REAL_VAR}/accounts"
 run 0 "start works from the payload shape" real_hook main start
 run 0 "the gateway answers /health" real_health
+assert "the gateway socket is world-writable" \
+    test "$(stat -c %a "${REAL_PAYLOAD}/app.sock")" = "666"
+run 0 "the gateway signs the NAS user in" real_gateway_signon
 run 0 "status says 'running'" real_hook main status
 run 0 "stop works from the payload shape" real_hook main stop
+assert "stop removes the socket file" test ! -e "${REAL_PAYLOAD}/app.sock"
 run 3 "status says 'not running' again" real_hook main status
 
 step "install"

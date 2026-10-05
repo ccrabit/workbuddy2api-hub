@@ -22,7 +22,8 @@
 - **国际版每日活跃打卡**：自动建网页端会话并接上沙箱把这一轮真正跑完（ACP over HTTP+SSE），全自动领满官方每日活跃 30/50 积分奖励；
 - **后台定时调度器**：09:00/21:00 国内签到旅行与国际版活跃打卡 · 22:00 保活 · 01:00 夜猫；
 - **双协议支持**：Chat Completions 与 Responses API（Codex / Claude Code）；
-- **Web 看板**：指标卡片、模型性能与用量大表、实时请求流水一屏可查。
+- **Web 看板**：指标卡片、模型性能与用量大表、实时请求流水一屏可查；浅色/深色主题（默认跟随系统，右上角切换）、手机端布局，手机浏览器或飞牛 App 里都能用。
+- **看得懂的数字**：Token 量按 K / M / B / T 自动换单位（悬停看精确值），模型明细里直接标出该模型**每 M tokens 多少积分**；「设置」页顶部有一份「使用说明」，列出 API 地址、直连地址与应用中心入口，可以一键复制。
 
 > ⚡ **Vibe Coding 产物**：本项目为 100% Vibe Coding 协同产物，由人类开发者提出架构与业务意图，AI 助手端到端完成逆向分析、链路调度、WAF 指纹脱敏与界面编写。
 
@@ -125,7 +126,7 @@ bash scripts/build-fpk.sh          # 产出 dist/workbuddy2api_<版本>.fpk
 bash scripts/verify-fpk.sh         # 本机把安装→启动→导入账号→升级→卸载跑一遍
 ```
 
-在飞牛「应用中心 → 手动安装」里选这个 .fpk 即可；manifest、生命周期脚本、数据目录与打包细节见 [fnos/README.md](fnos/README.md)。推 `v*` tag 时 CI 会自动构建并把 `.fpk` 挂到同名 Release，另有一个每天同步上游的 workflow（合不上就开 issue 并失败，不会留下半个合并）。
+在飞牛「应用中心 → 手动安装」里选这个 .fpk 即可；装好后应用中心/桌面点「打开」，看板在飞牛里内嵌打开、已登录飞牛的用户**免输看板密码**（直连 `http://<NAS>:8788/` 仍要面板密码）。manifest、生命周期脚本、数据目录与打包细节见 [fnos/README.md](fnos/README.md)。推 `v*` tag 时 CI 会自动构建并把 `.fpk` 挂到同名 Release，另有一个每天同步上游的 workflow（合不上就开 issue 并失败，不会留下半个合并）。
 
 ### 7. 测试
 
@@ -136,7 +137,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 20 个套件：17 个 Python + 3 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 33 个套件：27 个 Python + 6 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - CI（`.github/workflows/tests.yml`）跑同一条命令：Ubuntu 上 python 3.9 与 3.12（3.9 是本项目声称的最低版本），Windows 上 python 3.12。
 
@@ -260,6 +261,18 @@ export OPENAI_API_KEY="你在看板设置中添加并绑定的API_Key"
 ---
 
 ## 六、版本更新记录 (Changelog)
+
+### v1.6.10.2（本分支：飞牛应用包与面板改造）
+
+上游 `v1.6.10` 之上的一批改动，重点是把它变成一只**飞牛 OS 应用**，顺带把看板本身收拾了一遍。
+
+- **飞牛 fnOS 原生应用包**：`fnos/` + `scripts/build-fpk.sh`，不依赖 Docker，用飞牛自带 `python3`（缺失时回退应用商店的 `python312`）跑；带应用中心图标、生命周期脚本与卸载向导，账号与用量落在应用数据目录。详见 [fnos/README.md](fnos/README.md)。
+- **应用中心内嵌打开、免密码**：`ui/config` 走飞牛网关（`app.sock` + `/app/workbuddy2api`），已登录飞牛的用户点「打开」直接进面板；直连 `8788` 仍然要面板密码。身份头只在网关 socket 上、且对端是飞牛网关时才被采信，TCP 上伪造无效。
+- **用 JSON 文件导入账号**：支持本网关导出的文件、账号数组、单个账号对象、cockpit tools 的 snake_case 写法（`access_token` / `expires_at` / `enterpriseId`）以及桌面客户端的 `{"account":…,"auth":…}`；毫秒时间戳、JWT `exp` 兜底、cn/intl 域判断与 uid 清洗都在服务端做，18 条测试钉住。
+- **夜间模式**：默认跟随系统，右上角可手动三态切换，选择存在浏览器里；运行日志窗口跟着主题走（浅色一套浅灰控制台，深色仍是原来的终端配色），鼠标划过的高亮在深色下也柔和了。
+- **手机可用**：断点重排、表格卡片化、安全区适配，飞牛 App 或手机浏览器打开都不必左右拖。
+- **数字更可读**：Token 量自动换 K / M / B / T（悬停显示精确值），模型明细标注每 M tokens 的积分单价（按额度计费的模型显示「单价未知」而不是编造），设置页新增「使用说明」列出 API / 直连 / 应用中心三种地址并可一键复制。
+- **打包与发布**：`scripts/build-fpk.sh` / `scripts/verify-fpk.sh`（55 项断言），推 `v*` tag 由 CI 构建并挂到 Release；另有每天同步上游的 workflow，合不上就开 issue 并失败。
 
 ### v1.6.10
 

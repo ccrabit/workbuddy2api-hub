@@ -54,6 +54,13 @@ PORT="${TRIM_SERVICE_PORT:-8788}"
 
 SERVER_DIR="${APPDEST}/server"
 SERVER="${SERVER_DIR}/wb_proxy.py"
+# The App Center entry is opened through the fnOS gateway: trim_http_cgi
+# connects to this socket (declared as gatewaySocket in ui/config) and forwards
+# the request with the /app/<appname> prefix intact, plus the NAS user fnOS
+# has already authenticated. Navidrome's official template puts its own socket
+# at ${TRIM_APPDEST}/app.sock the same way.
+GATEWAY_SOCKET="${APPDEST}/app.sock"
+GATEWAY_PREFIX="/app/${APPNAME}"
 LOGFILE="${PKGVAR}/${APPNAME}.log"
 PIDFILE="${PKGVAR}/${APPNAME}.pid"
 ACCOUNTS_DIR="${PKGVAR}/accounts"
@@ -245,8 +252,11 @@ cmd_start() {
     # --lan is what makes the gateway reachable from other machines (it also
     # creates the API key under ACCOUNTS_DIR on first run); accounts and usage
     # are redirected into TRIM_PKGVAR so an upgrade never touches them.
+    # --unix-socket/--base-path are what the App Center entry needs: the fnOS
+    # gateway connects to the socket and forwards "/app/<appname>/..." to it.
     nohup "$PYTHON" "$SERVER" \
         --host 0.0.0.0 --port "$PORT" --lan \
+        --unix-socket "$GATEWAY_SOCKET" --base-path "$GATEWAY_PREFIX" \
         --accounts-dir "$ACCOUNTS_DIR" --usage-dir "$USAGE_DIR" \
         < /dev/null >> "$LOGFILE" 2>&1 &
     echo $! > "$PIDFILE"
@@ -254,7 +264,9 @@ cmd_start() {
 
     if wait_for_http; then
         log_line "${APPNAME} 已就绪：${HEALTH_URL}"
-        log_line "提示：看板默认密码是 admin，请在首次登录后修改（账号、设置和用量都在 ${PKGVAR}）。"
+        log_line "应用中心入口：${GATEWAY_PREFIX}/ （在飞牛桌面/手机 app 里内嵌打开，免密码）"
+        log_line "直连入口：http://<飞牛地址>:${PORT}/ （需面板密码，默认 admin，建议首次登录后修改）"
+        log_line "数据目录：${PKGVAR}（账号、设置、用量）"
         return 0
     fi
     dialog_error "${APPNAME} 启动失败或超时，请查看日志 ${LOGFILE}。"
@@ -281,6 +293,9 @@ cmd_stop() {
     rm -f "$PIDFILE" 2>/dev/null
     # Second pass: anything still running the payload, pid file or not.
     kill_stale
+    # A socket nothing listens on makes the App Center entry look "installed
+    # but broken"; the next start binds a fresh one anyway.
+    rm -f "$GATEWAY_SOCKET" 2>/dev/null
     log_line "${APPNAME} 已停止"
     return 0
 }

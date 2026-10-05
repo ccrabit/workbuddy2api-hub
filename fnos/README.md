@@ -14,13 +14,15 @@
 | `config/privilege` | 以 `package` 身份运行，用户名与组名都是 `workbuddy2api`（不用 root）。 |
 | `config/resource` | 只登记端口：`WorkBuddy2API.sc` 把 `8788/tcp` 映射出去，没有数据共享目录。 |
 | `WorkBuddy2API.sc` | 端口转发声明（`src.ports = 8788/tcp`）。 |
-| `ui/config` | 桌面图标：`workbuddy2api.Application` → `http://<NAS>:8788/`。**必须放在载荷里**（`app.tgz` 内），包根再放一份只是沿用惯例：应用中心登记「打开」入口时读的是载荷里的那一份。 |
+| `ui/config` | 应用中心入口：`workbuddy2api.Application` → `type: iframe`，`gatewaySocket: app.sock`、`gatewayPrefix: /app/workbuddy2api`、`url: /app/workbuddy2api/`（原理见「免密码入口」）。**必须放在载荷里**（`app.tgz` 内），包根再放一份只是沿用惯例：应用中心登记「打开」入口时读的是载荷里的那一份。 |
 | `ui/images/{64,256}.png` | 构建时由 `ICON.PNG` / `ICON_256.PNG` 生成，仓库里只存这两份位图（载荷与包根各放一份，与 `ui/config` 里的 `images/{0}.png` 对应）。 |
 | `wizard/uninstall` | 卸载时问一句「保留还是删除账号、用量、看板密码」。 |
 
 ## 装好之后
 
-- **看板**：`http://<NAS>:8788/`（桌面图标或应用中心都能打开）。看板密码默认 `admin`，
+- **应用中心入口**（推荐）：桌面/应用中心里点「打开」，看板在飞牛里内嵌打开，已经登录飞牛的
+  用户**不用再输看板密码**（原理见下面「免密码入口」）。
+- **直连看板**：`http://<NAS>:8788/`，这条路径要输看板密码，默认 `admin`，
   首次登录后请在「设置」里改掉。
 - **数据目录**：`/var/apps/workbuddy2api/var/`
   - `accounts/`：账号凭证与 `settings.json`（API Key、看板密码）；
@@ -28,6 +30,8 @@
   - `workbuddy2api.log`：服务日志（超过 5 MB 自动轮转一次）；
   - `workbuddy2api.pid`：PID 文件。
 - **程序目录**：`/var/apps/workbuddy2api/target/server/`（升级时整体替换，**不要**在这里放东西）。
+- **地址不知道去哪找**：看板「设置」页顶部有「使用说明」，列出 API 地址、直连地址与应用中心入口，
+  每行都能一键复制；端口取自服务端（`/panel/status` 的 `direct_port`），换端口不用改页面。
 - **导入账号**：看板「导入账号」选一个 JSON 文件即可，支持本网关导出的文件、账号数组、
   单个账号对象、cockpit tools 导出的 snake_case 写法（`access_token` / `expires_at`）、
   以及桌面客户端的 `{"account":…,"auth":…}`。详见仓库 README。
@@ -41,10 +45,9 @@ bash scripts/build-fpk.sh          # 产出 dist/workbuddy2api_<版本>_<platfor
 bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 ```
 
-- **版本号**：默认取 `git describe --tags` 的 tag，再加上「这个 tag 之后有多少个提交」作为
-  第四段：tag 上就是 `1.6.10`，tag 之后 3 个提交就是 `1.6.10.3`。飞牛只在版本号变大时才提供
-  升级，而上游打 tag 往往晚于构成它的提交，所以从 `main` 直接构建必须能表达「比 1.6.10 新」。
-  正式发布永远从 tag 构建，于是保持三段版本号。
+- **版本号**：`<最新的上游三段 tag>.<本基线上的第几次发布>`，例如 `1.6.10.2`；用
+  `bash scripts/build-fpk.sh --print-version` 只看不算。规则、四段/三段 tag 的区别与
+  `--alpha` 过程包见下面「版本号和 tag」。
 - **distributor**：默认取 `origin` 的 owner 与 URL，也就是你的 fork；`origin` 还指向上游时
   脚本会直接报错（否则应用商店里会把包记成上游作者），可以显式传
   `PACKAGER=<你的用户名> PACKAGER_URL=<你的 fork>`。
@@ -56,7 +59,8 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 
 `scripts/verify-fpk.sh` 会像应用中心那样解包，导出 `TRIM_*` 环境变量，然后走完
 安装 → 启动 → 用面板登录并导入一份 cockpit tools 格式的账号文件 → 升级（确认账号还在）
-→ 停止 → 卸载（两种选择都试一遍），共 40 多项断言。它跑的是真进程、真 HTTP，**但装不了真机**：
+→ 停止 → 卸载（两种选择都试一遍），共 55 项断言（含网关入口：socket 权限、免密识别、
+前缀剥离、停止后 socket 文件被清掉）。它跑的是真进程、真 HTTP，**但装不了真机**：
 应用中心本身（`trim-cli`）只存在于飞牛系统里，所以最后一公里还是要在一台真 NAS 上试。
 
 ### 两种 `TRIM_APPDEST` 形状
@@ -73,6 +77,42 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 没装就挂），根本没有测到沙箱里这份代码。`WB_APPDIR` 只有 `scripts/verify-fpk.sh` 会设置，
 应用中心永远不设它，真机行为不变。
 
+### 免密码入口（应用中心里的 iframe）
+
+应用中心入口不再是一个指向 `8788` 的新标签页，而是交给飞牛自己的网关：
+
+```json
+"workbuddy2api.Application": {
+    "type": "iframe",
+    "gatewaySocket": "app.sock",            // 载荷目录里的 unix socket
+    "gatewayPrefix": "/app/workbuddy2api",
+    "url": "/app/workbuddy2api/",
+    "allUsers": true
+}
+```
+
+`cmd/main start` 带上 `--unix-socket <载荷>/app.sock --base-path /app/workbuddy2api` 启动，
+服务器把 socket 建成 `0666`（连接它的网关进程不一定以本应用的用户身份运行）。请求由
+`/usr/trim/bin/trim_http_cgi` 转发进来，并带上 `X-Trim-Username`、`X-Trim-Userid`、
+`X-Trim-Isadmin` —— 这是飞牛那边的实现，`strings /usr/trim/bin/trim_http_cgi` 里能读到
+`X-Trim-Username` 以及 `gatewaySocket` / `gatewayPrefix` 的字段名。
+
+头可以伪造，所以**只有 socket 对端是 root（uid 0，即网关自己）或本应用自己的 uid 时**才认它，
+其它进程一律当匿名请求；TCP 端口上永远不认这个头。真机上（root 模拟网关）：
+
+```
+root  + X-Trim-Username: deepseek.harness -> {"via_gateway": true, "gateway_user": "deepseek.harness", "authenticated": true}
+root  不带头                              -> {"via_gateway": true, "gateway_user": "", "authenticated": false}
+uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gateway_user": "", "authenticated": false}
+```
+
+看板里的表现：网关进来的用户直接进主界面，右上角提示「已通过飞牛OS 统一登录进入」；
+直连 `8788` 的用户看到的是「请从飞牛OS 应用中心打开」和一个折叠的密码登录。
+`/v1` API 端口的行为没变，仍然只认 API Key。
+
+`allUsers: true` = 所有登录飞牛的用户都能看到这个入口（与改之前的 url 入口一致）；
+想收紧就改成 `false`（`false` 的确切语义没有在本机对照过，agent2api 用的是 `false`）。
+
 ### 真机验证记录（fnOS 1.2.0800）
 
 已在一台飞牛 NAS 上真装真跑通过：
@@ -86,6 +126,16 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
   （`control.isOpen = true`、`openType = url`、端口 `8788`），桌面与应用中心都能点开看板。
   图标按 `ui/images/{0}.png` 解析，所以载荷里必须有 `ui/images/{64,256}.png`。
 
+- **网关入口**（2026-10-05，用一个改名/换端口的同源包 `wbgateway` 1.6.10 实测，
+  不动已经在用的那个应用）：装完后应用列表里 `appServiceInfo.type` 是 `iframe`、
+  `urls.path = /app/wbgateway/`（对照：老入口是 `type: url`、`urls.port = 8788`）；
+  载荷里的 `app.sock` 是 `srw-rw-rw-`，用 root 带 `X-Trim-Username` 连上去
+  `via_gateway` / `gateway_user` / `authenticated` 三项都成立，换个 uid 伪造同样的头被忽略；
+  socket 上带 `/app/wbgateway` 前缀的请求会被剥掉前缀，看板里注入的是
+  `<base href="/app/wbgateway/">` 与 `window.__WB_BASE__="/app/wbgateway"`。
+  浏览器里 `/app/<appname>/…` 先由飞牛校验会话（没有会话时 nginx 直接回 `invalid token`），
+  所以「带着飞牛会话在应用中心里点开」这一段只能靠一次真的登录去点，CLI 模拟不了。
+
 只有真机才知道的两件事，已经写进脚本与回归测试：
 
 1. `TRIM_APPDEST` 的形状（见上一节）；
@@ -93,6 +143,10 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
    而本包带卸载向导（`wizard/uninstall`），`trim-cli app uninstall --yes` 会以
    「app-center uninstall requires custom wizard parameters; run it from App Center UI」被拒
    （2026-10-05 复测；向导自己的默认选项是 `wizard_delete_data=false`，也就是保留）。
+   改用 CLI 卸载也行，但要先把已安装目录里的 `wizard/uninstall` 临时挪走
+   （`cp -a /var/apps/<appname>/wizard/uninstall /tmp/ && rm /var/apps/<appname>/wizard/uninstall`）：
+   2026-10-05 对一个测试包这么卸过，`trim-cli app uninstall <appname> --yes` 成功，
+   而且数据目录**原样保留**（去掉向导就没得选「删除数据」，所以走的是保留那条路）。
    **升级的做法**：在应用中心里先卸载（向导里选「保留现有文件」），再安装新的 `.fpk` ——
    账号、用量与看板密码都在 `/vol1/@appdata/workbuddy2api` 里原样保留。
    但不要默认「一定保留」：2026-10-05 11:21 的一次卸载（不是 CLI，CLI 会被拒）之后

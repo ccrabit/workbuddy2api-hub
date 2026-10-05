@@ -1,0 +1,301 @@
+"""The fnOS gateway socket: single sign-on, and the panel behind it.
+
+fnOS does not open a third-party app by pointing a browser at its port. The
+App Center redirects to `/app/<appname>/`, nginx forwards that to a unix socket
+inside the payload, and the gateway - after authenticating the NAS user -
+injects `X-Trim-Username` header on the way through. Two properties have to
+hold for that to be both useful and safe:
+
+  * a request that arrived on the socket from the gateway itself is trusted,
+    so the panel opens without a password (the whole point of the entry);
+  * the same header on the TCP port buys nothing, because it is trivially
+    forged by anyone who can reach the port.
+
+The payload also has to survive being mounted under the gateway prefix, so the
+dashboard is served with the prefix baked in and the server strips it if it
+arrives anyway. These tests drive a real process over both transports.
+"""
+import json
+import os
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+import urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+PREFIX = "/app/workbuddy2api"
+GATEWAY_USER = "deepseek.harness"
+PANEL_PASSWORD = "test-panel-password"
+
+
+def free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def parse_response(raw):
+    head, _, body = raw.partition(b"\r\n\r\n")
+    lines = head.decode("utf-8", "replace").split("\r\n")
+    status = int(lines[0].split(" ")[1]) if len(lines[0].split(" ")) > 1 else 0
+    headers = {}
+    for line in lines[1:]:
+        if ":" in line:
+            key, _, value = line.partition(":")
+            headers[key.strip().lower()] = value.strip()
+    return status, headers, body.decode("utf-8", "replace")
+
+
+def request(connect, method, path, headers=None, payload=None):
+    """One HTTP/1.1 request/response over an already-connected socket."""
+    head = "%s %s HTTP/1.1\r\nHost: workbuddy2api\r\nConnection: close\r\n" % (method, path)
+    for key, value in (headers or {}).items():
+        head += "%s: %s\r\n" % (key, value)
+    body = b""
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        head += "Content-Type: application/json\r\nContent-Length: %d\r\n" % len(body)
+    connect.sendall(head.encode("ascii") + b"\r\n" + body)
+    chunks = []
+    while True:
+        try:
+            data = connect.recv(65536)
+        except socket.timeout:
+            break
+        if not data:
+            break
+        chunks.append(data)
+    return parse_response(b"".join(chunks))
+
+
+def unix_request(sock_path, method, path, headers=None, payload=None):
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(15)
+    conn.connect(sock_path)
+    try:
+        return request(conn, method, path, headers, payload)
+    finally:
+        conn.close()
+
+
+def tcp_request(port, method, path, headers=None, payload=None):
+    conn = socket.create_connection(("127.0.0.1", port), timeout=15)
+    conn.settimeout(15)
+    try:
+        return request(conn, method, path, headers, payload)
+    finally:
+        conn.close()
+
+
+class GatewayProcess(object):
+    """`wb_proxy.py` on a private port plus a gateway socket, both temporary."""
+
+    def __init__(self):
+        self.tmp = tempfile.mkdtemp(prefix="wb-gateway-")
+        self.port = free_port()
+        self.sock_path = os.path.join(self.tmp, "app.sock")
+        accounts = os.path.join(self.tmp, "accounts")
+        usage = os.path.join(self.tmp, "usage")
+        os.makedirs(accounts)
+        os.makedirs(usage)
+        env = dict(os.environ)
+        env.pop("ACCOUNTS_DIR", None)
+        env.pop("USAGE_DIR", None)
+        self.proc = subprocess.Popen(
+            [sys.executable, os.path.join(ROOT, "wb_proxy.py"),
+             "--host", "127.0.0.1", "--port", str(self.port),
+             "--unix-socket", self.sock_path, "--base-path", PREFIX,
+             "--accounts-dir", accounts, "--usage-dir", usage,
+             "--panel-password", PANEL_PASSWORD],
+            cwd=ROOT, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def wait_ready(self, timeout=60):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                raise AssertionError("gateway exited early:\n" + self.output())
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/health" % self.port, timeout=2) as resp:
+                    if resp.status == 200:
+                        break
+            except Exception:
+                time.sleep(0.2)
+        else:
+            raise AssertionError("gateway never became ready:\n" + self.output())
+        # The socket is bound before serve_forever starts, so give the accept
+        # loop a moment rather than failing on the first connection refused.
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                status, _, body = unix_request(self.sock_path, "GET", "/health")
+                if status == 200 and json.loads(body).get("ok"):
+                    return
+            except Exception:
+                pass
+            time.sleep(0.2)
+        raise AssertionError("gateway socket never answered:\n" + self.output())
+
+    def output(self):
+        try:
+            self.proc.terminate()
+            return (self.proc.communicate(timeout=10)[0] or b"").decode("utf-8", "replace")
+        except Exception:
+            return ""
+
+    def stop(self):
+        if self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=10)
+
+
+class GatewaySocketTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.gw = GatewayProcess()
+        cls.gw.wait_ready()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.gw.stop()
+
+    def sso_headers(self):
+        return {"X-Trim-Username": GATEWAY_USER}
+
+    # -- the socket itself -------------------------------------------------
+
+    def test_socket_is_world_writable(self):
+        # The gateway is not this app's user, so a 0600 socket would leave the
+        # App Center entry showing a connection error while everything else
+        # looked fine.
+        mode = stat.S_IMODE(os.stat(self.gw.sock_path).st_mode)
+        self.assertEqual(0o666, mode, "gateway socket mode is %o" % mode)
+
+    def test_requests_on_the_socket_are_served(self):
+        status, _, body = unix_request(self.gw.sock_path, "GET", "/health")
+        self.assertEqual(200, status)
+        self.assertTrue(json.loads(body)["ok"])
+
+    # -- single sign-on ---------------------------------------------------
+
+    def test_gateway_identity_opens_the_panel(self):
+        status, headers, _ = unix_request(self.gw.sock_path, "GET", "/accounts",
+                                          self.sso_headers())
+        self.assertEqual(200, status)
+        self.assertIn("application/json", headers.get("content-type", ""))
+
+    def test_gateway_identity_is_reported_to_the_page(self):
+        status, _, body = unix_request(self.gw.sock_path, "GET", "/panel/status")
+        info = json.loads(body)
+        self.assertFalse(info["authenticated"], "a plain socket request has no identity")
+
+        status, _, body = unix_request(self.gw.sock_path, "GET", "/panel/status",
+                                       self.sso_headers())
+        info = json.loads(body)
+        self.assertEqual(200, status)
+        self.assertTrue(info["via_gateway"])
+        self.assertEqual(GATEWAY_USER, info["gateway_user"])
+        self.assertTrue(info["authenticated"], "sign-on replaces the panel password")
+        # The settings page prints the client-facing addresses; the port is
+        # configurable, so it has to come from here rather than from a
+        # number someone typed into the page.
+        self.assertEqual(self.gw.port, info["direct_port"])
+
+    def test_panel_status_reports_the_direct_port(self):
+        status, _, body = tcp_request(self.gw.port, "GET", "/panel/status")
+        info = json.loads(body)
+        self.assertEqual(200, status)
+        self.assertEqual(self.gw.port, info["direct_port"])
+        self.assertFalse(info["via_gateway"], "a port visit is not a gateway visit")
+
+    def test_dashboard_carries_the_gateway_prefix(self):
+        status, _, body = unix_request(self.gw.sock_path, "GET", "/", self.sso_headers())
+        self.assertEqual(200, status)
+        self.assertIn('<base href="%s/">' % PREFIX, body)
+        self.assertIn('window.__WB_BASE__="%s"' % PREFIX, body)
+        self.assertIn("window.__WB_VIA_GATEWAY__=true", body)
+        self.assertIn('window.__WB_GATEWAY_USER__="%s"' % GATEWAY_USER, body)
+
+    def test_prefix_arriving_at_the_server_is_stripped(self):
+        # nginx is supposed to strip it. When it does not, the payload still
+        # has to answer instead of 404-ing every asset and API call.
+        status, _, body = unix_request(self.gw.sock_path, "GET", PREFIX + "/health")
+        self.assertEqual(200, status)
+        self.assertTrue(json.loads(body)["ok"])
+
+        status, _, body = unix_request(self.gw.sock_path, "GET", PREFIX)
+        self.assertEqual(200, status)
+        self.assertIn("WorkBuddy", body)
+
+    def test_panel_password_still_works_on_the_gateway(self):
+        # A gateway request without the identity header (an older App Center, or
+        # a proxy that strips it) must fall back to the password, not lock out.
+        status, _, body = unix_request(self.gw.sock_path, "GET", "/accounts")
+        self.assertEqual(401, status)
+
+        status, _, body = unix_request(self.gw.sock_path, "POST", "/panel/login",
+                                      payload={"password": PANEL_PASSWORD})
+        self.assertEqual(200, status)
+        token = json.loads(body)["token"]
+        self.assertTrue(token)
+
+        status, _, _ = unix_request(self.gw.sock_path, "GET", "/accounts",
+                                    {"X-Panel-Token": token})
+        self.assertEqual(200, status)
+
+    # -- the port is not a way around the password ------------------------
+
+    def test_forged_identity_header_is_ignored_on_tcp(self):
+        status, _, _ = tcp_request(self.gw.port, "GET", "/accounts",
+                                   {"X-Trim-Username": GATEWAY_USER})
+        self.assertEqual(401, status, "the header must not authenticate over TCP")
+
+    def test_health_stays_open_but_the_panel_does_not(self):
+        # /health is the one thing a monitoring script is allowed to see; the
+        # panel routes behind it are not.
+        status, _, body = tcp_request(self.gw.port, "GET", "/health")
+        self.assertEqual(200, status)
+        self.assertTrue(json.loads(body)["ok"])
+
+        status, _, _ = tcp_request(self.gw.port, "GET", "/panel/status")
+        self.assertEqual(200, status)
+        status, _, _ = tcp_request(self.gw.port, "GET", "/logs")
+        self.assertEqual(401, status)
+
+    def test_panel_password_works_on_the_port(self):
+        status, _, body = tcp_request(self.gw.port, "POST", "/panel/login",
+                                     payload={"password": PANEL_PASSWORD})
+        self.assertEqual(200, status)
+        token = json.loads(body)["token"]
+        status, _, _ = tcp_request(self.gw.port, "GET", "/accounts",
+                                   {"X-Panel-Token": token})
+        self.assertEqual(200, status)
+
+    def test_wrong_password_is_rejected_on_the_port(self):
+        status, _, body = tcp_request(self.gw.port, "POST", "/panel/login",
+                                     payload={"password": "not-the-password"})
+        self.assertEqual(401, status)
+
+    # -- the dashboard is the same file on both transports ----------------
+
+    def test_direct_visits_get_no_prefix(self):
+        status, _, body = tcp_request(self.gw.port, "GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn('window.__WB_BASE__="";', body)
+        self.assertIn("window.__WB_VIA_GATEWAY__=false", body)
+        self.assertNotIn("<base href=", body, "a direct visit is not under the prefix")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
