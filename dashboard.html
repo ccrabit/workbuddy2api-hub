@@ -996,7 +996,8 @@ a:hover{text-decoration:underline}
     </div>
     <div class="modal-bd">
       <p class="hint" style="margin-top:0">
-        选择一个账号 JSON 文件。支持本网关导出的文件、账号数组、单个账号对象，
+        选择一个账号 JSON 文件。支持本网关导出的文件、账号数组、单个账号对象、
+        cockpit tools 导出的 <code>access_token</code> 写法（snake_case），
         以及桌面客户端的 <code>{"account":…,"auth":…}</code> 格式。
       </p>
       <div id="importBody"><p class="hint">尚未选择文件。</p></div>
@@ -2046,13 +2047,15 @@ async function readImportFile(file){
     try{ doc = JSON.parse(text); }
     catch(e){ throw new Error('文件不是合法 JSON'); }
 
-    // Accept the export document, a bare array, or a single account object.
-    let rows;
-    if(Array.isArray(doc)) rows = doc;
-    else if(doc && Array.isArray(doc.accounts)) rows = doc.accounts;
-    else if(doc && (doc.accessToken || doc.auth)) rows = [doc];
-    else throw new Error('文件里没有找到账号（既没有 accounts 数组，也不是单个账号）');
-
+    // The server owns the list of accepted shapes (see
+    // wb_accounts._coerce_account_rows), so hand the document over as it is -
+    // except for a file that is not an object or array at all, which cannot be
+    // sent anywhere and is worth reporting without a round trip.
+    if(doc === null || typeof doc !== 'object'){
+      throw new Error('文件里没有找到账号（既不是 JSON 数组也不是 JSON 对象）');
+    }
+    const rows = Array.isArray(doc) ? doc
+               : (Array.isArray(doc.accounts) ? doc.accounts : [doc]);
     if(!rows.length) throw new Error('账号列表是空的');
     importRows = rows;
 

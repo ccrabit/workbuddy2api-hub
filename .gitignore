@@ -27,3 +27,7 @@ usage/*.bak*
 
 # Local Docker Compose override
 docker-compose.override.yml
+
+# 飞牛应用包的构建产物（都能从仓库重新生成，不进版本库）
+build/
+dist/

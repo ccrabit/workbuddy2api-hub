@@ -1,0 +1,174 @@
+name: Sync from upstream
+
+# Pulls the upstream project into this fork once a day, and turns every new
+# state of it into a built .fpk.
+#
+#   * fast-forward or clean auto-merge  -> pushed to this fork, the new state is
+#     tagged v<upstream release>.<commits since it>, and the package is built
+#     and attached to a release of that tag;
+#   * merge conflict -> aborted (no half-merged repository), an issue is opened
+#     or updated, and the run fails so the failure is visible in the Actions
+#     list as well.
+#
+# The tag carries a fourth component because upstream tags a release days after
+# the commits that make it: "v1.6.10.7" says "upstream v1.6.10 plus the seven
+# commits we have on top". fnOS only offers an upgrade for a bigger number, and
+# scripts/build-fpk.sh derives the version the same way, so a tag and the
+# package built from it always agree.
+on:
+  schedule:
+    # 03:17 UTC, i.e. 11:17 in Asia/Shanghai.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  UPSTREAM_REPO: ardeyouxipianyi/workbuddy2api-hub
+  UPSTREAM_BRANCH: main
+  CONFLICT_TITLE: Upstream sync needs a human
+
+jobs:
+  sync:
+    name: merge upstream
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          set -e
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null \
+            || git remote set-url upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --tags --prune upstream
+          echo "upstream $(git rev-parse --short "upstream/${UPSTREAM_BRANCH}")"
+
+      - name: Merge upstream
+        id: merge
+        run: |
+          set -e
+          upstream_ref="upstream/${UPSTREAM_BRANCH}"
+          branch="${{ github.event.repository.default_branch }}"
+
+          behind="$(git rev-list --count "HEAD..${upstream_ref}")"
+          if [ "$behind" = "0" ]; then
+            echo "already up to date with ${upstream_ref}"
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git merge --no-edit "$upstream_ref"; then
+            git push origin "HEAD:${branch}"
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Upstream merged"
+              echo
+              echo "${behind} commit(s) from \`${upstream_ref}\` are now on \`${branch}\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            git merge --abort
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            echo "Merging ${upstream_ref} conflicted; the merge was aborted."
+          fi
+
+      - name: Report a conflict
+        if: steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          branch="${{ github.event.repository.default_branch }}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="$(cat <<EOF
+          Merging \`upstream/${UPSTREAM_BRANCH}\` into \`${branch}\` failed, so the sync stopped and
+          the merge was aborted - this fork is still exactly where it was.
+
+          Resolve it by hand:
+
+          \`\`\`bash
+          git remote add upstream https://github.com/${UPSTREAM_REPO}.git  # once
+          git fetch upstream
+          git checkout ${branch}
+          git merge upstream/${UPSTREAM_BRANCH}       # fix the conflicts
+          git push origin ${branch}
+          \`\`\`
+
+          Run: ${run_url}
+          EOF
+          )"
+
+          number="$(gh issue list --state open --search "in:title \"${CONFLICT_TITLE}\"" \
+            --json number --jq '.[0].number // empty' | head -1)"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "${CONFLICT_TITLE}" --body "$body"
+          fi
+          exit 1
+
+      - name: Tag this state as a release
+        id: release
+        run: |
+          set -e
+          upstream_ref="upstream/${UPSTREAM_BRANCH}"
+
+          # The newest upstream release tag, not simply the newest tag: this
+          # fork's own releases have a fourth component and would sort above
+          # every upstream tag, and only upstream/main's tags are upstream's.
+          tag="$(git tag --merged "$upstream_ref" --list 'v*' \
+            | grep -E '^v[0-9]+(\.[0-9]+){2}$' | sort -V | tail -1 || true)"
+          if [ -z "$tag" ]; then
+            echo "upstream has not tagged a release yet - nothing to name a version after"
+            exit 0
+          fi
+
+          # Mirror it so the fork can say which upstream release it is based on.
+          # A tag pushed with GITHUB_TOKEN does not start a workflow run, so
+          # this tag is only something to look at; the package job below is the
+          # explicit `uses:` call.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null 2>&1; then
+            git push origin "refs/tags/${tag}"
+            echo "mirrored upstream tag ${tag}"
+          fi
+
+          # What this exact tree would be built as - the same number the tag
+          # gets, so the release, the tag and the fpk all carry one version.
+          version="$(bash scripts/build-fpk.sh --print-version)"
+          ours="v${version}"
+          echo "this state is ${ours} (upstream ${tag})"
+
+          if git rev-parse -q --verify "refs/tags/${ours}" > /dev/null \
+            || git ls-remote --exit-code --tags origin "refs/tags/${ours}" > /dev/null 2>&1; then
+            echo "${ours} has already been released"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${ours}" -m "WorkBuddy2API ${version} (upstream ${tag})"
+          git push origin "refs/tags/${ours}"
+          echo "tag=${ours}" >> "$GITHUB_OUTPUT"
+          echo "releasing ${ours}, built from $(git rev-parse --short HEAD)"
+
+  package:
+    name: build the new release
+    needs: sync
+    if: needs.sync.outputs.tag != ''
+    # Called explicitly rather than left to the tag push: a tag pushed with
+    # GITHUB_TOKEN does not start a workflow run. The called workflow publishes
+    # the release itself, so it needs to be able to write to this repository.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-fpk.yml
+    with:
+      ref: ${{ needs.sync.outputs.tag }}

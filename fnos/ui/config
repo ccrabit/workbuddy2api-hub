@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "workbuddy2api.Application": {
+            "title": "WorkBuddy2API",
+            "desc": "WorkBuddy 账号池网关",
+            "icon": "images/{0}.png",
+            "type": "url",
+            "port": "8788",
+            "protocol": "http",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}

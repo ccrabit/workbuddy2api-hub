@@ -1,0 +1,10 @@
+{
+    "port-config": {
+        "protocol-file": "WorkBuddy2API.sc"
+    },
+    "data-share": {
+        "shares": []
+    },
+    "systemd-unit": {
+    }
+}

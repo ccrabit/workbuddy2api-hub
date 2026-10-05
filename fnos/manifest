@@ -1,0 +1,14 @@
+appname         = workbuddy2api
+version         = 1.6.10
+display_name    = WorkBuddy2API
+platform        = all
+maintainer      = ardeyouxipianyi
+maintainer_url  = https://github.com/ardeyouxipianyi/workbuddy2api-hub
+distributor     = __PACKAGER__
+distributor_url = __PACKAGER_URL__
+desktop_uidir   = ui
+desktop_applaunchname = workbuddy2api.Application
+service_port    = 8788
+desc            = WorkBuddy 账号池网关：把多个 WorkBuddy/CodeBuddy 账号聚合成 OpenAI 兼容 API，带 Web 看板、账号导入导出与用量统计。
+source          = thirdparty
+checksum        =

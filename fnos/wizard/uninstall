@@ -1,0 +1,25 @@
+[{
+  "stepTitle": "卸载应用",
+  "items": [
+    {
+      "type": "tips",
+      "helpText": "账号文件、用量统计与看板密码都保存在应用数据目录中。"
+    },
+    {
+      "type": "radio",
+      "field": "wizard_delete_data",
+      "label": "仅卸载，保留现有文件以备将来重新安装。",
+      "initValue": "false",
+      "options": [
+        {
+          "label": "保留现有文件（重新安装后账号仍在）",
+          "value": "false"
+        },
+        {
+          "label": "清除所有套件数据文件（账号、用量、设置，不可恢复）！！！",
+          "value": "true"
+        }
+      ]
+    }
+  ]
+}]

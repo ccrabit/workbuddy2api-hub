@@ -1423,15 +1423,31 @@ def scan_desktop_credentials():
 # The shape is deliberately close to the per-account files on disk, so an
 # exported document can be read by eye and hand-edited if needed.
 #
-# Two containers are accepted on import:
+# The containers accepted on import:
 #   1. this module's own export  -> {"format": "workbuddy-accounts", "accounts": [...]}
 #   2. a bare list               -> [ {...}, {...} ]           (hand-written)
 #   3. a single account object   -> {...}                       (one-off paste)
 # A desktop-app credential ({"auth": {...}, "account": {...}}) is also accepted,
-# because that is what people usually have lying around.
+# because that is what people usually have lying around, and so is a cockpit-tools
+# export -> [ {"uid": ..., "access_token": ..., "expires_at": 1767225600000} ],
+# which is the same credential spelled with snake_case keys.
 
 EXPORT_FORMAT = "workbuddy-accounts"
 EXPORT_VERSION = 1
+
+# Foreign spellings of the fields this module stores. The import path looks a
+# field up under its own name first and then under these aliases, so a file
+# written by another tool imports as-is instead of every reader having to learn
+# both spellings. Only credential and identity fields are aliased; unknown
+# extras are ignored rather than guessed at.
+IMPORT_FIELD_ALIASES = {
+    "accessToken": ("access_token",),
+    "refreshToken": ("refresh_token",),
+    # Cockpit-tools exports this one in milliseconds; normalize_epoch() already
+    # converts a millisecond value to seconds, so no per-alias handling is needed.
+    "expiresAt": ("expires_at",),
+    "enterpriseId": ("enterprise_id",),
+}
 
 # Fields that describe live state rather than the credential itself. They are
 # exported for inspection but never trusted on import: a stale cooldown or a
@@ -1483,7 +1499,8 @@ def _coerce_account_rows(blob):
     """Normalise any accepted container into a list of account dicts.
 
     Returns (rows, error). Accepts the export document, a bare list, a single
-    account object, or a desktop-app credential.
+    account object, a desktop-app credential, or a bare list of foreign rows
+    (see IMPORT_FIELD_ALIASES).
     """
     if isinstance(blob, list):
         rows = blob
@@ -1496,6 +1513,7 @@ def _coerce_account_rows(blob):
         # and must be reported rather than silently treated as one account.
         looks_like_account = (
             blob.get("accessToken")
+            or blob.get("access_token")
             or isinstance(blob.get("auth"), dict)
             or isinstance(blob.get("account"), dict)
         )
@@ -1520,18 +1538,27 @@ def _coerce_account_rows(blob):
 def normalise_import_row(row, realm=None):
     """Turn one exported/foreign row into Account kwargs.
 
-    Accepts both the flat account shape and the nested desktop-credential shape
-    so a file from either source imports cleanly. Raises ValueError when the
-    row carries no usable credential.
+    Accepts the flat account shape, the nested desktop-credential shape and the
+    foreign spellings listed in IMPORT_FIELD_ALIASES, so a file from any of those
+    sources imports cleanly. Raises ValueError when the row carries no usable
+    credential.
     """
     auth = row.get("auth") if isinstance(row.get("auth"), dict) else None
     profile = row.get("account") if isinstance(row.get("account"), dict) else None
 
     def pick(key, default=None):
-        """Read a field from whichever layer holds it (flat, auth, account)."""
+        """Read a field from whichever layer holds it (flat, auth, account).
+
+        Each layer is searched for the canonical key first and then for its
+        aliases, so a row mixing both spellings still resolves the same way.
+        """
+        names = (key,) + IMPORT_FIELD_ALIASES.get(key, ())
         for layer in (row, auth, profile):
-            if isinstance(layer, dict) and layer.get(key) not in (None, ""):
-                return layer.get(key)
+            if not isinstance(layer, dict):
+                continue
+            for name in names:
+                if layer.get(name) not in (None, ""):
+                    return layer.get(name)
         return default
 
     token = str(pick("accessToken") or "").strip()

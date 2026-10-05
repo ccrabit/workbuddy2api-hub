@@ -1,0 +1,28 @@
+#!/bin/bash
+#
+# Called before the payload is unpacked. Our files are not on disk yet, so the
+# only thing worth refusing here is a machine without a Python the gateway could
+# run on (the hub needs 3.9+). cmd/install_callback repeats the same check
+# through cmd/main once the payload exists.
+#
+# Do NOT look for cmd/main in this script: appcenter calls install_init while
+# the payload directory is still empty, so a missing-file report on that path
+# only ever describes our own pre-flight - and exit 1 here aborts the whole
+# install with that message.
+#
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH="/var/apps/python312/target/bin:${PATH}"
+
+for candidate in python3.12 python3.11 python3.10 python3 python; do
+    path="$(command -v "$candidate" 2>/dev/null)" || path=""
+    [ -n "$path" ] || continue
+    # Let the interpreter answer for itself instead of trusting the name.
+    if "$path" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+        exit 0
+    fi
+done
+
+msg="未找到 Python 3.9 或更高版本。请先在飞牛应用中心的套件里安装「Python 3.12」，然后重新安装本应用。"
+[ -n "${TRIM_TEMP_LOGFILE:-}" ] && echo "$msg" >> "${TRIM_TEMP_LOGFILE}"
+echo "[${TRIM_APPNAME:-workbuddy2api}] install_init: ${msg}" >&2
+exit 1

@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# After appcenter changed the app's settings (port, access permissions): those
+# are injected as environment variables, which a running process read once at
+# startup - restart so the change actually takes effect.
+#
+APPNAME="${TRIM_APPNAME:-workbuddy2api}"
+APPDEST="${TRIM_APPDEST:-/var/apps/${APPNAME}/target}"
+# TRIM_APPDEST is the unpacked payload, and its shape depends on the caller:
+# /var/apps/<app>/target on the sample layout, <volume>/@appcenter/<appname> on
+# a real App Center install (fnOS 1.2.0800). Take whichever candidate really
+# holds cmd/ instead of trusting the shape of the string.
+APP_ROOT=""
+# WB_APPDIR is a sandbox hook for scripts/verify-fpk.sh: the last candidate below
+# is an absolute path appcenter owns, so without it the guard would resolve to
+# whatever app the caller's TRIM_APPNAME names. appcenter never sets WB_APPDIR.
+for candidate in "${WB_APPDIR:-}" "$APPDEST" "${APPDEST%/target}" "/var/apps/${APPNAME}"; do
+    if [ -n "$candidate" ] && [ -d "${candidate}/cmd" ]; then
+        APP_ROOT="$candidate"
+        break
+    fi
+done
+[ -n "$APP_ROOT" ] || APP_ROOT="${APPDEST%/target}"
+MAIN="${APP_ROOT}/cmd/main"
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+echo "[${APPNAME}] config_callback: restarting to apply the new settings"
+[ -f "$MAIN" ] || exit 0
+bash "$MAIN" restart
+exit $?

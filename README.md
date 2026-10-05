@@ -116,7 +116,18 @@ GHCR 新包默认私有；如需免登录拉取，首次发布后在 Packages �
 - **鉴权**：容器以 `--lan` 启动（监听 `0.0.0.0`），会生成 API Key 写入 `./accounts/settings.json`，并打印在启动日志里：
   `docker compose logs wb-proxy | grep -i "api key"`。不带这个 Key 调 `/v1` 会收到 401；想用自己的 Key 就传 `-e API_KEY=...`。
 
-### 6. 测试
+### 6. 飞牛 fnOS 应用包（.fpk）
+
+`fnos/` 里是原生 Python 版应用包——不依赖 Docker，直接用飞牛自带的 `python3`（缺失时回退到应用商店的 `python312`），账号与用量落在 `/var/apps/workbuddy2api/var/`，装完从桌面图标或应用中心即可打开看板：
+
+```bash
+bash scripts/build-fpk.sh          # 产出 dist/workbuddy2api_<版本>.fpk
+bash scripts/verify-fpk.sh         # 本机把安装→启动→导入账号→升级→卸载跑一遍
+```
+
+在飞牛「应用中心 → 手动安装」里选这个 .fpk 即可；manifest、生命周期脚本、数据目录与打包细节见 [fnos/README.md](fnos/README.md)。推 `v*` tag 时 CI 会自动构建并把 `.fpk` 挂到同名 Release，另有一个每天同步上游的 workflow（合不上就开 issue 并失败，不会留下半个合并）。
+
+### 7. 测试
 
 全部测试集中在 `tests/`，一条命令跑完：
 
@@ -192,7 +203,19 @@ python tests/run_all.py realm      # 只跑名字里含 realm 的
 2. 选择要登录的区域（国际版 / 国内版），点击弹出的官方授权链接并在浏览器完成登录；
 3. 程序自动检测回调，完成后账号自动加入账号池，无需手动复制凭证。
 
-### ~~方式二：从本地桌面应用导入（暂不可用）~~
+### 方式二：用 JSON 文件导入账号
+
+看板「账号 → 导入账号」选一个账号 JSON 文件即可：导入前先做一次预演（新增 / 覆盖 / 跳过 / 无效 各几条、分别是哪些 UID），确认后才落盘。支持的文件形态：
+
+- **本网关导出的文件**：`{"format":"workbuddy-accounts","accounts":[…]}`（导出后手工删改过的文件同样能读）；
+- **账号数组**：`[{"accessToken":…,"refreshToken":…}, …]`；
+- **单个账号对象**：`{"accessToken":…}`——只有一条凭据时直接存成文件；
+- **cockpit tools 等工具的导出**：`[{"uid":"…","access_token":"…","refresh_token":"…","expires_at":1767225600000,"domain":"www.workbuddy.ai"}]`。这是同一份凭据的 snake_case 写法（`access_token` / `refresh_token` / `expires_at` / `enterprise_id`），`expires_at` 是**毫秒**；导入时按两种拼写查找，`realm` 缺失就按 token 或 `domain` 推断；
+- **桌面客户端凭据**：`{"account":{…},"auth":{…}}` 的嵌套写法。
+
+同 UID 的账号默认跳过，勾选「覆盖同 UID 账号」才会替换（连同其凭证）。UID 只保留字母、数字、`-`、`_`，其余字符导入时替换成 `_`。
+
+### ~~方式三：从本地桌面应用导入（暂不可用）~~
 ~~桌面客户端自 2026-09-24 起把 `accessToken` / `refreshToken` 改成加密存储（`$wbEncrypted` 信封）。扫描仍能读到文件，但拿不到可用的 token——导入后每个请求都会返回 401（聊天、刷新凭证、查积分都会被拒）。看板上的「扫描桌面客户端账号」入口已暂时隐藏，**请改用上面的 OAuth 方式添加账号**。~~
 
 ~~相关代码保留未删（前端 `scanDesktop()` 与后端 `/accounts/import/desktop` 都在），等解密打通或改走其他凭据来源之后再放出来。~~

@@ -1,0 +1,7 @@
+#!/bin/bash
+#
+# The app has no configuration to migrate: it reads everything from
+# TRIM_PKGVAR on start, so a settings change needs nothing here.
+#
+echo "[${TRIM_APPNAME:-workbuddy2api}] config_init"
+exit 0

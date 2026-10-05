@@ -1,0 +1,369 @@
+#!/bin/bash
+#
+# WorkBuddy2API - fnOS app lifecycle entry point.
+#
+#   main start | stop | status | restart | log [lines]
+#   main python-check          called by main install (cmd/install_callback)
+#   main install               called by cmd/install_callback + upgrade_callback
+#   main uninstall-clean       called by cmd/uninstall_callback
+#   main config-init           called by cmd/config_init
+#
+# Contract with appcenter (the part that is easy to get wrong):
+#   * `status` exits 0 while the service is up and 3 while it is down.
+#   * `start` must not return before the gateway actually answers HTTP:
+#     appcenter runs `status` right after `start` and reports a transient
+#     "10500" error when the two disagree, and used to call a daemon that died
+#     on the spot a success.
+#   * Deliberately NO `set -e`. A missing pid file, an already-gone process and
+#     a port that is still busy are all normal here, and none of them may turn
+#     a control command into a failure.
+#
+# Paths are decided by fnOS; every one of them can be overridden so the script
+# can also be run by hand (scripts/verify-fpk.sh does exactly that):
+#   TRIM_APPDEST=/var/apps/workbuddy2api/target   unpacked payload -> server/
+#   TRIM_PKGVAR=/var/apps/workbuddy2api/var       accounts/, usage/, log, pid
+#   TRIM_PKGETC=/var/apps/workbuddy2api/etc       (unused, kept for symmetry)
+#   TRIM_SERVICE_PORT=8788                        the port from the manifest
+
+APPNAME="${TRIM_APPNAME:-workbuddy2api}"
+APPDEST="${TRIM_APPDEST:-/var/apps/${APPNAME}/target}"
+
+# TRIM_APPDEST is the unpacked payload, and its shape depends on the caller:
+# /var/apps/<app>/target on the sample layout, <volume>/@appcenter/<appname> on
+# a real App Center install (fnOS 1.2.0800, where the .../target symlink only
+# exists inside /var/apps). Take whichever candidate really holds cmd/ instead
+# of trusting the shape of the string - dirname() on the second one lands on the
+# volume's @appcenter directory, which is what used to abort installs.
+resolve_app_root() {
+    local candidate
+    # WB_APPDIR is a sandbox hook for scripts/verify-fpk.sh: the last candidate below
+    # is an absolute path appcenter owns, so without it the guard would resolve to
+    # whatever app the caller's TRIM_APPNAME names. appcenter never sets WB_APPDIR.
+    for candidate in "${WB_APPDIR:-}" "$APPDEST" "${APPDEST%/target}" "/var/apps/${APPNAME}"; do
+        if [ -n "$candidate" ] && [ -d "${candidate}/cmd" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    printf '%s' "${APPDEST%/target}"
+}
+APP_ROOT="$(resolve_app_root)"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/${APPNAME}/var}"
+PKGETC="${TRIM_PKGETC:-/var/apps/${APPNAME}/etc}"
+PORT="${TRIM_SERVICE_PORT:-8788}"
+
+SERVER_DIR="${APPDEST}/server"
+SERVER="${SERVER_DIR}/wb_proxy.py"
+LOGFILE="${PKGVAR}/${APPNAME}.log"
+PIDFILE="${PKGVAR}/${APPNAME}.pid"
+ACCOUNTS_DIR="${PKGVAR}/accounts"
+USAGE_DIR="${PKGVAR}/usage"
+HEALTH_URL="http://127.0.0.1:${PORT}/health"
+
+# appcenter gives up on a slow start around 15s, so aim below that: a healthy
+# hub answers /health within a second or two.
+START_TIMEOUT_SECS=15
+MAX_LOG_BYTES=5242880
+
+# fnOS hands lifecycle scripts a curated environment with no PATH at all
+# (verified on fnOS 1.2.0203) and bash does not export its own fallback, so
+# anything started from here would inherit an unset PATH and fail on the first
+# helper it shells out to. Ask for the same PATH fnOS daemons use, and put the
+# App Store Python where `command -v` can see it.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH="/var/apps/python312/target/bin:${PATH}"
+
+log_line() {
+    local msg="$*"
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg"
+    if [ -d "$PKGVAR" ]; then
+        printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" >> "$LOGFILE" 2>/dev/null || true
+    fi
+}
+
+# appcenter shows the content of TRIM_TEMP_LOGFILE in its dialog when a
+# lifecycle step exits non-zero - that is the only place a user ever reads.
+dialog_error() {
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        printf '%s\n' "$*" >> "${TRIM_TEMP_LOGFILE}" 2>/dev/null || true
+    fi
+    log_line "ERROR: $*"
+    return 1
+}
+
+find_python() {
+    local candidate path
+    # WB_PYTHON wins: a NAS can have several interpreters, and the verification
+    # script needs to point at a known one.
+    if [ -n "${WB_PYTHON:-}" ]; then
+        if "$WB_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+            PYTHON="$WB_PYTHON"
+            return 0
+        fi
+    fi
+    for candidate in python3.12 python3.11 python3.10 python3 python; do
+        path="$(command -v "$candidate" 2>/dev/null)" || path=""
+        [ -n "$path" ] || continue
+        # hub needs Python 3.9+ (its README); let the interpreter answer for
+        # itself instead of trusting the name.
+        if "$path" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+            PYTHON="$path"
+            return 0
+        fi
+    done
+    PYTHON=""
+    return 1
+}
+
+read_pid() {
+    [ -r "$PIDFILE" ] || return 1
+    local pid
+    pid="$(tr -dc '0-9' < "$PIDFILE" 2>/dev/null)"
+    [ -n "$pid" ] || return 1
+    printf '%s' "$pid"
+}
+
+# A pid alone proves nothing: it can be reused by an unrelated process after a
+# crash. The cmdline has to still name our server script.
+is_our_process() {
+    local pid="$1"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    [ -r "/proc/${pid}/cmdline" ] || return 0     # no /proc: trust kill -0
+    tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | grep -qF "$SERVER"
+}
+
+is_running() {
+    is_our_process "$(read_pid)"
+}
+
+# Every process still running OUR payload. Matching the absolute script path in
+# /proc/<pid>/cmdline is deliberate: `pkill -f wb_proxy.py` would also hit a
+# hand-started copy from another directory, and `pkill -f` is something of a
+# tradition of accidents in the fnOS lifecycle (it has taken out appcenter-cli).
+stale_pids() {
+    local entry pid args
+    for entry in /proc/[0-9]*; do
+        pid="${entry#/proc/}"
+        [ -r "${entry}/cmdline" ] || continue
+        args="$(tr '\0' ' ' < "${entry}/cmdline" 2>/dev/null)"
+        case "$args" in
+            *"$SERVER"*) printf '%s\n' "$pid" ;;
+        esac
+    done
+}
+
+health_ok() {
+    "$PYTHON" - "$HEALTH_URL" <<'PY' >/dev/null 2>&1
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=2) as response:
+    response.read(1)
+PY
+}
+
+wait_for_http() {
+    local waited=0
+    while [ "$waited" -lt $((START_TIMEOUT_SECS * 2)) ]; do
+        if health_ok; then
+            return 0
+        fi
+        if ! is_running; then
+            return 1        # the daemon is gone; waiting cannot help
+        fi
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
+kill_stale() {
+    local pids
+    pids="$(stale_pids)"
+    [ -n "$pids" ] || return 0
+    log_line "清理残留进程: $(echo $pids | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null
+    sleep 1
+    pids="$(stale_pids)"
+    if [ -n "$pids" ]; then
+        # shellcheck disable=SC2086
+        kill -9 $pids 2>/dev/null
+        sleep 1
+    fi
+    return 0
+}
+
+rotate_log() {
+    local size
+    [ -f "$LOGFILE" ] || return 0
+    size="$(wc -c < "$LOGFILE" 2>/dev/null)" || return 0
+    case "$size" in ''|*[!0-9]*) return 0 ;; esac
+    if [ "$size" -gt "$MAX_LOG_BYTES" ]; then
+        mv -f "$LOGFILE" "${LOGFILE}.1" 2>/dev/null || true
+    fi
+}
+
+cmd_python_check() {
+    if ! find_python; then
+        dialog_error "未找到 Python 3.9 或更高版本。请先在飞牛应用中心的套件里安装「Python 3.12」，然后重新安装本应用。"
+        return 1
+    fi
+    log_line "python: ${PYTHON} ($("$PYTHON" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null))"
+    return 0
+}
+
+cmd_start() {
+    if is_running; then
+        log_line "${APPNAME} 已在运行 (pid $(read_pid))"
+        return 0
+    fi
+    if ! find_python; then
+        dialog_error "未找到 Python 3.9 或更高版本。请先在飞牛应用中心的套件里安装「Python 3.12」，然后重新安装本应用。"
+        return 1
+    fi
+    if [ ! -f "$SERVER" ]; then
+        dialog_error "应用文件缺失：${SERVER}。请卸载后重新安装本应用。"
+        return 1
+    fi
+
+    # A crash or a manual start can leave an orphan holding the port; clear it
+    # before deciding whether the port is taken by somebody else.
+    kill_stale
+    rm -f "$PIDFILE" 2>/dev/null
+
+    if health_ok; then
+        dialog_error "端口 ${PORT} 已被其他程序占用（该端口上的 /health 有响应）。请在「应用设置 → 端口」改一个端口，或先释放 ${PORT} 再启动。"
+        return 1
+    fi
+
+    mkdir -p "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" 2>/dev/null
+    rotate_log
+    cd "$SERVER_DIR" 2>/dev/null || true
+
+    # --lan is what makes the gateway reachable from other machines (it also
+    # creates the API key under ACCOUNTS_DIR on first run); accounts and usage
+    # are redirected into TRIM_PKGVAR so an upgrade never touches them.
+    nohup "$PYTHON" "$SERVER" \
+        --host 0.0.0.0 --port "$PORT" --lan \
+        --accounts-dir "$ACCOUNTS_DIR" --usage-dir "$USAGE_DIR" \
+        < /dev/null >> "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    log_line "启动 ${APPNAME} (pid $(read_pid), 端口 ${PORT}, 数据目录 ${PKGVAR})"
+
+    if wait_for_http; then
+        log_line "${APPNAME} 已就绪：${HEALTH_URL}"
+        log_line "提示：看板默认密码是 admin，请在首次登录后修改（账号、设置和用量都在 ${PKGVAR}）。"
+        return 0
+    fi
+    dialog_error "${APPNAME} 启动失败或超时，请查看日志 ${LOGFILE}。"
+    return 1
+}
+
+cmd_stop() {
+    local pid i
+    pid="$(read_pid)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        log_line "停止 ${APPNAME} (pid ${pid})"
+        kill "$pid" 2>/dev/null
+        i=0
+        while [ "$i" -lt 30 ] && kill -0 "$pid" 2>/dev/null; do
+            sleep 0.5
+            i=$((i + 1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            log_line "pid ${pid} 未在 15 秒内退出，强制结束"
+            kill -9 "$pid" 2>/dev/null
+            sleep 1
+        fi
+    fi
+    rm -f "$PIDFILE" 2>/dev/null
+    # Second pass: anything still running the payload, pid file or not.
+    kill_stale
+    log_line "${APPNAME} 已停止"
+    return 0
+}
+
+cmd_status() {
+    if is_running; then
+        echo "${APPNAME} is running (pid $(read_pid), port ${PORT})"
+        return 0
+    fi
+    echo "${APPNAME} is not running"
+    return 3
+}
+
+cmd_log() {
+    local lines="${1:-100}"
+    if [ -r "$LOGFILE" ]; then
+        tail -n "$lines" "$LOGFILE"
+        return 0
+    fi
+    echo "日志文件不存在：${LOGFILE}"
+    return 1
+}
+
+cmd_install() {
+    # cmd/install_init runs before the payload exists, so it cannot look at our
+    # files; this is the first place where a missing interpreter can be reported
+    # with the app's own logic (and with a readable dialog message).
+    cmd_python_check || return 1
+    mkdir -p "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" "$PKGETC" 2>/dev/null
+    chmod +x "${APP_ROOT}/cmd/main" 2>/dev/null || true
+    # accounts/*.json holds account credentials - keep them to the owner only.
+    chmod 700 "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" 2>/dev/null || true
+    # appcenter creates the data directories as root, while the daemon runs as
+    # the package user (config/privilege run-as=package). Hand them over when we
+    # are allowed to; failing to is not fatal, the daemon then writes as root.
+    if [ -n "${TRIM_USERNAME:-}" ] && [ -n "${TRIM_GROUPNAME:-}" ]; then
+        chown -R "${TRIM_USERNAME}:${TRIM_GROUPNAME}" "$PKGVAR" "$PKGETC" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE" 2>/dev/null
+    log_line "${APPNAME} 数据目录已就绪：${PKGVAR}"
+    return 0
+}
+
+# Deletion guard: only ever recurse into a directory that is clearly ours.
+purge_dir() {
+    local dir="$1"
+    case "$dir" in
+        *"${APPNAME}"*) ;;
+        *) log_line "拒绝删除可疑路径：${dir}"; return 1 ;;
+    esac
+    [ -d "$dir" ] || return 0
+    find "$dir" -mindepth 1 -delete 2>/dev/null || true
+    return 0
+}
+
+cmd_uninstall_clean() {
+    # runtime leftovers only; the wizard decides whether the data goes
+    rm -f "$PIDFILE" 2>/dev/null || true
+    kill_stale
+    log_line "${APPNAME} 运行时残留已清理"
+    return 0
+}
+
+cmd_config_init() {
+    # Nothing to migrate: the app reads its configuration from PKGVAR on start.
+    log_line "配置变更：${APPNAME} 在重启后生效"
+    return 0
+}
+
+case "${1:-}" in
+    start)           cmd_start ;;
+    stop)            cmd_stop ;;
+    status)          cmd_status ;;
+    restart)         cmd_stop; cmd_start ;;
+    log)             cmd_log "${2:-100}" ;;
+    python-check)    cmd_python_check ;;
+    install)         cmd_install ;;
+    uninstall-clean) cmd_uninstall_clean ;;
+    purge)           purge_dir "${2:-}" ;;
+    config-init)     cmd_config_init ;;
+    *)
+        echo "usage: $0 start|stop|status|restart|log [lines]|python-check|install|uninstall-clean|config-init" >&2
+        exit 1
+        ;;
+esac
+exit $?

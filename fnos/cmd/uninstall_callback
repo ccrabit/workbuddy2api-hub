@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# After the files are removed. Runtime leftovers always go; the account files,
+# panel password and usage data only go when the uninstall wizard said so -
+# they are the reason a user reinstalls this app.
+#
+APPNAME="${TRIM_APPNAME:-workbuddy2api}"
+APPDEST="${TRIM_APPDEST:-/var/apps/${APPNAME}/target}"
+# TRIM_APPDEST is the unpacked payload, and its shape depends on the caller:
+# /var/apps/<app>/target on the sample layout, <volume>/@appcenter/<appname> on
+# a real App Center install (fnOS 1.2.0800). Take whichever candidate really
+# holds cmd/ instead of trusting the shape of the string.
+APP_ROOT=""
+# WB_APPDIR is a sandbox hook for scripts/verify-fpk.sh: the last candidate below
+# is an absolute path appcenter owns, so without it the guard would resolve to
+# whatever app the caller's TRIM_APPNAME names. appcenter never sets WB_APPDIR.
+for candidate in "${WB_APPDIR:-}" "$APPDEST" "${APPDEST%/target}" "/var/apps/${APPNAME}"; do
+    if [ -n "$candidate" ] && [ -d "${candidate}/cmd" ]; then
+        APP_ROOT="$candidate"
+        break
+    fi
+done
+[ -n "$APP_ROOT" ] || APP_ROOT="${APPDEST%/target}"
+MAIN="${APP_ROOT}/cmd/main"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/${APPNAME}/var}"
+PKGETC="${TRIM_PKGETC:-/var/apps/${APPNAME}/etc}"
+PKGHOME="${TRIM_PKGHOME:-/var/apps/${APPNAME}/home}"
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+echo "[${APPNAME}] uninstall_callback (wizard_delete_data=${wizard_delete_data:-false})"
+[ -f "$MAIN" ] && bash "$MAIN" uninstall-clean
+
+if [ "${wizard_delete_data:-false}" = "true" ]; then
+    echo "[${APPNAME}] 用户选择删除数据，清理 ${PKGVAR}"
+    # purge_dir refuses anything whose path does not carry the app name, so a
+    # stray TRIM_* value cannot turn this into a recursive delete of a volume.
+    bash "$MAIN" purge "$PKGVAR"
+    bash "$MAIN" purge "$PKGETC"
+    bash "$MAIN" purge "$PKGHOME"
+else
+    echo "[${APPNAME}] 保留数据目录 ${PKGVAR}"
+fi
+exit 0

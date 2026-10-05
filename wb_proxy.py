@@ -6469,10 +6469,13 @@ class Handler(BaseHTTPRequestHandler):
     def _route_accounts_import(self, payload):
         # Import a previously exported document (or any hand-written list
         # of accounts). Body shapes accepted, see wb_accounts._coerce_account_rows:
-        #   {"format":"workbuddy-accounts","accounts":[...]}   <- our export
-        #   [...]                                              <- bare list
-        #   {"accessToken": ...}                               <- single account
-        #   {"account":{...},"auth":{...}}                     <- desktop credential
+        #   {"format":"workbuddy-accounts","accounts":[...]}    <- our export
+        #   [...]                                               <- bare list
+        #   {"accessToken": ...}                                <- single account
+        #   {"account":{...},"auth":{...}}                      <- desktop credential
+        #   [{"uid":...,"access_token":...,"expires_at":...}]   <- cockpit tools export
+        # The last one also covers a lone row of that shape, and the aliases in
+        # wb_accounts.IMPORT_FIELD_ALIASES are what make it readable.
         #
         # Options:
         #   dryRun    (bool) - validate and report, write nothing
