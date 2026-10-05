@@ -24,10 +24,19 @@ import sys
 import tempfile
 import time
 import unittest
+import socketserver
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+# The socket this whole file drives does not exist on Windows: socketserver
+# only defines UnixStreamServer where the platform has AF_UNIX. Skip instead of
+# failing - the gateway entry is a fnOS feature, and CI runs Windows to prove
+# the *port* path still works there (see _test_platform_import.py).
+if not (hasattr(socket, "AF_UNIX") and hasattr(socketserver, "UnixStreamServer")):
+    print("SKIP: this platform has no AF_UNIX sockets; the gateway entry is fnOS only")
+    sys.exit(0)
 
 PREFIX = "/app/workbuddy2api"
 GATEWAY_USER = "deepseek.harness"

@@ -5058,26 +5058,35 @@ def inject_dashboard_context(body, base_path="", gateway_user="", via_gateway=Fa
         return body.replace(marker, injection + marker, 1)
     return body
 
-class GatewayUnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    """Serves the App Center iframe entry over <TRIM_APPDEST>/app.sock."""
-    daemon_threads = True
-    allow_reuse_address = True
-    is_gateway = True
+if hasattr(socketserver, "UnixStreamServer") and hasattr(socket, "AF_UNIX"):
+    class GatewayUnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        """Serves the App Center iframe entry over <TRIM_APPDEST>/app.sock."""
 
-    def server_bind(self):
-        # A socket file left behind by a killed process makes bind() fail with
-        # EADDRINUSE even though nothing is listening; drop it first, exactly
-        # like Filebrowser's cmd/main does.
-        try:
-            if os.path.exists(self.server_address):
-                os.unlink(self.server_address)
-        except OSError:
-            pass
-        socketserver.UnixStreamServer.server_bind(self)
-        try:
-            os.chmod(self.server_address, GATEWAY_SOCKET_MODE)
-        except OSError:
-            pass
+        daemon_threads = True
+        allow_reuse_address = True
+        is_gateway = True
+
+        def server_bind(self):
+            # A socket file left behind by a killed process makes bind() fail with
+            # EADDRINUSE even though nothing is listening; drop it first, exactly
+            # like Filebrowser's cmd/main does.
+            try:
+                if os.path.exists(self.server_address):
+                    os.unlink(self.server_address)
+            except OSError:
+                pass
+            socketserver.UnixStreamServer.server_bind(self)
+            try:
+                os.chmod(self.server_address, GATEWAY_SOCKET_MODE)
+            except OSError:
+                pass
+else:
+    # Windows has no UnixStreamServer, and the gateway entry is a fnOS thing
+    # anyway. This module is imported there too (the launcher and the test
+    # suite), so it has to import cleanly and only complain when a socket is
+    # actually asked for. CI caught the alternative: twenty suites failing on
+    # Windows with "module 'socketserver' has no attribute 'UnixStreamServer'".
+    GatewayUnixHTTPServer = None
 
 # ---------------------------------------------------------------------------
 # HTTP layer
@@ -7462,6 +7471,11 @@ def _serve_forever(args):
 
 def _open_gateway_socket(args, handler_cls):
     """Bind the fnOS gateway socket, or explain why the entry will not open."""
+    if GatewayUnixHTTPServer is None:
+        log("gateway    : this platform has no AF_UNIX sockets, --unix-socket ignored;")
+        log("             the App Center entry exists on fnOS only. The panel is still")
+        log("             served on the port above.")
+        return None
     try:
         gateway = GatewayUnixHTTPServer(args.unix_socket, handler_cls)
     except OSError as exc:
