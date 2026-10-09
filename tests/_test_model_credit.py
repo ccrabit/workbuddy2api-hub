@@ -1,10 +1,16 @@
 """每 M tokens 多少积分: the model breakdown needs per-model credits.
 
-The metrics page prints, inside each model's pill, what a million tokens of
+The metrics page prints, in the model usage matrix, what a million tokens of
 that model cost. That rate cannot be derived from the model totals alone: the
 per-model buckets used to keep requests / tokens / reasoning only, so the
 credit column of the log was dropped for everything except the account-level
 sums, and the rate could not be computed at all.
+
+This file pins the server half of that contract - the per-model buckets and
+their credits. The page half (the ratio itself, the 「—」 for a model with no
+tokens, the real 0.00 for a model billed by quota, and the rendered column) is
+pinned in tests/_test_gateway_ui.js, because a rate is only meaningful where
+the two numbers sit in the same row.
 
 Three semantics matter and are pinned here:
   * credits are summed per model, per account, in both the selected window and

@@ -161,7 +161,20 @@ docker run -d --name wb-proxy-watchtower --restart unless-stopped \
 - **目录权限（PUID/PGID）**：容器默认以 root（`0:0`）运行，与历史行为一致。想以宿主用户身份跑，就在 compose 里设 `PUID=$(id -u)` / `PGID=$(id -g)`（或写进 `.env`），并确保 `./accounts`、`./usage` 对该 uid 可写；`docker run` 也可直接加 `--user $(id -u):$(id -g)`。
 - **健康检查**：镜像自带 `HEALTHCHECK`（每 30s 请求一次 `/health`），`docker ps` 的 STATUS 列会显示 healthy/unhealthy，编排器也可直接探活。
 
-### 6. 测试
+### 6. 飞牛 fnOS 原生应用包（本仓库新增）
+
+上游之外的这一层飞牛 fnOS（trim）打包：应用以 **fnOS 统一网关的 iframe 入口**挂在面板里（网关前缀 `/app/workbuddy2api`、套接字 `app.sock`），已被网关校验过身份的 NAS 用户打开面板即免密进入——`X-Trim-Username` 只用来显示用户名，已经登录的人不会因为会话头过期又被弹一次口令框；从别处直连 TCP 端口仍要面板密码。
+
+```bash
+bash scripts/build-fpk.sh        # 产出 dist/WorkBuddy2API-Hub_<版本>_all.fpk + .sha256
+bash scripts/verify-fpk.sh       # 在本地沙箱里跑完 安装/启动/导入账号/升级/卸载
+```
+
+- 包名与显示名是 **WorkBuddy2API-Hub**，而安装标识 `appname` 仍是 `workbuddy2api`：`/vol1/@appcenter/workbuddy2api/`、数据目录 `/vol1/@appdata/workbuddy2api/`、网关前缀 `/app/workbuddy2api` 都跟着 `appname` 走，改它等于另起一套目录、把已有账号留在旧目录里。
+- 版本号在最新上游 tag 后面补一位发布号（`v1.6.17` → `1.6.17.1`），因为飞牛只在数字更大时才给升级入口；`.github/workflows/sync-upstream.yml` 每天把上游并进来并按同一规则打 tag、触发打包。
+- 打包内容、真机安装与升级（含数据目录备份）、免密口径与排错见 [`fnos/README.md`](fnos/README.md)。
+
+### 7. 测试
 
 全部测试集中在 `tests/`，一条命令跑完：
 
@@ -171,7 +184,7 @@ python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
-- 77 个套件：60 个 Python + 17 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 85 个套件：66 个 Python + 19 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - CI（`.github/workflows/tests.yml`）跑同一条命令：Ubuntu 上 python 3.9 与 3.12（3.9 是本项目声称的最低版本），Windows 上 python 3.12。推送 `v*` tag 时额外断言 **tag == 源码版本**（`wb_proxy.py` 里的两处版本串必须先一致，`-ci` 演练 tag 豁免）。
 
 ---
@@ -368,6 +381,18 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 - **看板 UI 全面优化**：彻底清理侧栏网格空隙恢复原生全宽布局，顶部卡片精简并突出账号可用对比。
 
 
+### v1.6.17.1
+
+飞牛 fnOS 原生应用包与网关免密修正版本（**本仓库这一层**，上游没有对应 tag）。版本号规则 = 上游最新三段 tag `v1.6.17` + 本仓库第四位发布号 `1`：
+
+- **飞牛 fnOS 原生应用包**（`WorkBuddy2API-Hub_1.6.17.1_all.fpk`）：产品名统一为 `WorkBuddy2API-Hub`（App Center 显示名、Release 标题、CI 产物名），而 `appname` **仍保持 `workbuddy2api`** —— 它决定应用目录 `/vol1/@appcenter/workbuddy2api/`、数据目录 `/vol1/@appdata/workbuddy2api/`、socket 与网关前缀 `/app/workbuddy2api`，改了等于另起一个新应用、老用户数据留在旧目录里读不到。构建与校验命令见「一、快速启动」第 6 节与 [`fnos/README.md`](fnos/README.md)；
+- **App Center 统一网关免密口径修正**：应用中心把应用挂在前缀 `/app/workbuddy2api` 下用 iframe 打开看板，走的是 `app.sock`。旧逻辑要求请求带 `X-Trim-Username` 才认为已登录，而飞牛会话老化后不再注入该头，于是**明明已登录的人被弹回面板口令框**；现改为 **unix socket 上对端（peer uid）校验通过即视为已登录**，该头只用来显示用户名，没带就只显示入口提示。直连 TCP 端口仍然要求面板口令，伪造该头的非网关 uid 仍然拒绝；
+- **挂载态看板**：页面按 `<base href>` 与 `window.__WB_BASE__` 把请求都打在网关前缀上，静态资源与接口不再假设自己挂在站点根；
+- **看板增强**：token 单位按量级自动切换（K/M）、模型矩阵新增「每 M tokens 积分」列（把积分消耗折算成可比单价）、**cockpit 兼容导出**（`POST /accounts/export`，`format=native|cockpit`；cockpit 产物是裸数组 + snake_case OAuth 行，`GET /accounts/export` 行为不变）；
+- **上游整合**：并入上游 `v1.6.11` – `v1.6.17` 以及 `v1.6.17` 之后的 6 个提交（合并提交 `9dff35f`）。与上游重复的能力一律以上游实现为准，本层只保留飞牛网关与打包这一层；
+- **打包脚本与校验强化**：payload 随包带上上游新增的全部运行时模块与 `pricing/pricing.json`，源码 `docs/`、`tests/`、`accounts/`、`usage/` **不进包**；`scripts/verify-fpk.sh` 断言由 55 项扩到 71 项，新增包身份三处一致（文件名 / `manifest` / 界面）、按工作树推导的模块完整性、四个禁止目录、包内 `server/**` 与仓库逐字节一致，以及**带与不带 `X-Trim-Username` 两种免密形态**的沙箱回归。
+
+
 ### v1.6.16
 
 重大稳定性与观测治理版本：涵盖账号熔断降权、工具调用防拆分修复、时序图表、全页面导航及多项深度优化：
@@ -408,6 +433,8 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 - **修复 `tests/run_all.py` 在非 UTF-8 控制台下崩溃**（Windows CI 长期红灯的根因）：各套件本身以 `PYTHONIOENCODING=utf-8` 运行、输出也按 utf-8 从日志读回，但 `run_all.py` **自己**再打印这行摘要时用的是控制台编码。Windows runner 的 stdout 是 cp1252，于是第一条含中文的摘要就抛 `UnicodeEncodeError` —— 而这时所有套件其实**已经全部通过**，是汇总环节把整轮判成了失败。main 上连续多个版本（含 v1.6.15 自身）的 Windows job 都是这么挂的。现在启动时把本进程的 stdout/stderr 重设为 utf-8，并以 `errors="replace"` 兜底（生僻码位退化成 `?` 而不是终止整轮）。新增 `tests/_test_run_all_encoding.py`（3 项）：分别在 cp1252 与 utf-8 下跑一个含中文摘要的套件，断言退出码为 0、输出里没有 `UnicodeEncodeError`，并确认摘要确实来自被选中的那个套件。
 
 - **一键刷新凭证**：账号工具栏新增批量按钮，等价于对池中每个账号点一次「刷新凭证」——后端 `/accounts/refresh` 不带 `uid` 时本就刷新整池，但看板上一直没有入口，`refreshAccounts()` 是没人调用的死代码（issue #167）。按钮在飞行期间禁用并显示「刷新中...」，结束后按成功数回报（全部成功为绿色，有失败则降级为黄色，并附上首个错误与失败条数），随后重画账号卡片让新凭证立刻可见。新增 `tests/_test_refresh_all_credentials.js`（10 项）：只发一次不带 `uid` 的请求、成功 / 部分失败 / 网络异常三档回报与配色、缺失 `error` 时兜底、刷新后必重载列表、按钮禁用与复位、按钮与英文词条确实在页面上。
+
+- **飞牛 fnOS 原生包与网关免密口径（本仓库这一层）**：`fnos/` 的 trim 包改名 **WorkBuddy2API-Hub**（`appname` 仍是 `workbuddy2api`，`/vol1/@appcenter/workbuddy2api/`、`/vol1/@appdata/workbuddy2api/` 与网关前缀 `/app/workbuddy2api` 都不动），版本按 `v<上游 tag>.<发布号>` 递增（当前 `1.6.17.1`），源码 `docs/` 不再进包。免密口径明确为「**unix socket 上 peer 校验通过即视为已登录**」（uid 0 的网关，或应用自身 uid）：`X-Trim-Username` 只用于显示用户名，会话头过期不会再把人弹回口令框；绕开网关直连 TCP 端口仍要面板密码。`scripts/verify-fpk.sh` 相应补了不带该头的回归断言、新模块完整性检查，以及「包内每个文件必须与仓库逐字节一致」的检查——打包必须发生在所有改动停笔之后。
 
 ### v1.6.15
 

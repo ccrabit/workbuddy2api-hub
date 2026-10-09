@@ -8,7 +8,7 @@
 
 | 路径 | 作用 |
 | --- | --- |
-| `manifest` | 应用元信息：`appname = workbuddy2api`、显示名 `WorkBuddy2API`、`service_port = 8788`、`platform = all`、`source = thirdparty`。`version`/`distributor`/`distributor_url`/`checksum` 由构建脚本填。 |
+| `manifest` | 应用元信息：`appname = workbuddy2api`、显示名 `WorkBuddy2API-Hub`、`service_port = 8788`、`platform = all`、`source = thirdparty`。`version`/`distributor`/`distributor_url`/`checksum` 由构建脚本填。 |
 | `cmd/main` | 唯一的生命周期入口：`start` / `stop` / `status` / `restart` / `log [行数]` / `python-check` / `install` / `uninstall-clean` / `purge <目录>`。 |
 | `cmd/*_init`、`cmd/*_callback` | 应用中心在安装、升级、卸载、改配置前后调用，全部转发给 `cmd/main`。 |
 | `config/privilege` | 以 `package` 身份运行，用户名与组名都是 `workbuddy2api`（不用 root）。 |
@@ -17,6 +17,18 @@
 | `ui/config` | 应用中心入口：`workbuddy2api.Application` → `type: iframe`，`gatewaySocket: app.sock`、`gatewayPrefix: /app/workbuddy2api`、`url: /app/workbuddy2api/`（原理见「免密码入口」）。**必须放在载荷里**（`app.tgz` 内），包根再放一份只是沿用惯例：应用中心登记「打开」入口时读的是载荷里的那一份。 |
 | `ui/images/{64,256}.png` | 构建时由 `ICON.PNG` / `ICON_256.PNG` 生成，仓库里只存这两份位图（载荷与包根各放一份，与 `ui/config` 里的 `images/{0}.png` 对应）。 |
 | `wizard/uninstall` | 卸载时问一句「保留还是删除账号、用量、看板密码」。 |
+
+### 命名：产品名与 `appname`
+
+| 用途 | 值 |
+| --- | --- |
+| 产品名 —— `manifest` 的 `display_name`、`ui/config` 的 `title`、Release 标题、fpk 文件名、CI artifact 名 | **WorkBuddy2API-Hub** |
+| 标识符 —— `manifest` 的 `appname`、`WorkBuddy2API.sc` 的文件名及其段落名、`TRIM_APPNAME`、包内 `workbuddy2api.Application` | `workbuddy2api`（**不要动**） |
+
+安装目录（`/vol1/@appcenter/workbuddy2api/`）、数据目录（`/vol1/@appdata/workbuddy2api/`）、
+网关前缀（`/app/workbuddy2api`）与 `.sc` 的端口声明都挂在标识符上：改它等于让应用另起一套目录，
+老用户升级后账号、用量与看板密码会留在旧目录里，入口地址也会跟着变。所以改名只改产品名，
+`scripts/build-fpk.sh` 在打包前会断言这两者分别是 `WorkBuddy2API-Hub` 与 `workbuddy2api`。
 
 ## 装好之后
 
@@ -41,26 +53,30 @@
 ## 打包
 
 ```bash
-bash scripts/build-fpk.sh          # 产出 dist/workbuddy2api_<版本>_<platform>.fpk
+bash scripts/build-fpk.sh          # 产出 dist/WorkBuddy2API-Hub_<版本>_<platform>.fpk + .sha256
 bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 ```
 
-- **版本号**：`<最新的上游三段 tag>.<本基线上的第几次发布>`，例如 `1.6.10.2`；用
+- **版本号**：`<最新的上游三段 tag>.<本基线上的第几次发布>`，例如 `1.6.17.1`；用
   `bash scripts/build-fpk.sh --print-version` 只看不算。规则、四段/三段 tag 的区别与
   `--alpha` 过程包见下面「版本号和 tag」。
 - **distributor**：默认取 `origin` 的 owner 与 URL，也就是你的 fork；`origin` 还指向上游时
   脚本会直接报错（否则应用商店里会把包记成上游作者），可以显式传
   `PACKAGER=<你的用户名> PACKAGER_URL=<你的 fork>`。
-- **载荷**：`app.tgz` 里只有服务器源码（`server/`）、`dashboard.html` 与 `LICENSE`；
-  测试、启动脚本、`Dockerfile`、`accounts/`、`usage/` 一律不进包——构建脚本发现
-  `accounts/` 或 `usage/` 会直接失败。
-- **校验**：打包前用 `ast.parse` 检查载荷里每个 `.py`；打包后校验必需文件、端口三处一致
-  （`manifest` ↔ `ui/config` ↔ `.sc`）与 `manifest` 里声明的 `checksum`（`app.tgz` 的 md5）。
+- **载荷**：`app.tgz` 里只有服务器源码（`server/`，含上游的 `pricing/pricing.json`）、
+  `dashboard.html` 与 `LICENSE`；测试、源码 `docs/`、启动脚本、`Dockerfile`、`accounts/`、
+  `usage/` 一律不进包——构建脚本发现 `accounts/` 或 `usage/` 会直接失败。
+- **校验**：打包前用 `ast.parse` 检查载荷里每个 `.py`，并逐个确认运行时模块与
+  `server/pricing/pricing.json` 都在；打包后校验必需文件、端口三处一致
+  （`manifest` ↔ `ui/config` ↔ `.sc`）、显示名/标识符，以及 `manifest` 里声明的 `checksum`
+  （`app.tgz` 的 md5）。
 
 `scripts/verify-fpk.sh` 会像应用中心那样解包，导出 `TRIM_*` 环境变量，然后走完
 安装 → 启动 → 用面板登录并导入一份 cockpit tools 格式的账号文件 → 升级（确认账号还在）
-→ 停止 → 卸载（两种选择都试一遍），共 55 项断言（含网关入口：socket 权限、免密识别、
-前缀剥离、停止后 socket 文件被清掉）。它跑的是真进程、真 HTTP，**但装不了真机**：
+→ 停止 → 卸载（两种选择都试一遍），共 71 项断言（含网关入口：socket 权限、带与不带
+`X-Trim-Username` 两种免密识别、前缀剥离、停止后 socket 文件被清掉；以及包身份：产品名、
+`appname`、版本在文件名/`manifest`/`ui/config` 三处一致，运行时模块与 `pricing/` 齐全，
+`accounts/`、`usage/`、`tests/`、`docs/` 四个目录都没进包，包内每个文件逐字节等于仓库里那份）。它跑的是真进程、真 HTTP，**但装不了真机**：
 应用中心本身（`trim-cli`）只存在于飞牛系统里，所以最后一公里还是要在一台真 NAS 上试。
 
 ### 两种 `TRIM_APPDEST` 形状
@@ -98,16 +114,19 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 `X-Trim-Username` 以及 `gatewaySocket` / `gatewayPrefix` 的字段名。
 
 头可以伪造，所以**只有 socket 对端是 root（uid 0，即网关自己）或本应用自己的 uid 时**才认它，
-其它进程一律当匿名请求；TCP 端口上永远不认这个头。真机上（root 模拟网关）：
+其它进程一律当匿名请求；TCP 端口上永远不认这个头。在这个前提下，**socket 上的对端校验通过就
+算已登录**，头只负责给出显示用的用户名——已经登录飞牛的人不会因为会话头没跟上来又被弹回
+口令框。真机上（root 模拟网关）：
 
 ```
 root  + X-Trim-Username: deepseek.harness -> {"via_gateway": true, "gateway_user": "deepseek.harness", "authenticated": true}
-root  不带头                              -> {"via_gateway": true, "gateway_user": "", "authenticated": false}
+root  不带头                              -> {"via_gateway": true, "gateway_user": "", "authenticated": true}
 uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gateway_user": "", "authenticated": false}
 ```
 
-看板里的表现：网关进来的用户直接进主界面，右上角提示「已通过飞牛OS 统一登录进入」；
-直连 `8788` 的用户看到的是「请从飞牛OS 应用中心打开」和一个折叠的密码登录。
+看板里的表现：网关进来的用户直接进主界面，右上角提示「已通过飞牛OS 统一登录进入」，
+用户名来自 `X-Trim-Username`（没带就只显示入口提示）；直连 `8788` 的用户看到的是
+「请从飞牛OS 应用中心打开」和一个折叠的密码登录。
 `/v1` API 端口的行为没变，仍然只认 API Key。
 
 `allUsers: true` = 所有登录飞牛的用户都能看到这个入口（与改之前的 url 入口一致）；
@@ -136,6 +155,9 @@ uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gatew
   浏览器里 `/app/<appname>/…` 先由飞牛校验会话（没有会话时 nginx 直接回 `invalid token`），
   所以「带着飞牛会话在应用中心里点开」这一段只能靠一次真的登录去点，CLI 模拟不了。
 
+- **当前状态（2026-10-09）**：设备上装的仍是旧包 `1.6.10.11`；`1.6.17.1`（上游 v1.6.17 加这一层
+  网关与打包改动）只在本机构建并跑完 `scripts/verify-fpk.sh` 的沙箱演练，**没有**装到设备上。
+
 只有真机才知道的两件事，已经写进脚本与回归测试：
 
 1. `TRIM_APPDEST` 的形状（见上一节）；
@@ -158,7 +180,8 @@ uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gatew
 ## CI
 
 - `.github/workflows/build-fpk.yml`：推送 `v*` tag 时构建 fpk、跑一遍 `scripts/verify-fpk.sh`，
-  然后把 `.fpk` 和 `.sha256` 挂到同名 Release 上（手动触发时改为上传 artifact）。
+  然后把 `.fpk` 和 `.sha256` 挂到同名 Release 上（Release 标题是产品名 `WorkBuddy2API-Hub <tag>`，
+  手动触发时改为上传 artifact `workbuddy2api-hub-fpk`）。
 - `.github/workflows/sync-upstream.yml`：每天 03:17 UTC（北京时间 11:17）拉上游
   `ardeyouxipianyi/workbuddy2api-hub` 的 `main`，能快进/自动合并就合并并推送，然后给这个新状态
   打一个 tag 并构建发布；**合并冲突则中止、开一个 issue 留痕并让这次运行失败**，
@@ -170,10 +193,10 @@ uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gatew
 **树里最新的上游三段 tag + 第四段（这个基线上的第几次发布）**：
 
 ```
-上游 tag:              v1.6.10
-这个基线的第一次发布:   1.6.10.1     <- tag / manifest / Release 名 / fpk 文件名 都是它
-第二次发布:             1.6.10.2
-上游发布 v1.6.11 之后:  1.6.11.1     （比任何 1.6.10.x 都大，飞牛会提示升级）
+上游 tag:              v1.6.17
+这个基线的第一次发布:   1.6.17.1     <- tag / manifest / Release 名 / fpk 文件名 都是它
+第二次发布:             1.6.17.2
+上游发布 v1.6.18 之后:  1.6.18.1     （比任何 1.6.17.x 都大，飞牛会提示升级）
 ```
 
 第四段数的是**发布**，不是提交：`scripts/build-fpk.sh` 里的 `derive_version` 取「本基线已经
@@ -184,8 +207,8 @@ uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gatew
 k = 距上一次发布过了多少个提交：
 
 ```bash
-bash scripts/build-fpk.sh                    # 1.6.10.2          发布用
-bash scripts/build-fpk.sh --alpha            # 1.6.10.2-alpha3   设备上试用的中间包
+bash scripts/build-fpk.sh                    # 1.6.17.1          发布用
+bash scripts/build-fpk.sh --alpha            # 1.6.17.1-alpha3   设备上试用的中间包
 bash scripts/build-fpk.sh --print-version    # 只看版本，不构建（可加 --alpha）
 ```
 
@@ -193,7 +216,7 @@ alpha 包不打 tag、不发 Release，只用于测试；真正发布时去掉�
 数字（飞牛比较版本号的规则没有正式文档，alpha 只出现在我们自己试用的包里，发布包不受影响）。
 `vX.Y.Z` 形状的三段 tag 只认上游的：本仓库自己发的四段 tag 在算基线时被刻意忽略。
 
-上游发布 v1.6.11 之后基线上移，第四段重新从 1 开始 —— 版本依然比任何 `1.6.10.x` 大。上游每天
+上游发布 v1.6.18 之后基线上移，第四段重新从 1 开始 —— 版本依然比任何 `1.6.17.x` 大。上游每天
 同步一次：只要同步带来了新提交，就会推一个新的 tag 并构建发布（新 fpk + 新 Release），在应用
 中心卸载旧包（向导里选保留数据）再装新包即可。
 

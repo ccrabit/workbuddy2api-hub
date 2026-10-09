@@ -84,6 +84,29 @@ printf '    sandbox: %s\n' "$WORK"
 tar -xzf "$FPK" -C "$APP"
 tar -xzf "${APP}/app.tgz" -C "${APP}/target"
 
+# The product name is what the user sees (fpk file name, App Center entry,
+# Release title); `appname` is the identifier the device keys the install, the
+# data directory and the gateway prefix off. They are deliberately not the same
+# string, and this block is what keeps a build from quietly renaming one of them.
+PRODUCT="WorkBuddy2API-Hub"
+FPK_BASE="$(basename "$FPK")"
+MANIFEST_VERSION="$(awk -F'=' '/^version/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${APP}/manifest")"
+MANIFEST_PLATFORM="$(awk -F'=' '/^platform/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${APP}/manifest")"
+
+step "package identity"
+assert "the file name carries the product name" bash -c '[[ "$0" == WorkBuddy2API-Hub_* ]]' "$FPK_BASE"
+assert "the manifest version is four components" \
+    bash -c '[[ "$0" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]' "$MANIFEST_VERSION"
+assert "the file name and the manifest agree on it" \
+    test "$FPK_BASE" = "${PRODUCT}_${MANIFEST_VERSION}_${MANIFEST_PLATFORM}.fpk"
+run 0 "the tree still derives a version" bash "${REPO_ROOT}/scripts/build-fpk.sh" --print-version
+assert "the package is what this tree builds" test "${LAST_OUTPUT}" = "${MANIFEST_VERSION}"
+assert "the manifest shows the product name" \
+    grep -q '^display_name[[:space:]]*=[[:space:]]*WorkBuddy2API-Hub$' "${APP}/manifest"
+assert "the desktop entry shows it too" grep -q '"title": "WorkBuddy2API-Hub"' "${APP}/target/ui/config"
+assert "the appname identifier is unchanged" \
+    grep -q '^appname[[:space:]]*=[[:space:]]*workbuddy2api$' "${APP}/manifest"
+
 step "package contents"
 # appcenter reads the desktop entry from inside the payload, not from the fpk
 # root; a package without it installs but never gets an "open" entry.
@@ -102,6 +125,42 @@ assert "  ...reaching the payload socket" grep -q '"gatewaySocket": "app.sock"' 
 assert "  ...mounted at the app's own prefix" grep -q '"gatewayPrefix": "/app/workbuddy2api"' "$ENTRY"
 assert "cmd/main listens on that socket" grep -q -- '--unix-socket' "${APP}/cmd/main"
 assert "cmd/main serves that prefix" grep -q -- '--base-path' "${APP}/cmd/main"
+
+step "payload matches the repository"
+# Listing the tree instead of a hand-written module list: upstream adds modules
+# between releases, and a package that starts on the NAS and dies on ImportError
+# is exactly what this check exists to prevent.
+MODULES_MISSING=""
+while IFS= read -r module; do
+    [ -f "${APP}/target/server/${module}" ] || MODULES_MISSING="${MODULES_MISSING} ${module}"
+done < <(find "${REPO_ROOT}" -maxdepth 1 -type f \( -name 'wb_*.py' -o -name '*.html' \) -printf '%f\n' | sort)
+assert "the payload carries every top-level module of the tree" test -z "$MODULES_MISSING"
+assert "the payload carries the pricing store" test -f "${APP}/target/server/pricing/pricing.json"
+
+# Credentials, machine state, the test suite and our own working docs stay in
+# the checkout: the package ships code, not our bookkeeping. Each directory is
+# asserted on its own so a failure names the one that leaked.
+assert "the payload leaves accounts/ behind" test ! -e "${APP}/target/server/accounts"
+assert "the payload leaves usage/ behind" test ! -e "${APP}/target/server/usage"
+assert "the payload leaves tests/ behind" test ! -e "${APP}/target/server/tests"
+assert "the payload leaves docs/ behind" test ! -e "${APP}/target/server/docs"
+
+# Byte for byte, walked from the payload side: every file that ships has to be
+# the file that is in the tree right now, so a package built before the last
+# edit to a module cannot pass. This is the check that catches "the box was
+# built while someone was still writing".
+payload_matches_the_tree() {
+    local file rel
+    while IFS= read -r -d '' file; do
+        rel="${file#"${APP}/target/server/"}"
+        if ! cmp -s "$file" "${REPO_ROOT}/${rel}"; then
+            printf 'not in the tree, or different: %s\n' "$rel"
+        fi
+    done < <(find "${APP}/target/server" -type f -print0)
+}
+DRIFT="$(payload_matches_the_tree || true)"
+assert "every packaged file is byte-identical to the tree" test -z "$DRIFT"
+[ -z "$DRIFT" ] || printf '%s\n' "$DRIFT" | head -5 | sed 's/^/         /'
 
 PORT="$("$PYTHON" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
@@ -301,6 +360,53 @@ raise SystemExit("the gateway socket did not sign the NAS user in: %s" % problem
 PY
 }
 
+# The frozen Phase E 口径: on the gateway socket the peer check alone signs the
+# NAS user in - X-Trim-Username only names them. A fnOS session that has aged
+# out stops sending the header, and the panel used to answer with its own
+# password prompt; this is the guard against that behaviour coming back.
+real_gateway_signon_without_session_header() {
+    "$PYTHON" - "${REAL_PAYLOAD}/app.sock" <<'PY'
+import json
+import socket
+import sys
+import time
+
+sock_path = sys.argv[1]
+deadline = time.time() + 20
+problem = "no answer"
+while True:
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(10)
+        conn.connect(sock_path)
+        conn.sendall(b"GET /panel/status HTTP/1.1\r\nHost: workbuddy2api\r\n"
+                     b"Connection: close\r\n\r\n")
+        chunks = []
+        while True:
+            data = conn.recv(65536)
+            if not data:
+                break
+            chunks.append(data)
+        conn.close()
+        head, _, body = b"".join(chunks).partition(b"\r\n\r\n")
+        status = int(head.split(b" ")[1])
+        info = json.loads(body.decode("utf-8"))
+        problem = ("status=%s via_gateway=%r authenticated=%r"
+                   % (status, info.get("via_gateway"), info.get("authenticated")))
+        if status == 200 and info.get("via_gateway") and info.get("authenticated"):
+            print(problem)
+            raise SystemExit(0)
+        break
+    except Exception as exc:
+        problem = str(exc)
+        if time.time() > deadline:
+            break
+        time.sleep(0.5)
+raise SystemExit("the gateway socket asked for a password without a session header: %s"
+                 % problem)
+PY
+}
+
 run 0 "install_init accepts a payload-shaped TRIM_APPDEST" real_hook install_init
 run 0 "install_callback accepts a payload-shaped TRIM_APPDEST" real_hook install_callback
 assert "the data directories were created there too" test -d "${REAL_VAR}/accounts"
@@ -309,6 +415,7 @@ run 0 "the gateway answers /health" real_health
 assert "the gateway socket is world-writable" \
     test "$(stat -c %a "${REAL_PAYLOAD}/app.sock")" = "666"
 run 0 "the gateway signs the NAS user in" real_gateway_signon
+run 0 "  ...and still does when the session header is gone" real_gateway_signon_without_session_header
 run 0 "status says 'running'" real_hook main status
 run 0 "stop works from the payload shape" real_hook main stop
 assert "stop removes the socket file" test ! -e "${REAL_PAYLOAD}/app.sock"

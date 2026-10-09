@@ -80,6 +80,9 @@ jobs:
   # wb_proxy.py, and the two source version strings must agree with each
   # other. A tag carrying a -ci suffix is a rehearsal and skips only the tag
   # comparison (the source-consistency check still runs).
+  # This fork tags v<source version> or v<source version>.<release ordinal>:
+  # fnOS only offers an upgrade for a bigger number, and the fourth component
+  # counts how many of our releases sit on that upstream version.
   version-assert:
     name: tag matches source version
     if: startsWith(github.ref, 'refs/tags/v')
@@ -99,9 +102,16 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           if [[ "$GITHUB_REF_NAME" == *-ci ]]; then
             echo "rehearsal tag (-ci): skipping tag==version assertion (source=$OVERVIEW)"
-          elif [ "$TAG" != "$OVERVIEW" ]; then
-            echo "::error::tag $GITHUB_REF_NAME != source version $OVERVIEW (bump the source first)"
-            exit 1
-          else
+          elif [ "$TAG" = "$OVERVIEW" ]; then
             echo "version assert OK: $TAG"
+          # This fork tags v<upstream version>.<release ordinal>: fnOS only
+          # offers an upgrade for a bigger number, and the fourth component
+          # says how many of our releases sit on that upstream version.
+          # scripts/build-fpk.sh derives the package version the same way, so a
+          # tag still cannot drift from the package built out of it.
+          elif [[ "$TAG" =~ ^"$OVERVIEW"\.[0-9]+$ ]]; then
+            echo "version assert OK: $TAG (source=$OVERVIEW + release ordinal)"
+          else
+            echo "::error::tag $GITHUB_REF_NAME is neither the source version $OVERVIEW nor <source>.<release ordinal>"
+            exit 1
           fi

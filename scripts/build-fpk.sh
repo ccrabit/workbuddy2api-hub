@@ -1,6 +1,12 @@
 #!/bin/bash
 #
-# Build the fnOS package: dist/workbuddy2api_<version>_<platform>.fpk
+# Build the fnOS package: dist/WorkBuddy2API-Hub_<version>_<platform>.fpk
+#
+# The file name (and the manifest's display_name) is the product name users see;
+# the manifest's appname stays workbuddy2api, because that identifier decides
+# /vol1/@appcenter/workbuddy2api, /vol1/@appdata/workbuddy2api and the gateway
+# prefix - renaming it would strand every account, usage record and setting the
+# device already has.
 #
 #   VERSION=1.6.10        version to stamp into the manifest
 #   PLATFORM=all          platform to stamp into the manifest
@@ -41,6 +47,13 @@ DIST_DIR="${REPO_ROOT}/dist"
 PAYLOAD_DIR="${BUILD_DIR}/payload"
 PKG_DIR="${BUILD_DIR}/pkg"
 PYTHON="${PYTHON:-python3}"
+
+# The name users see (fpk file name, manifest display_name, Release title) and
+# the identifier the device keys everything off. They are deliberately not the
+# same string - see the header.
+PRODUCT="WorkBuddy2API-Hub"
+APPNAME="$(awk -F'=' '/^appname/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${FNOS_DIR}/manifest" 2>/dev/null || true)"
+APPNAME="${APPNAME:-workbuddy2api}"
 
 # The pristine upstream project. It is not the distributor of this package -
 # whoever builds the fpk is.
@@ -163,6 +176,7 @@ build_payload() {
         --exclude='./.git' \
         --exclude='./.github' \
         --exclude='./tests' \
+        --exclude='./docs' \
         --exclude='./accounts' \
         --exclude='./usage' \
         --exclude='./dist' \
@@ -195,14 +209,28 @@ build_payload() {
 
     normalise_modes "$PAYLOAD_DIR" 644
 
+    # Every module the server imports at runtime, plus the entry point, the
+    # dashboard and the licence. A new upstream module that this list has not
+    # caught up with is a package that starts and then dies on ImportError, so
+    # the list is asserted rather than trusted to the root tar.
     local required
-    for required in wb_proxy.py wb_accounts.py dashboard.html LICENSE; do
+    for required in wb_proxy.py wb_export.py wb_accounts.py dashboard.html LICENSE \
+                    wb_pricing.py wb_atrest.py wb_modelsdev.py wb_prompt.py \
+                    wb_ipintel.py wb_probes.py wb_catalog.py wb_fingerprint.py \
+                    wb_identity.py wb_webagent.py wb_webtools.py \
+                    wb_scheduler.py wb_settings.py wb_tasks.py; do
         [ -f "${PAYLOAD_DIR}/server/${required}" ] \
             || die "payload is missing server/${required} - did upstream rename it?"
     done
-    if [ -e "${PAYLOAD_DIR}/server/accounts" ] || [ -e "${PAYLOAD_DIR}/server/usage" ]; then
-        die "payload must not contain accounts/ or usage/ (they hold credentials)"
-    fi
+    [ -f "${PAYLOAD_DIR}/server/pricing/pricing.json" ] \
+        || die "payload is missing server/pricing/ - the pricing store ships with the server"
+    local forbidden
+    for forbidden in accounts usage tests docs; do
+        if [ -e "${PAYLOAD_DIR}/server/${forbidden}" ]; then
+            die "payload must not contain ${forbidden}/ (credentials, or machine-only material)"
+        fi
+    done
+    return 0
 }
 
 check_payload_python() {
@@ -337,6 +365,17 @@ validate_package() {
     checksum_actual="$(md5sum "${PKG_DIR}/app.tgz" | cut -d' ' -f1)"
     [ "$checksum_declared" = "$checksum_actual" ] || die "checksum mismatch in manifest"
     echo "    port ${manifest_port}, checksum ${checksum_actual}"
+
+    # The name the app store shows has to be the product name, and the
+    # identifier it installs under has to stay the appname - the package must
+    # never be renamed into a different data directory by accident.
+    local display appname_declared
+    display="$(awk -F'=' '/^display_name/ {sub(/^[^=]*=[[:space:]]*/, ""); print; exit}' "${PKG_DIR}/manifest")"
+    appname_declared="$(awk -F'=' '/^appname/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${PKG_DIR}/manifest")"
+    [ "$display" = "$PRODUCT" ] || die "manifest display_name is '${display}', expected '${PRODUCT}'"
+    [ "$appname_declared" = "$APPNAME" ] || die "manifest appname is '${appname_declared}', expected '${APPNAME}'"
+    grep -q "\"title\": \"${PRODUCT}\"" "${PKG_DIR}/ui/config" \
+        || die "ui/config title is not '${PRODUCT}' - the App Center entry would show the old name"
 }
 
 # The member names inside the finished archive are what appcenter resolves
@@ -392,7 +431,7 @@ if [ "$PACKAGER_URL" = "$UPSTREAM_URL" ]; then
     die "origin is still the upstream repository, so 'distributor' would name the wrong person. Pass PACKAGER=<github user> PACKAGER_URL=<your fork> - the release workflow does this for you."
 fi
 
-info "building workbuddy2api ${VERSION} (${PLATFORM}) for ${PACKAGER}"
+info "building ${PRODUCT} (appname ${APPNAME}) ${VERSION} (${PLATFORM}) for ${PACKAGER}"
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
 info "collecting the payload"
@@ -408,7 +447,7 @@ write_manifest "$VERSION" "$PLATFORM" "$PACKAGER" "$PACKAGER_URL" "$CHECKSUM"
 info "validating the package"
 validate_package
 
-FPK_NAME="workbuddy2api_${VERSION}_${PLATFORM}.fpk"
+FPK_NAME="${PRODUCT}_${VERSION}_${PLATFORM}.fpk"
 FPK_PATH="${DIST_DIR}/${FPK_NAME}"
 rm -f "$FPK_PATH"
 # Same shape as the packages appcenter ships: the fpk is a tar.gz whose root
@@ -419,7 +458,8 @@ validate_fpk_archive "$FPK_PATH"
 
 info "built dist/${FPK_NAME} ($(human_size "$FPK_PATH"))"
 echo
-echo "  appname    : workbuddy2api"
+echo "  product    : ${PRODUCT}"
+echo "  appname    : ${APPNAME}   (unchanged: owns the data directory and gateway prefix)"
 echo "  version    : ${VERSION}"
 echo "  platform   : ${PLATFORM}"
 echo "  distributor: ${PACKAGER} <${PACKAGER_URL}>"

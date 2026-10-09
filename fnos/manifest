@@ -1,6 +1,6 @@
 appname         = workbuddy2api
 version         = 1.6.10
-display_name    = WorkBuddy2API
+display_name    = WorkBuddy2API-Hub
 platform        = all
 maintainer      = ardeyouxipianyi
 maintainer_url  = https://github.com/ardeyouxipianyi/workbuddy2api-hub

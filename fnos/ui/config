@@ -1,8 +1,8 @@
 {
     ".url": {
         "workbuddy2api.Application": {
-            "title": "WorkBuddy2API",
-            "desc": "WorkBuddy 账号池网关",
+            "title": "WorkBuddy2API-Hub",
+            "desc": "WorkBuddy 账号池网关（飞牛统一网关免密入口）",
             "icon": "images/{0}.png",
             "type": "iframe",
             "protocol": "",

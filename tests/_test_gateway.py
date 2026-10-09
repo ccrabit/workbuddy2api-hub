@@ -2,12 +2,15 @@
 
 fnOS does not open a third-party app by pointing a browser at its port. The
 App Center redirects to `/app/<appname>/`, nginx forwards that to a unix socket
-inside the payload, and the gateway - after authenticating the NAS user -
-injects `X-Trim-Username` header on the way through. Two properties have to
-hold for that to be both useful and safe:
+inside the payload, and the gateway forwards the request for a NAS user it has
+already authenticated. Two properties have to hold for that to be both useful
+and safe:
 
-  * a request that arrived on the socket from the gateway itself is trusted,
-    so the panel opens without a password (the whole point of the entry);
+  * a request that arrived on the socket from the gateway itself is a signed-in
+    session, so the panel opens without a password - the whole point of the
+    entry. `X-Trim-Username` only names the user for display: fnOS stops
+    sending it once its own session ages out, and prompting for the panel
+    password at that moment is the duplicate login this entry exists to avoid;
   * the same header on the TCP port buys nothing, because it is trivially
     forged by anyone who can reach the port.
 
@@ -205,9 +208,17 @@ class GatewaySocketTests(unittest.TestCase):
         self.assertIn("application/json", headers.get("content-type", ""))
 
     def test_gateway_identity_is_reported_to_the_page(self):
+        # fnOS ages out its own session and stops sending X-Trim-Username while
+        # the gateway keeps forwarding. The peer check - not the header - is
+        # what makes the session signed in, so a socket request without it must
+        # still be authenticated; only the displayed name goes missing.
         status, _, body = unix_request(self.gw.sock_path, "GET", "/panel/status")
         info = json.loads(body)
-        self.assertFalse(info["authenticated"], "a plain socket request has no identity")
+        self.assertEqual(200, status)
+        self.assertTrue(info["via_gateway"])
+        self.assertTrue(info["authenticated"],
+                        "a gateway peer is a signed-in session even without the header")
+        self.assertEqual("", info["gateway_user"], "no header means no name to show")
 
         status, _, body = unix_request(self.gw.sock_path, "GET", "/panel/status",
                                        self.sso_headers())
@@ -220,6 +231,14 @@ class GatewaySocketTests(unittest.TestCase):
         # configurable, so it has to come from here rather than from a
         # number someone typed into the page.
         self.assertEqual(self.gw.port, info["direct_port"])
+
+    def test_panel_routes_open_on_the_socket_without_the_header(self):
+        # The failure seen on the device: the panel fell back to its own
+        # password page because the header was gone. Every management route
+        # must answer on the socket.
+        for path in ("/accounts", "/settings", "/logs", "/tasks", "/usage"):
+            status, _, _ = unix_request(self.gw.sock_path, "GET", path)
+            self.assertEqual(200, status, "%s needs the panel password again" % path)
 
     def test_panel_status_reports_the_direct_port(self):
         status, _, body = tcp_request(self.gw.port, "GET", "/panel/status")
@@ -247,11 +266,52 @@ class GatewaySocketTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("WorkBuddy", body)
 
+    @unittest.skipUnless(hasattr(os, "setuid") and hasattr(os, "getuid")
+                         and os.getuid() == 0,
+                         "needs root to connect to the socket as another uid")
+    def test_a_foreign_uid_on_the_socket_is_not_signed_in(self):
+        # The socket is world-writable so the gateway can reach it whatever user
+        # it runs as, which means the peer credentials are the only thing
+        # keeping every other local user out of the panel. Drop to nobody in a
+        # child process and prove that request is not treated as the gateway.
+        os.chmod(self.gw.tmp, 0o755)          # let the child walk to the socket
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:                           # pragma: no cover - runs as nobody
+            try:
+                os.close(read_fd)
+                os.setgroups([])
+                os.setgid(65534)
+                os.setuid(65534)
+                accounts = unix_request(self.gw.sock_path, "GET", "/accounts")[0]
+                panel = json.loads(unix_request(self.gw.sock_path, "GET",
+                                                "/panel/status")[2])
+                answer = {"accounts": accounts,
+                          "authenticated": panel["authenticated"],
+                          "gateway_user": panel["gateway_user"]}
+            except Exception as exc:
+                answer = {"error": repr(exc)}
+            os.write(write_fd, json.dumps(answer).encode() + b"\n")
+            os._exit(0)
+        os.close(write_fd)
+        with os.fdopen(read_fd, "rb") as pipe:
+            raw = pipe.read()
+        os.waitpid(pid, 0)
+        result = json.loads((raw or b"{}").decode("utf-8", "replace").strip() or "{}")
+        self.assertNotIn("error", result, "child could not make its request")
+        self.assertEqual(401, result.get("accounts"),
+                         "a foreign uid must not reach the panel")
+        self.assertFalse(result.get("authenticated"),
+                         "a foreign uid is not a signed-in NAS session")
+        self.assertEqual("", result.get("gateway_user"))
+
     def test_panel_password_still_works_on_the_gateway(self):
-        # A gateway request without the identity header (an older App Center, or
-        # a proxy that strips it) must fall back to the password, not lock out.
-        status, _, body = unix_request(self.gw.sock_path, "GET", "/accounts")
-        self.assertEqual(401, status)
+        # The password is not required on the socket any more, but the route
+        # itself must keep working there: a browser that reaches the payload
+        # through the NAS proxy is on the socket, and logging in that way still
+        # has to hand out a usable session token.
+        status, _, _ = unix_request(self.gw.sock_path, "GET", "/accounts")
+        self.assertEqual(200, status)
 
         status, _, body = unix_request(self.gw.sock_path, "POST", "/panel/login",
                                       payload={"password": PANEL_PASSWORD})

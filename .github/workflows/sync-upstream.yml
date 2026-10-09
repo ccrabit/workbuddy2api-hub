@@ -15,6 +15,13 @@ name: Sync from upstream
 # commits we have on top". fnOS only offers an upgrade for a bigger number, and
 # scripts/build-fpk.sh derives the version the same way, so a tag and the
 # package built from it always agree.
+#
+# This fork is not a mirror: the default branch also carries the fnOS layer
+# (fnos/**, the gateway changes in wb_proxy.py and dashboard.html, the packaging
+# scripts). Upstream touching those files therefore conflicts, and a conflict is
+# never resolved here - the merge is aborted, nothing half-merged is pushed, an
+# issue is opened or updated, and the run fails so it shows up in the Actions
+# list. A human decides which side wins; upstream-first is the standing rule.
 on:
   schedule:
     # 03:17 UTC, i.e. 11:17 in Asia/Shanghai.
@@ -155,7 +162,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${ours}" -m "WorkBuddy2API ${version} (upstream ${tag})"
+          git tag -a "${ours}" -m "WorkBuddy2API-Hub ${version} (upstream ${tag})"
           git push origin "refs/tags/${ours}"
           echo "tag=${ours}" >> "$GITHUB_OUTPUT"
           echo "releasing ${ours}, built from $(git rev-parse --short HEAD)"

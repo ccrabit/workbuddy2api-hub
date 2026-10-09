@@ -57,12 +57,14 @@ jobs:
             gh release upload "$TAG" "${files[@]}" --clobber
           else
             gh release create "$TAG" "${files[@]}" \
-              --title "WorkBuddy2API $TAG" \
+              --title "WorkBuddy2API-Hub $TAG" \
               --generate-notes
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: workbuddy2api-fpk
+          # Named after the product; the package's own `appname` stays
+          # workbuddy2api, which is what the device keys the install off.
+          name: workbuddy2api-hub-fpk
           path: dist/*
           if-no-files-found: error

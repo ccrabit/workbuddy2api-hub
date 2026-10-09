@@ -68,8 +68,10 @@ class CockpitRowTests(unittest.TestCase):
         self.assertEqual(got["nickname"], "Cockpit cockpit-1")
         self.assertEqual(got["domain"], "www.workbuddy.ai")
         self.assertEqual(got["realm"], "intl")
-        # Imported credentials are live, not inherited state.
-        self.assertEqual(got["source"], "import")
+        # Imported credentials are live, not inherited state. A snake_case row
+        # is labelled as the cockpit export it is; the label is what the panel
+        # shows and what a re-export remembers.
+        self.assertEqual(got["source"], "cockpit")
         self.assertTrue(got["enabled"])
         self.assertEqual(got["cooldownUntil"], 0.0)
 
@@ -90,14 +92,26 @@ class CockpitRowTests(unittest.TestCase):
         self.assertEqual(A.normalise_import_row(row)["expiresAt"], soon)
 
     def test_cn_rows_are_detected(self):
-        cn = A.normalise_import_row(cockpit_row("cn-1", domain="codebuddy.cn"))
-        self.assertEqual(cn["realm"], "cn")
-        # No domain at all: the token issuer decides.
-        row = cockpit_row("cn-2", domain="")
-        row["access_token"] = make_token("cn-2", issuer="https://copilot.tencent.com")
+        # The token issuer decides first: it is the string that will actually
+        # be presented upstream, while the domain is a field a client wrote
+        # down and may have stale from logging in on the other region.
+        row = cockpit_row("cn-1", domain="www.codebuddy.cn")
+        row["access_token"] = make_token("cn-1", issuer="https://copilot.tencent.com")
         self.assertEqual(A.normalise_import_row(row)["realm"], "cn")
+
+        # Nothing readable in the issuer: the domain decides.
+        row = cockpit_row("cn-2", domain="www.codebuddy.cn")
+        row["access_token"] = make_token("cn-2", issuer="https://example.com")
+        self.assertEqual(A.normalise_import_row(row)["realm"], "cn")
+
+        # A domain naming the other region loses to the token (the default
+        # issuer is intl), because following that domain would send every
+        # request of this account to the wrong upstream.
+        stale = cockpit_row("cn-3", domain="www.codebuddy.cn")
+        self.assertEqual(A.normalise_import_row(stale)["realm"], "intl")
+
         # An explicit realm still beats both.
-        forced = A.normalise_import_row(cockpit_row("cn-3", domain="codebuddy.cn"), realm="intl")
+        forced = A.normalise_import_row(cockpit_row("cn-4", domain="codebuddy.cn"), realm="intl")
         self.assertEqual(forced["realm"], "intl")
 
     def test_uid_falls_back_to_the_token_subject_and_is_sanitised(self):
@@ -231,12 +245,14 @@ class PoolImportTests(unittest.TestCase):
 
 
 class DashboardContractTests(unittest.TestCase):
-    """The dashboard must not keep its own list of accepted file shapes.
+    """The dashboard sniffs the container, not the fields.
 
-    It used to sniff the document for `accessToken`/`auth` before uploading, so a
+    It used to sniff every row for `accessToken`/`auth` before uploading, so a
     cockpit-tools row (or any shape the server learns later) was refused in the
-    browser, where the server never got a say. The whitelist is gone; the dry run
-    sends the document itself and the server answers with a readable reason.
+    browser, where the server never got a say. What is left is a three-way
+    container test - list, export document, or one bare row - and the parsed
+    document itself is what goes to the dry run, so the server stays the one
+    that decides whether a row is usable.
     """
     def setUp(self):
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -244,9 +260,15 @@ class DashboardContractTests(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             self.html = fh.read()
 
-    def test_no_client_side_field_whitelist(self):
-        self.assertNotIn("doc.accessToken", self.html)
+    def test_only_the_container_is_sniffed(self):
+        # The single-row branch looks at the two spellings of one account, and
+        # only to decide that a bare object is a row at all.
+        self.assertIn("doc.accessToken || doc.auth", self.html)
+        # The cockpit spelling is not a client-side concern: those files arrive
+        # as an array (or inside an export document) and ride through whole.
         self.assertNotIn("doc.access_token", self.html)
+        # Nothing filters rows on the way to the server.
+        self.assertNotIn("rows = rows.filter", self.html)
 
     def test_the_document_reaches_the_server_intact(self):
         self.assertIn("{data: doc, dryRun: true}", self.html)

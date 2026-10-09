@@ -51,6 +51,7 @@ import uuid
 import wb_accounts
 import wb_atrest
 import wb_catalog
+import wb_export
 import wb_ipintel
 import wb_pricing
 import wb_settings
@@ -7014,13 +7015,18 @@ def stream_responses_events(upstream, model, holder):
 # (ND_ADDRESS=unix:$TRIM_APPDEST/app.sock, ND_BASEURL=/app/Navidrome,
 # ND_UNIX_SOCKET_PERM=0666, ND_EXTAUTH_TRUSTEDSOURCES=@,
 # ND_EXTAUTH_USERHEADER=X-Trim-Username); Filebrowser does the same with
-# --auth.method=proxy. So: a request that arrives on the gateway socket and
-# carries X-Trim-Username is an authenticated NAS user, and the panel does not
-# ask for its own password again.
+# --auth.method=proxy. So: a request that arrives on the gateway socket is a
+# NAS user fnOS has already authenticated, and the panel does not ask for its
+# own password again.
 #
-# Those headers mean nothing on the TCP listener - any LAN client can send
-# them - so they are only honoured on the gateway socket, and only from the
-# gateway itself (root; see _gateway_user). Direct access to the panel still
+# X-Trim-Username only names that user. fnOS stops sending it once its own
+# session ages out, so a request from the gateway without the header is still a
+# signed-in session and asking for the password again would be the duplicate
+# login this integration exists to avoid.
+#
+# The header means nothing on the TCP listener - any LAN client can send it -
+# so only the gateway socket counts, and only from the gateway itself (root or
+# this app's own user; see _gateway_trusted). Direct access to the panel still
 # needs the panel password, which is the escape hatch when the gateway is not
 # available.
 GATEWAY_HEADER_USER = "X-Trim-Username"
@@ -7518,25 +7524,48 @@ class Handler(BaseHTTPRequestHandler):
             if rest.startswith("?"):
                 rest = "/" + rest
             self.path = rest
-    def _gateway_user(self):
-        """The fnOS user this request was authenticated as, or "".
+    def _gateway_trusted(self):
+        """True when this request comes from the App Center gateway itself.
 
-        Only a connection on the gateway socket counts, and only from the
-        gateway process itself: the header is trivially forged over TCP, and
-        the socket is world-writable so the gateway can reach it whatever user
-        it runs as. Anything else falls back to the panel password.
+        fnOS has already authenticated the person by the time the App Center
+        forwards the request, so a connection from the gateway is a signed-in
+        session even without X-Trim-Username: fnOS stops injecting that header
+        once its own session ages out, and prompting for the panel password
+        again is the duplicate login this integration exists to avoid. The
+        header is display data only - see _gateway_user.
+
+        The socket is world-writable (GATEWAY_SOCKET_MODE), so the peer
+        credentials are the real guard: only root (the gateway) or this app's
+        own user counts, and an unreadable peer is refused rather than assumed
+        to be the gateway (fail closed - the alternative would let any local
+        user open the panel without a password). A direct TCP visitor never
+        counts either - the header is trivially forged there - and the panel
+        password stays the escape hatch when the gateway is not available.
         """
         if not getattr(self.server, "is_gateway", False):
-            return ""
+            return False
         uid = unix_peer_uid(getattr(self, "connection", None))
         own = getattr(os, "getuid", lambda: None)()
-        if uid is not None and uid != 0 and uid != own:
+        if uid is None:
+            report_gateway_peer(uid, "sign-on ignored: peer credentials unavailable")
+            return False
+        if uid != 0 and uid != own:
             report_gateway_peer(uid, "sign-on ignored: peer is not the gateway")
-            return ""
+            return False
         user = (self.headers.get(GATEWAY_HEADER_USER) or "").strip()
         report_gateway_peer(uid, "sign-on accepted: %s" % user if user
                             else "no X-Trim-Username header")
-        return user
+        return True
+    def _gateway_user(self):
+        """The fnOS user this request is attributed to, or "", for display.
+
+        Only meaningful together with _gateway_trusted: the name is what the
+        page shows, not what authorises the request, because fnOS may have
+        stopped sending it while the session is still valid.
+        """
+        if not self._gateway_trusted():
+            return ""
+        return (self.headers.get(GATEWAY_HEADER_USER) or "").strip()
     def _key_ok(self):
         """True when the request carries a right key (or no key is needed)."""
         # An authenticated panel session also unlocks the management APIs,
@@ -7640,9 +7669,10 @@ class Handler(BaseHTTPRequestHandler):
         return token
     def _panel_ok(self):
         # Opened from the App Center, fnOS has already authenticated the user
-        # and says so in X-Trim-Username; asking for the panel password again
-        # would be a second login for the same person.
-        if self._gateway_user():
+        # before it forwards the request, so the panel must not ask for its own
+        # password again - not even when X-Trim-Username is missing because
+        # fnOS's own session aged out. _gateway_trusted is the actual guard.
+        if self._gateway_trusted():
             return True
         return PANEL.valid(self._panel_token())
     @staticmethod
@@ -7916,6 +7946,65 @@ class Handler(BaseHTTPRequestHandler):
             name = "workbuddy-accounts-%s%s.json" % (label, stamp)
             return self._download(name, doc)
         return self._json(200, doc)
+
+    def _route_accounts_export(self, payload):
+        """`POST /accounts/export` - native envelope or cockpit bare array.
+
+        GET keeps the historical native document (the dashboard's own button
+        downloads exactly what it always did); this POST is the explicit-format
+        variant, so a caller that wants the cockpit-tools shape for the Go
+        panel - or a native document built for one realm - can ask for it.
+        """
+        if POOL is None:
+            return self._error(503, "account pool unavailable", "invalid_request_error")
+        realm = str(payload.get("realm") or "").strip() or None
+        if realm not in ("intl", "cn"):
+            return self._error(400, "realm must be cn or intl", "invalid_request_error")
+        fmt, error = wb_export.normalize_format(payload.get("format"), default=None)
+        if error:
+            return self._error(400, error, "invalid_request_error")
+        if fmt is None:
+            # An explicit POST has to say which file it wants: defaulting to
+            # native here would hand a caller aiming for the panel a document
+            # it cannot import. (GET keeps the historical native default.)
+            return self._error(400, "format is required (native or cockpit)",
+                               "invalid_request_error")
+        uids = payload.get("uids")
+        if uids is None:
+            uid = str(payload.get("uid") or "").strip()
+            uids = [uid] if uid else None
+        else:
+            if not isinstance(uids, list):
+                return self._error(400, "uids must be a list of account uids",
+                                   "invalid_request_error")
+            uids = [str(u).strip() for u in uids if str(u or "").strip()] or None
+        if uids:
+            known = {a.uid for a in POOL.accounts}
+            missing = [u for u in uids if u not in known]
+            if missing:
+                return self._error(404, "no such account: %s" % ", ".join(missing[:5]),
+                                   "invalid_request_error")
+        # A credential-free cockpit file imports nothing (the panel skips rows
+        # without both tokens), so the combination is refused rather than
+        # silently producing an empty file.
+        include_secrets = payload.get("secrets", True) is not False
+        if fmt == wb_export.COCKPIT_FORMAT and not include_secrets:
+            return self._error(400, "cockpit export always carries credentials; drop secrets",
+                               "invalid_request_error")
+        doc, name, count = wb_export.build_document(
+            fmt, POOL.accounts, realm=realm, uids=uids, include_secrets=include_secrets)
+        if fmt == wb_export.COCKPIT_FORMAT:
+            # A cockpit row has no realm field, so a stale domain is rewritten
+            # to the realm's own host. Say so instead of rewriting in silence.
+            rows = doc if isinstance(doc, list) else []
+            conflicted = [str(r.get("uid") or "") for r in rows
+                          if wb_export.realm_for_domain(r.get("domain")) != realm]
+            if conflicted:
+                log("cockpit export: %d account(s) had a domain outside realm %s (%s); "
+                    "wrote the realm host so the panel cannot misfile them"
+                    % (len(conflicted), realm, ", ".join(conflicted[:5])))
+        return self._json(200, {"ok": True, "format": fmt, "filename": name,
+                                "count": count, "data": doc})
 
     def _get_accounts_login_poll(self, query):
         if not self._authorized():
@@ -8656,6 +8745,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._route_accounts_set_all(payload)
         if path == "/accounts/delete":
             return self._route_accounts_delete(payload)
+        if path == "/accounts/export":
+            return self._route_accounts_export(payload)
         if path == "/accounts/import":
             return self._route_accounts_import(payload)
         return self._error(404, "unknown account endpoint", "invalid_request_error")
@@ -9938,7 +10029,9 @@ def _apply_cli_overrides(args):
     # ACCOUNTS_DIR is resolved, so it can be persisted and reused.
     if args.lan and args.host == "127.0.0.1":
         args.host = "0.0.0.0"
-    args.base_path = (args.base_path or "").strip().rstrip("/")
+    # Embedders and tests build their own namespace and may not carry
+    # --base-path at all; a missing attribute means "no prefix", not a crash.
+    args.base_path = (getattr(args, "base_path", "") or "").strip().rstrip("/")
     if args.base_path and not args.base_path.startswith("/"):
         args.base_path = "/" + args.base_path
     if args.user_agent:
