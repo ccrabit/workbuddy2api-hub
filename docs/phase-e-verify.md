@@ -1,17 +1,19 @@
 # Phase E 独立验证报告（WP-E4 / task-14）
 
-> 验证者：`verifier`（独立于任何写者）。分支 `phase-e/upstream-sync`，HEAD `55dfad2`（`9dff35f` 合并上游 v1.6.17 及其后 6 个提交之后，本 fork 的交付提交；tag `v1.6.17.1` 已打）。
+> 验证者：`verifier`（独立于任何写者）。分支 `phase-e/upstream-sync`，HEAD `55dfad2`（`9dff35f` 合并上游 v1.6.17 及其后 6 个提交之后，本 fork 的交付提交；tag `v1.6.17.1` 已打）。task-20 复跑时 HEAD 已是 `9b6c630`（`v1.6.17.1` 重指在 `adac7eb` 上，HEAD 越过该 tag 一个提交）。
 > 立场：不接受写者的口头结论，只认本机实跑输出；伪造输入、边界值、坏 payload、陌生 uid、未登录、未知 realm 一律打。
 > 写域：`tests/_test_phase_e_verify.py`（验证套件）、`docs/phase-e-verify.md`（本文）。**本阶段未 `git commit`、未打 tag、未碰设备、未改任何写者文件。**
-> 状态：**收口版 + CI 兼容修订（第二轮）+ 发布流水线复核（第三轮，task-18）**。数字来自最终包（`dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk`，412737 字节，sha256 `5edc6c97…`）上的独立复跑；套件已能在 windows-latest（没有 `socket.AF_UNIX`）上整跑（`e10` 预演），并新增 `e11` 复刻 CI 的真实形状——**shallow clone（depth 1）+ 非 root runner**，因为 v1.6.17.1 的 tag CI 正是被这两件事打红的（见 §3 R7）；`e13` 独立复核发布流水线修复（修复前 `1.6.10.3` → 修复后 `1.6.17.1`；R10 由 Lead 修复、我已复测关闭，见 §2.14）。
+> 状态：**收口版 + CI 兼容修订（第二轮）+ 发布流水线复核（第三轮，task-18）+ CI Windows 腿修订（第四轮，task-20）**。数字来自最终包（`dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk`，412737 字节，sha256 `5edc6c97…`）上的独立复跑；套件已能在 windows-latest（没有 `socket.AF_UNIX`）上整跑（`e10` 预演），并新增 `e11` 复刻 CI 的真实形状——**shallow clone（depth 1）+ 非 root runner**，因为 v1.6.17.1 的 tag CI 正是被这两件事打红的（见 §3 R7）；`e13` 独立复核发布流水线修复（修复前 `1.6.10.3` → 修复后 `1.6.17.1`；R10 由 Lead 修复、我已复测关闭，见 §2.14）；task-20 修掉最后一条只在 Windows 上红的断言（R12，平台措辞 + 守卫顺序）、把 e5 的包版本断言改成状态感知（R13）、并把 e10 平台预演加硬成「整个进程树都变 Windows 形状」（`sitecustomize.py` 走 `PYTHONPATH`）——加硬后当场暴露 **R14**：`scripts/verify-fpk.sh` 的网关探针依赖 `socket.AF_UNIX`，无该能力时 e5 改为跳过沙箱调用（只记一条 SKIP，不把环境缺失误判成包缺陷）。
 
 ## 0. 结论摘要
 
-**合计：PASS=261 / FAIL=0 / SKIP=2；其中 E1..E8 为验收口径（PASS=169），E9 为第二波 WP-E5 的独立交叉验证（PASS=35），E10 为平台兼容预演（PASS=6），E11 为 CI 形状预演（PASS=9），E12 为已发布错包的反向取证（PASS=12，task-19），E13 为发布流水线修复的独立复核（PASS=30，task-18）——后五段都是对套件自身可移植性/发布资产/发布流水线的断言、不计入 E1..E8。另：`run_all.py --jobs 4` = 86 passed / 0 failed / 0 skipped（62.5s，退出码 0），`verify-fpk.sh`（本机最终包）= 71 passed / 0 failed，`verify-fpk.sh`（已发布错包）= 70 passed / 1 failed（唯一红 = `the package is what this tree builds`）。未验证项 11 条见 §4，有意口径差异 3 条 + R8/R11 登记见 §5，提交前置风险 R6 已闭环（`55dfad2` 提交时用 `git add -A`）见 §3。**
+**合计：PASS=266 / FAIL=0 / SKIP=2；其中 E1..E8 为验收口径（PASS=169），E9 为第二波 WP-E5 的独立交叉验证（PASS=35），E10 为平台兼容预演（PASS=8），E11 为 CI 形状预演（PASS=11），E12 为已发布错包的反向取证（PASS=12，task-19），E13 为发布流水线修复的独立复核（PASS=31，task-18）——后五段都是对套件自身可移植性/发布资产/发布流水线的断言、不计入 E1..E8。另：`run_all.py --jobs 4` = 86 passed / 0 failed / 0 skipped（53.5s，退出码 0；本套件行 `PASS=266 FAIL=0 SKIP=2 50.8s`），`verify-fpk.sh`（本机最终包，HEAD 已越过发布 tag 的当前状态）= 70 passed / 1 failed，唯一红是 `the package is what this tree builds`——因为本树此刻派生 `1.6.17.2` 而包是 `1.6.17.1`（该断言的结构与判定见 §2.6、登记见 §3 R13）。未验证项 11 条见 §4，有意口径差异 3 条 + R11 登记见 §5，R12/R13/R14 三条套件侧问题见 §3，提交前置风险 R6 已闭环（`55dfad2` 提交时用 `git add -A`）见 §3。**
 
 **task-18 结论（一句话）**：流水线修复经我独立复现红/绿——同一个 fixture（CI 当时看得见的 `v1.6.10/.1/.2` + HEAD 上的 `v1.6.17.1`）里，**修复前脚本报 `1.6.10.3`（正是错包版本）、修复后报 `1.6.17.1`**；dispatch 形状（HEAD 无 tag、54 个 tag 都可见）派生 `1.6.17.2`。**R10（`tests/_test_release_pipeline.py` 的 `"file://" + path`）已由 Lead 修复、我复测关闭**，故**可以提交/推送**——详见 §2.14 / §3 R9–R11。
 
 **task-19 结论（一句话）**：Release `v1.6.17.1` 的附件 `WorkBuddy2API-Hub_1.6.10.3_all.fpk`（411262 B）**只是 manifest 版本号错**——它的 payload 26 个文件与本机最终包逐文件 md5 相同、也与仓库逐字节相同，所以**把 tag `v1.6.17.1` 重指到修复提交让 CI 重新构建是安全的**（详见 §2.13 / §3 R8）。
+
+**task-20 结论（一句话）**：windows-latest 腿唯一那条红是**我的断言过严**——CI 原文 `[FAIL] 非 root 模拟：uid 矩阵记为 SKIP（不是 FAIL） -> ['[SKIP] e2b peer uid 矩阵  (本平台没有 socket.AF_UNIX（Windows）：网关 socket 传输不存在)']`；Windows 既没有 `socket.AF_UNIX` 也没有 `os.geteuid`，`needs_unix()` 先于 `needs_root()` 命中，旧断言只认「切 uid 需要 root」这一句。现改为钉「**e2b peer uid 矩阵这一项被跳过**」+「理由是共用常量 `ENV_SKIP_REASONS` 之一」+「绝不是 FAIL」，另加两条防空跑断言（段名确实命中、子跑恰好 `PASS=0 FAIL=0 SKIP=1`）；同一份 Windows 形状输出上实测：旧断言 `False`（= CI 的红）、新断言 `True`（详见 §2.12 / §3 R12）。顺手审计了整份套件里依赖平台措辞/POSIX 行为/具体错误文本的断言，见 §3 R12 末尾的审计表。
 
 | # | 验收项 | 判定 | 通过 / 不通过 / 跳过 | 证据（命令见 §1 / 详见 §2） |
 |---|---|---|---|---|
@@ -20,16 +22,16 @@
 | E2b | peer uid 矩阵（root 放行 / 陌生 uid 拒绝） | **通过（1 项跳过）** | 4 / 0 / 1 | §2.3 |
 | E3 | 挂载前缀契约（`<base href>` / `__WB_BASE__` / 直连不注 / 所有调用带前缀） | **通过** | 32 / 0 / 0 | §2.4 |
 | E4 | 每 M tokens 积分（后端 credit 累加 + 界面除零保护） | **通过** | 26 / 0 / 0 | §2.5 |
-| E5 | 最终 fpk 一致性（命名 / payload / 逐字节 / verify-fpk） | **通过** | 55 / 0 / 0 | §2.6 |
+| E5 | 最终 fpk 一致性（命名 / payload / 逐字节 / verify-fpk） | **通过** | 56 / 0 / 0 | §2.6 |
 | E6 | 真机设备探针（只读；设备已装 1.6.17.1） | **通过** | 3 / 0 / 0 | §2.7 |
 | E7 | 免密防线加固面（socket 权限 / peer 不可读取向 / key 边界） | **通过（1 项登记）** | 10 / 0 / 0 | §2.8 |
 | E8 | 交付纪律（跨提交状态成立 + 设备上跑的就是交付版） | **通过（1 项跳过）** | 15 / 0 / 1 | §2.9 |
 | E9 | cockpit 兼容导出（独立段，交叉验证 WP-E5） | **通过（不计入 E1..E8 口径）** | 35 / 0 / 0 | §2.10 |
-| E10 | 平台预演：删掉 `socket.AF_UNIX` 后整套仍绿 | **通过（不计入 E1..E8 口径）** | 6 / 0 / 0 | §2.11 |
-| E11 | CI 预演：shallow clone（depth 1）+ 非 root runner | **通过（不计入 E1..E8 口径）** | 9 / 0 / 0 | §2.12 |
+| E10 | 平台预演：删掉 `socket.AF_UNIX` 后整套仍绿 | **通过（不计入 E1..E8 口径）** | 8 / 0 / 0 | §2.11 |
+| E11 | CI 预演：shallow clone（depth 1）+ 非 root runner | **通过（不计入 E1..E8 口径）** | 11 / 0 / 0 | §2.12 |
 | E12 | 已发布错包反向取证（Release 资产 vs 本机包 vs 仓库） | **通过（不计入 E1..E8 口径）** | 12 / 0 / 0 | §2.13 |
-| E13 | 发布流水线修复（tag 可见性 / 版本推导 / 六条对抗） | **通过（不计入 E1..E8 口径；1 项登记见 §5）** | 30 / 0 / 0 | §2.14 |
-| — | **合计（E1..E13）** | **通过** | **261 / 0 / 2** | — |
+| E13 | 发布流水线修复（tag 可见性 / 版本推导 / 六条对抗） | **通过（不计入 E1..E8 口径；1 项登记见 §5）** | 31 / 0 / 0 | §2.14 |
+| — | **合计（E1..E13）** | **通过** | **266 / 0 / 2** | — |
 
 E8 的 1 项跳过是「包内文件相对 HEAD 无未提交改动」——本轮复跑时 packager 正在改 `scripts/build-fpk.sh`、`.github/workflows/*.yml`、`README.md`（都不是 payload 文件，e5 的逐字节比对才是真正抓包的断言），所以它按设计记 SKIP 而不是红；E2b 的 1 项跳过是本机无法以陌生 uid 起面板（§4 第 5 条）。
 
@@ -98,15 +100,15 @@ WB_PHASE_E_STRICT=1 python3 -u tests/_test_phase_e_verify.py
 python3 tests/run_all.py --jobs 4
 ```
 
-原始尾部（task-18 复跑，`/tmp/wb-e18-r10-runall.log`；task-19 那轮为 `PASS=231` / `56.8s`，差异是新增的 `e13` 段与其后的 R10 复测）：
+原始尾部（task-20 最终复跑，`/tmp/wb-e20b-runall.log`；task-20 加硬 e10 之前那轮为 `PASS=264` / `66.0s`，task-18 那轮为 `PASS=261` / `62.5s`，task-19 那轮为 `PASS=231` / `56.8s`）：
 
 ```
   [PASS] _test_connection_reuse.py              SUMMARY: PASS=8 FAIL=0                                12.6s
-  [PASS] _test_phase_e_verify.py                PASS=261 FAIL=0 SKIP=2                                59.8s
+  [PASS] _test_phase_e_verify.py                PASS=266 FAIL=0 SKIP=2                                50.8s
 
-  slowest: _test_phase_e_verify.py 59.8s, _test_connection_reuse.py 12.6s, _test_pricing_switch.py 3.5s
+  slowest: _test_phase_e_verify.py 50.8s, _test_connection_reuse.py 12.6s, _test_pricing_switch.py 3.6s
   86 passed, 0 failed, 0 skipped  (/vol2/1000/AgentWork/2api/workbuddy2api-hub)
-  total 62.5s with --jobs 4
+  total 53.5s with --jobs 4
 ```
 
 - 验收口径 **86 passed, 0 failed, 0 skipped**（86 = 67 Python + 19 JS，含我的 `_test_phase_e_verify.py`、第二波 UI 套件 `_test_phase_e_ui2.js`，以及 packager 本轮新增的 `tests/_test_release_pipeline.py`），与我实读的 `README.md:187`「86 个套件：67 个 Python + 19 个 JS」一致。（CI 期望值由 Lead 给的 85 变为 **86**，是新增套件所致，不是套件被跳过。）
@@ -184,7 +186,7 @@ python3 -u tests/_test_phase_e_verify.py e4_credit
 - 任何组合都**不**外泄 `NaN` / `Infinity` / `undefined`；tokens 为 0 或非法 → 显示 `—`（没有比值，不是 0）；credit 为真实 0 → 显示 `0` 而不是 `—`；`42 积分 / 2M tokens` → `21`。
 - 表头存在「每 M tokens 积分」列，渲染点都走 `fmtPerM()`（不各自手算），且不是裸 `credit/tokens`。
 
-### 2.6 E5 — 最终 fpk 一致性（55 / 0 / 0）
+### 2.6 E5 — 最终 fpk 一致性（56 / 0 / 0）
 
 ```bash
 python3 -u tests/_test_phase_e_verify.py e5_package
@@ -207,7 +209,20 @@ bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk
 - payload（`app.tgz` 里的 `server/**`）：**21 个文件，逐个与仓库逐字节一致**（枚举包内全部 `server/` 条目再比，不写死清单）；含 18 个模块/文件（`wb_proxy.py`、`wb_accounts.py`、`dashboard.html`、`wb_export.py`、`wb_pricing.py`、`wb_atrest.py`、`wb_modelsdev.py`、`wb_prompt.py`、`wb_ipintel.py`、`wb_probes.py`、`wb_catalog.py`、`wb_fingerprint.py`、`wb_identity.py`、`wb_webagent.py`、`wb_webtools.py`、`wb_scheduler.py`、`wb_settings.py`、`wb_tasks.py`）与 `server/pricing/**`。
 - payload **不含** `accounts/`、`usage/`、`tests/`、`docs/`、`dist/`、`build/`、`scripts/`、`fnos/`、`.git/`（`scripts/build-fpk.sh` 的 `--exclude='./docs'` 等排除清单生效）。
 - fnOS 外壳：`manifest` / `app.tgz` / `ui/**` / `cmd/**` / `wizard/**` / `config/**`；7 个 `cmd/*` 脚本齐全；`ui/config` 与 `fnos/ui/config` 逐字节一致且指向挂载前缀 `/app/workbuddy2api` 与 `app.sock`。
-- `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk` → **71 passed, 0 failed**，退出码 `0`（94 行；尾部自述「the package behaves; only a real NAS can test the app store itself」）。该脚本从 55 条扩到 71 条（新增新命名/新模块/禁止目录具名断言），旧包上它会报 2 条失败（`the payload carries every top-level module of the tree`、`every packaged file is byte-identical to the tree`），最终包上全绿。
+- `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk`：**同一命令的输出随 HEAD 相对发布 tag 的位置而变**（本轮实测两种状态）——
+  - HEAD 就是发布 tag 时（`55dfad2`，包构建时）→ **71 passed, 0 failed**，退出码 `0`（94 行；尾部自述「the package behaves; only a real NAS can test the app store itself」）。
+  - HEAD 越过 tag 一个提交时（`9b6c630`，task-20 复跑时）→ **70 passed, 1 failed**，唯一失败名 `the package is what this tree builds`：本树 `bash scripts/build-fpk.sh --print-version` = **`1.6.17.2`**（`v1.6.17.1` 在 `adac7eb` 上，HEAD 上的 `9b6c630` 是它的下一个提交），而包 manifest 是 `1.6.17.1`；payload 逐字节比对等其余 70 条全过。这不是包的问题，也不是产品缺陷：该断言的定义就是「包 == 本树此刻会构建出来的东西」，HEAD 一动它必然改口。
+  - 该脚本从 55 条扩到 71 条（新增新命名/新模块/禁止目录具名断言），旧包上它会报 2 条失败（`the payload carries every top-level module of the tree`、`every packaged file is byte-identical to the tree`），最终包上全绿。
+- 因此 e5 段对 verify-fpk 的判定改成**状态感知**（不再写死「0 failed」）：先取 `bash scripts/build-fpk.sh --print-version` 与包 manifest 的 `version`——相等时要求 **0 failed**；不相等时要求**恰好 1 条失败、失败名就是 `the package is what this tree builds`、且派生值确实 != 包版本**，另外要求通过条数仍成规模（不是脚本半途夭折），退出码 `0` 或仅因这一条而 `1`。运行输出原文：
+  ```
+  [NOTE] 包版本 vs 本树派生版本 = {'package': '1.6.17.1', 'deriving': '1.6.17.2', 'same_tree': False,
+                                  'failed_names': ['the package is what this tree builds']}
+  [PASS] verify-fpk 只反对「包版本 != 本树派生版本」这一条（树已越过发布 tag）
+  [PASS] verify-fpk 的其余断言仍成规模（不是脚本半途夭折）
+  [PASS] verify-fpk 退出码 0，或仅因树越过 tag 而 1
+  ```
+  这条耦合登记为 §3 R13。
+- **无 `socket.AF_UNIX` 时这一条会变成假红**（task-20 加硬 e10 后实测）：`scripts/verify-fpk.sh` 的网关探针本身就是 unix socket 客户端（`:330` / `:379` 用 `socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)` 连 `<payload>/app.sock`，`:126` 断言 `cmd/main` 带 `--unix-socket`，`:416` 断言 socket `0666`）。把整个进程树变成 Windows 形状后同一份包实测 **67 passed / 4 failed**，多出的三条正是 `the gateway socket is world-writable`、`the gateway signs the NAS user in (exit 1, wanted 0)`、`...and still does when the session header is gone (exit 1, wanted 0)`——都是「沙箱跑不起来」，不是包的问题。所以 e5 现在先判 `HAS_UNIX`：没有 `AF_UNIX` 就只记一条 SKIP、不调沙箱（`register` R14，见 §3 R14），上面的 tar/命名/manifest/payload/checksum 断言照跑（它们与传输无关）。
 
 ### 2.7 E6 — 真机设备探针（3 / 0 / 0，只读）
 
@@ -250,7 +265,7 @@ python3 -u tests/_test_phase_e_verify.py e8_delivery
 - `docs/phase-e-delivery.md`（6927 字节）含「包指纹 / 安装与备份 / 已知限制 / 测试路线」四节、写明安装状态、无 `PENDING_*` 占位符；旁置 `.sha256` 与产物一致。
 - **设备只读核对**：`/vol1/@appcenter/workbuddy2api/server/**` 逐字节等于仓库工作树（21 个文件、排除 `__pycache__`/`.pyc`）；数据目录 `/vol1/@appdata/workbuddy2api` 只断言仍可读、`accounts/` 仍在。**不用 mtime**（用户随时可能安装/升级，运行中的服务还在持续写数据目录，mtime 断言在真机必然假红，且红了也证明不了什么）；「本次没有对设备执行任何写操作」作为流程事实记 NOTE + 登记项。
 
-本段在 task-19 复跑时是 **15 / 0 / 1**：唯一 SKIP = 「包内文件相对 HEAD 无未提交改动」，因为当时 packager 正在改 `scripts/build-fpk.sh`、`.github/workflows/{build-fpk,sync-upstream}.yml`、`README.md`（四行 dirty 被原样打出；`docs/phase-e-verify.md` 与 `tests/_test_phase_e_verify.py` 是我自己在改，也在清单里）。这四行**都不是 payload 文件**，真正抓「工作树与 fpk 分叉」的是 e5 的逐字节比对（55 / 0 / 0，全绿），所以按设计记 SKIP 而不是红。`scripts/verify-fpk.sh` 与 `scripts/build-fpk.sh` 不在任何 payload 里（§2.6 的禁止清单里就含 `scripts/`）。
+本段在 task-19 复跑时是 **15 / 0 / 1**：唯一 SKIP = 「包内文件相对 HEAD 无未提交改动」，因为当时 packager 正在改 `scripts/build-fpk.sh`、`.github/workflows/{build-fpk,sync-upstream}.yml`、`README.md`（四行 dirty 被原样打出；`docs/phase-e-verify.md` 与 `tests/_test_phase_e_verify.py` 是我自己在改，也在清单里）。这四行**都不是 payload 文件**，真正抓「工作树与 fpk 分叉」的是 e5 的逐字节比对（当时 55 / 0 / 0 全绿；task-20 改成状态感知后为 56 / 0 / 0，见 §2.6），所以按设计记 SKIP 而不是红。`scripts/verify-fpk.sh` 与 `scripts/build-fpk.sh` 不在任何 payload 里（§2.6 的禁止清单里就含 `scripts/`）。
 
 ### 2.10 E9 — cockpit 兼容导出（35 / 0 / 0，独立段）
 
@@ -270,19 +285,23 @@ python3 -u tests/_test_phase_e_verify.py e9
 
 结论：**WP-E5（task-15）我这边零发现**；这条与写者自测构成交叉印证（不是同一作者自证）。
 
-### 2.11 E10 — 平台预演：删掉 `socket.AF_UNIX` 后整套仍必须绿（6 / 0 / 0）
+### 2.11 E10 — 平台预演：删掉 `socket.AF_UNIX` 后整套仍必须绿（8 / 0 / 0）
 
 ```bash
 python3 -u tests/_test_phase_e_verify.py e10_platform_sim
 ```
 
-CI 矩阵里有 `windows-latest`，而 Windows 的 `socket` **没有** `AF_UNIX`／`socketserver.UnixStreamServer`。本段在本机（Linux）复刻那种形状：子进程先 `delattr(socket, "AF_UNIX")` 与 `delattr(socketserver, "UnixStreamServer"/"UnixDatagramServer")`，再 `runpy.run_path(本套件)` 跑整套，断言**退出码 0、`FAIL == 0`、`SKIP > 0`（确实跳过了 AF_UNIX 段）、其余段仍在真跑、输出无 Traceback**。
+CI 矩阵里有 `windows-latest`，而 Windows 的 `socket` **没有** `AF_UNIX`／`socketserver.UnixStreamServer`，`os` 也**没有** `geteuid`。本段在本机（Linux）复刻那种形状，并且 task-20 把它加硬成**整棵进程树**都是这种形状：一段 `sitecustomize.py`（删 `socket.AF_UNIX`、`socketserver.Unix*` 六个类，`if hasattr(os,"geteuid"): del os.geteuid`）写到临时目录并放进 `PYTHONPATH`——CPython 在 site 初始化时会导入 `PYTHONPATH` 上的 `sitecustomize`，所以本段拉起的子进程**以及子进程再拉起的孙进程**都变 Windows 形状；孙进程只 `runpy.run_path(本套件)` 跑整套，然后断言**退出码 0、`FAIL == 0`、`SKIP > 0`（确实跳过了 AF_UNIX 段）、其余段仍在真跑、输出无 Traceback、新起的解释器形状恰为 `False False`**。
 
-实测：子进程 `PASS=159 FAIL=0 SKIP=12`（12 条跳过全是 socket 相关：e2 免密三段、e2b peer 矩阵、e3 挂载态 socket、e7 socket 权限/key 边界、e6 真机探针等），父进程 6 / 0 / 0。
+为什么必须加硬：旧版只在子进程里 `delattr`，孙进程（`e11` 的 shallow-clone 子跑、非 root 子跑）仍是完整 Linux socket 模块，于是**抓不到 R12**（CI 那条 windows-latest 假红恰恰靠孙进程的措辞差异）。
+
+实测（task-20 复跑）：子进程 `PASS=201 FAIL=0 SKIP=13`（13 条跳过全是 socket 相关：e2 免密三段、e2b peer 矩阵、e3 挂载态 socket、e7 socket 权限/key 边界、e6 真机探针、e5 的 verify-fpk 沙箱等），父进程 8 / 0 / 0。加硬后当场红过一次（父段 `4 / 3`，子进程 `PASS=203 FAIL=1`），那次红**问出了 R14**（`verify-fpk.sh` 的网关探针依赖 `AF_UNIX`），修法是 e5 在无 `AF_UNIX` 时跳过沙箱调用。
+
+同一轮里还纠正了我自己的一个错误断言：原打算用「孙进程的 `[SKIP] e2b peer uid 矩阵 (...AF_UNIX...)` 行」来证明形状继承，但 `e11` 在嵌套预演里会**自我跳过**（`WB_E1_NESTED`/`WB_E11_NESTED` 守卫，防递归），输出里根本没有那一行——于是改成直接探孙辈解释器形状（断言 `hasattr(socket,'AF_UNIX'), hasattr(os,'geteuid')` 打印 `False False`），并加一条「e11 在嵌套预演里确实自我跳过」的断言把原因写清。
 
 这道预演**当场抓到过一个真问题**：`e6_device` 直接调 `unix_request()` 而没有平台守卫，在无 `AF_UNIX` 的进程里抛 `RuntimeError` 让整段崩溃（子进程 `FAIL=1`，失败名 `段 e6_device 自身没有崩溃`）。修法是在 `DEVICE_SOCK` 存在性判断之后加 `needs_unix(...)` 早退，见 §3 R5。这就是「把平台模拟做成套件里的一个真实段」的价值：同一件事以后不会再打红 CI。
 
-### 2.12 E11 — CI 预演：shallow clone（depth 1）+ 非 root runner（9 / 0 / 0）
+### 2.12 E11 — CI 预演：shallow clone（depth 1）+ 非 root runner（11 / 0 / 0）
 
 ```bash
 python3 -u tests/_test_phase_e_verify.py e11
@@ -316,6 +335,32 @@ python3 tests/run_all.py --jobs 4
 ```
 
 本机（非 shallow，HEAD `55dfad2`）：`python3 tests/run_all.py --jobs 4` = **85 passed / 0 failed / 0 skipped**（57.9s，exit 0），其中本套件 `PASS=220 FAIL=0 SKIP=1`（55.1s）。（这两段数字是 task-19 之前那一刻的快照，当时树里是 85 个套件；task-19 复跑时 packager 新增了 `tests/_test_release_pipeline.py`，树与 README 一起变成 86，见 §2.1。）
+
+**第四轮（task-20）：Windows 腿最后一条红 = 我自己的断言过严。** tag `v1.6.17.1` 重指到 `adac7eb` 后的 CI（run `37891379131`，HEAD `9b6c630`）三个腿里只有 `windows-latest / python 3.12` 红，唯一红行原文（我从 artifact `suite-logs-windows-latest-3.12` 读到，与 Lead 转述逐字一致）：
+
+```
+  [FAIL] 非 root 模拟：uid 矩阵记为 SKIP（不是 FAIL）  -> ['[SKIP] e2b peer uid 矩阵  (本平台没有 socket.AF_UNIX（Windows）：网关 socket 传输不存在)']
+```
+
+根因是**守卫顺序 + 措辞耦合**：Windows 既没有 `socket.AF_UNIX` 也没有 `os.geteuid`，所以 `e2b` 的 `needs_unix()`（`tests/_test_phase_e_verify.py:619`）**先于** `needs_root()` 命中，落下的 skip 文案是 AF_UNIX 那条；而 e11 的非 root 断言只认「切 uid 需要 root」这一句，于是「确实按设计跳过了」被判成红。`e11` 当时 `PASS=8 FAIL=1`，其余两条（退出码 0、`FAIL == 0`）已过。
+
+改法（只在本套件里，`tests/_test_phase_e_verify.py`）：
+
+- 新增共用常量 `SKIP_NO_UNIX = "本平台没有 socket.AF_UNIX（Windows）：网关 socket 传输不存在"`、`SKIP_NO_ROOT = "切 uid 需要 root（CI runner 非 root）：本段跳过"`、`ENV_SKIP_REASONS = (SKIP_NO_UNIX, SKIP_NO_ROOT)`，`needs_unix`/`needs_root` 改成用它们发 skip（单一真相源，断言与文案不再各写一份）。
+- 断言重写为：**`e2b peer uid 矩阵` 这一项确实出现在 SKIP 行里**（按项目名钉住，不是只看计数）+ **理由是 `ENV_SKIP_REASONS` 之一**（环境原因，不是产品原因）+ **同一项绝不出现在 FAIL 行里**；再加两条防空跑断言：`e2b peer uid 矩阵` 确实被段名过滤命中并跑到、以及子跑计数**恰好** `PASS=0 FAIL=0 SKIP=1`（只有这一项）。所以没有退化成「只看 `SKIP=1`」的永真断言——项目名写错、e2b 被整段漏跑、或者它变成 FAIL，都仍然会红。
+- 顺手审计同类脆弱点（Windows / 无 AF_UNIX 下逐条复核）：AF_UNIX 相关探针（e2 socket 半段 / e2b / e3 / e6 / e7）都由 `needs_unix` 或 `HAS_UNIX` 门住；`setpriv`+`chown` 类只出现在 `needs_root` 之后；`/vol1/**` 只读探针先判目录存在；`tar`/`bash`/`git` 三个外部工具各有一道 gate，缺工具走 SKIP（e8 此前没有 gate，无 git 会 `FileNotFoundError` 崩段 → 已补）；文本文件读取全部显式 `encoding`（无 cp1252 陷阱）；路径比较都已 `.replace(os.sep, "/")`；唯一断言产品措辞的地方是本套件自己的日志串（`gateway: peer uid`）与 unittest 的 `Ran`/`OK` 字样。同一类「钉死别人的测试条数」的三处断言也放松成解析 `Ran (\d+) tests` / `skipped=(\d+)` 后断关系（`rc == 0` + 条数 > 0 + 0 < skip < ran），不再写死 `Ran 8 tests`／`skipped=5`。
+
+复算证据（红/绿同一份输出）：
+
+| 步骤 | 结果 |
+|---|---|
+| Windows 形状预演（`/tmp/winsim/sitecustomize.py`：删 `socket.AF_UNIX`、删 `socketserver.UnixStreamServer/UnixDatagramServer`、`del os.geteuid`；`PYTHONPATH` 让子进程继承）里跑 `e11` | **PASS=11 FAIL=0 SKIP=0**；NOTE 打出的 skip 文案正是 CI 里那一句 |
+| 把同一份 Windows 形状输出喂给两个断言（`PYTHONPATH=/tmp/winsim` 的 `os.geteuid = lambda: 1000` 子进程） | 旧断言（只认「切 uid 需要 root」）= **False**（= CI 的红）；新断言（项目名 + `ENV_SKIP_REASONS` 之一）= **True** |
+| 真 `git clone --depth 1 file://<repo>`（`is-shallow-repository` = `true`）里跑 `e8_delivery e2_peer_matrix e11_ci_rehearsal`，用仓库里已提交的那版套件 | `PASS=26 FAIL=0 SKIP=2` |
+| 同一个 clone 里换成工作树这一版套件再跑同样三段 | `PASS=28 FAIL=0 SKIP=2`（跳过两条仍是按设计的历史断言） |
+| 缺工具守卫：`env PATH=/tmp/emptybin /usr/bin/python3 -u tests/_test_phase_e_verify.py e8_delivery e13_release_pipeline` | `PASS=10 FAIL=0 SKIP=2`（e8 记「本机没有 git」，e13 静态 10 条照跑、行为段记「本平台没有 bash, git」） |
+
+`e11` 段最终 **11 / 0 / 0**（`PASS=11 FAIL=0 SKIP=0`），并在段尾 `register("R12 …")` 记录这条平台措辞/守卫顺序的修复（见 §3 R12）。
 
 ### 2.13 E12 — 已发布错包反向取证（12 / 0 / 0，task-19）
 
@@ -403,8 +448,8 @@ $ bash scripts/build-fpk.sh --print-version
 | R1 | peer 凭据不可读时 `_gateway_trusted()` 判为受信（fail open）：`uid is None` 不拒，socket 又是 0666 | `wb_proxy.py`（WP-E1 / api-integrator） | **已修并复测**：改为 `uid is None` 直接拒绝 + `peer credentials unavailable` 日志；e7 `10 / 0 / 0` |
 | R2 | `_test_release_engineering.py:71` 断言 README 声明的套件数与实际扫盘一致，`README.md` 仍写旧值（当时 `README.md:187` = 「77 个套件：60 个 Python + 17 个 JS」） | `README.md`（WP-E3 / packager） | **已修并复测**：现为「85 个套件：66 个 Python + 19 个 JS」，`python3 tests/_test_release_engineering.py` → `Ran 6 tests` / `OK` / exit 0 |
 | R3 | `_test_usage_share.js` `PASS=12 FAIL=3`：三条 summary 断言取到 `null`（测试要裸 `<td data-label="总 Token">`，而汇总行/模型行在该 `<td>` 上加了 `title=` 属性） | `dashboard.html` + 该套件（WP-E2 / ui-panel） | **已修并复测**：`node tests/_test_usage_share.js` → `PASS=15 FAIL=0` |
-| R4 | 最终包缺失/漂移（`payload 含 server/wb_export.py` 失败、`包内 server/** 与仓库逐字节一致` 失败、`verify-fpk` 2 条失败、交付文档 5 处 `PENDING_*`） | WP-E3 打包时序 | **已消除**：最终包 412737 字节上 e5 `55 / 0 / 0`、`verify-fpk` `71 passed / 0 failed`、`grep -c PENDING` = 0 |
-| R5 | 无 `AF_UNIX` 的平台上 `e6_device` 直接调 `unix_request()` 而**没有平台守卫** → 抛 `RuntimeError`，整段崩溃（E10 预演子进程 `FAIL=1`，失败名「段 e6_device 自身没有崩溃」） | `tests/_test_phase_e_verify.py`（我自己的写域） | **已修并复测**：`DEVICE_SOCK` 存在性判断之后加 `needs_unix("真机 socket 只读探针")` 早退；E10 子进程 `PASS=159 FAIL=0 SKIP=12`、父段 `6 / 0 / 0` |
+| R4 | 最终包缺失/漂移（`payload 含 server/wb_export.py` 失败、`包内 server/** 与仓库逐字节一致` 失败、`verify-fpk` 2 条失败、交付文档 5 处 `PENDING_*`） | WP-E3 打包时序 | **已消除**：最终包 412737 字节上（当时）e5 `55 / 0 / 0`、`verify-fpk` `71 passed / 0 failed`、`grep -c PENDING` = 0（e5 现为 `56 / 0 / 0`，见 §2.6） |
+| R5 | 无 `AF_UNIX` 的平台上 `e6_device` 直接调 `unix_request()` 而**没有平台守卫** → 抛 `RuntimeError`，整段崩溃（E10 预演子进程 `FAIL=1`，失败名「段 e6_device 自身没有崩溃」） | `tests/_test_phase_e_verify.py`（我自己的写域） | **已修并复测**：`DEVICE_SOCK` 存在性判断之后加 `needs_unix("真机 socket 只读探针")` 早退；E10 子进程 `PASS=159 FAIL=0 SKIP=12`（该快照；task-20 最终复跑为 `PASS=201 FAIL=0 SKIP=13`，父段 `8 / 0 / 0`，见 §2.11）、父段 `6 / 0 / 0` |
 | R6 | **提交前置风险**：`wb_export.py`（`wb_proxy.py:54` 顶层 `import wb_export`）、`tests/_test_cockpit_export.py`、`tests/_test_phase_e_ui2.js`、`tests/_test_phase_e_verify.py` 以及整个 `docs/`（4 个文件）都还是 **untracked（`??`）**；若用 `git commit -am` 提交，这些文件不会进 commit | 提交动作（git 由 Lead 执行） | **已闭环**：`55dfad2` 已把这些文件全部纳入版本库（`git ls-files` 命中，工作树只剩本套件本次的修改），e8「包内文件相对 HEAD 无未提交改动」已由 SKIP 转 PASS |
 | R7 | **CI 假红（v1.6.17.1 tag CI 三平台全红）**：`actions/checkout` 是 shallow clone（depth 1）→ `merge-base --is-ancestor 9dff35f HEAD` 报 128、annotated tag 对象不可达；runner 非 root → `setpriv` 切 uid 的探针以 127 失败。三条都是**套件的断言假设了本机环境**，不是交付件缺陷（包 job 与 tag 门禁都是绿的） | `tests/_test_phase_e_verify.py`（我自己的写域） | **已修并复算**：`e8` 加 shallow/对象可达性判定后记 SKIP（完整 clone 仍 PASS）、`e2b` 加 `needs_root()`、新增 `e11` 常驻预演；真 shallow clone 里 `run_all --jobs 4` 由 `84 passed, 1 failed` 变为 `85 passed, 0 failed, 0 skipped`（§2.12） |
 
@@ -414,8 +459,11 @@ $ bash scripts/build-fpk.sh --print-version
 
 | R10 | **跨平台风险**：`tests/_test_release_pipeline.py` 原用 `"file://" + self.work` 拼 clone URL；Windows 上 `self.work` 是 `C:\Users\…\Temp\…`，拼出 `file://C:\Users\…`（反向斜杠）→ 该用例会在 windows-latest 上红 | `tests/_test_release_pipeline.py`（packager；Lead 代为修复） | **已修并复测关闭**：Lead 加 `import pathlib` 并改成 `source = pathlib.Path(self.work).resolve().as_uri()`（`:152`）。我的复测：`python3 tests/_test_release_pipeline.py` → `Ran 8 tests / OK`；e13 三条断言全 PASS（代码无 `file://" + ` 拼接、有 `as_uri()`、每个 `subprocess.run(` 走 `cwd=`），并把「裸拼形状 `file://C:\…` 在 git 眼里非法（rc 128 no path specified）」留作**常驻反证断言**，防止回退 |
 | R11 | dispatch 的版本下限只由「看得见的 tag」保证（登记，非缺陷） | `scripts/build-fpk.sh` + CI | **登记为有意口径差异**（§5）：只看得见 `v1.6.10/.1/.2 + v1.6.17.1` 的克隆里 dispatch 派生 `1.6.10.3`；`fnos/manifest` 的 version 是占位值 `1.6.10`（构建时被 `write_manifest` 覆写），所以「派生值 < manifest.version 就拒绝」抓不到它。判定**可接受**（dispatch 不发 Release、origin 已镜像全部 54 个 tag） |
+| R12 | **CI 假红（windows-latest 腿唯一一条红，task-20）**：`e11` 的非 root 断言只认「切 uid 需要 root」这一句措辞，而 Windows 既没有 `socket.AF_UNIX` 也没有 `os.geteuid`，`needs_unix()` 先于 `needs_root()` 命中、skip 文案是 AF_UNIX 那条 → 把「按设计跳过」判成红（CI run 37891379131，原文见 §2.12） | `tests/_test_phase_e_verify.py`（我自己的写域） | **已修**：`SKIP_NO_UNIX`/`SKIP_NO_ROOT`/`ENV_SKIP_REASONS` 常量做单一真相源；断言改成「项目名 `e2b peer uid 矩阵` 出现在 SKIP 行」+「理由 ∈ `ENV_SKIP_REASONS`」+「该项目绝不出现在 FAIL 行」，并加两条防空跑断言（段名确实命中、子跑恰好 `PASS=0 FAIL=0 SKIP=1`）——没有弱化成只看 `SKIP=1`。同一份 Windows 形状输出上旧断言 `False` / 新断言 `True`；`e11` 转 `11 / 0 / 0`。**同类审计**（Windows / 无 AF_UNIX 下逐条复核）与「缺 `git` 时 `e8` 崩段」「钉死别人测试条数」两处一并修掉，审计表见 §2.12 |
+| R13 | **状态耦合（登记）**：`e5` 原先写死「`verify-fpk` 0 failed」，而 `scripts/verify-fpk.sh` 最后一条是「包 == 本树此刻会构建的东西」——HEAD 一旦越过发布 tag（`9b6c630` 相对 `v1.6.17.1` 在 `adac7eb`），本树派生 `1.6.17.2` 而包是 `1.6.17.1`，这条必然改口（实测 70 passed / 1 failed，唯一红就是它） | `tests/_test_phase_e_verify.py`（我自己的写域） | **已修（状态感知）**：先比「本树派生版本 vs 包 manifest 版本」——相等要求 0 failed；不等要求**恰好 1 条失败且失败名就是 `the package is what this tree builds`** + 通过条数仍成规模 + 退出码 0 或仅因这一条而 1。**不是产品缺陷**（verify-fpk 的行为正确），登记以免下次误判 |
+| R14 | **平台耦合（登记）**：`scripts/verify-fpk.sh` 的网关探针是 unix socket 客户端（`:330` / `:379` `socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)` 连 `<payload>/app.sock`；`:126` 断言 `cmd/main` 带 `--unix-socket`；`:416` 断言 socket `0666`），所以没有 `AF_UNIX` 的平台（windows-latest）整个沙箱跑不起来——`e5` 调它会多出三条假红（`the gateway socket is world-writable`、`the gateway signs the NAS user in (exit 1, wanted 0)`、`...and still does when the session header is gone`），实测同一份包在 Windows 形状的进程里 67 passed / 4 failed | `tests/_test_phase_e_verify.py`（我自己的写域） | **已修**：`e5` 在跑沙箱前判 `HAS_UNIX`，没有 `AF_UNIX` 就 `skip`（「verify-fpk 沙箱（网关探针需要 socket.AF_UNIX）」）+ `register("R14 …")`，上面的 tar/命名/manifest/payload/checksum 断言照跑。`scripts/verify-fpk.sh` 本身**不需要改**（它只在本机/NAS 上跑，那里有 `AF_UNIX`），登记以免下次在 Windows 上误判成包缺陷 |
 
-以上共发现 **7 个真实缺陷（R1/R2/R3/R5/R7 在代码与套件侧，R8 在发布流水线侧，R10 在跨平台）+ 1 项登记（R11，非缺陷）**：R1/R2/R3/R5/R7 已修复、我逐条复测转绿；R8 的 payload 经取证无问题、其修复 R9 已由我独立复现红/绿；**R10 已由 Lead 修复并由我复测关闭（e13 三条断言 + 常驻反证）**；R11 是登记项不是缺陷；R4 属「等最终包」的时序红，重建后一次性转绿；**R6 是提交动作上的前置条件，已随 `55dfad2` 闭环**。**当前无遗留未修复缺陷。**
+以上共发现 **7 个真实缺陷（R1/R2/R3/R5/R7 在代码与套件侧，R8 在发布流水线侧，R10 在跨平台）+ 1 项登记（R11，非缺陷）**：R1/R2/R3/R5/R7 已修复、我逐条复测转绿；R8 的 payload 经取证无问题、其修复 R9 已由我独立复现红/绿；**R10 已由 Lead 修复并由我复测关闭（e13 三条断言 + 常驻反证）**；R11 是登记项不是缺陷；R4 属「等最终包」的时序红，重建后一次性转绿；**R6 是提交动作上的前置条件，已随 `55dfad2` 闭环**。task-20 又发现并修掉三处**我自己套件**的问题：**R12（windows-latest 腿唯一那条红 = 平台措辞 + 守卫顺序，已修，`e11` → 11/0/0）**、**R13（`e5` 的包版本断言与 HEAD 位置耦合，已改为状态感知，登记为「不是产品缺陷」）**、**R14（`e5` 无条件调 `verify-fpk.sh`，而该沙箱的网关探针依赖 `socket.AF_UNIX`；无 `AF_UNIX` 时改为 SKIP + 登记，`scripts/verify-fpk.sh` 本身不改）**。**当前无遗留未修复缺陷。**
 
 ## 4. 未验证与范围外
 
@@ -427,7 +475,7 @@ $ bash scripts/build-fpk.sh --print-version
 6. **真机上的写操作**：设备现已装 1.6.17.1，只读探针（E6）在真机上验到 `authenticated: true`、`server/**` 与仓库逐字节一致；但安装/重启/升级全部由用户在应用中心完成，**我一次都没写过设备**，所以「升级会不会丢数据、卸载是否干净」仍不在验证范围。
 7. **上游 tag 之后的每日同步**：`sync-upstream.yml` 的实际运行（含冲突中止）未在 CI 上观察。
 8. **第二波 UI 的运行时行为（`#btnExportCockpit` 点击流）**：我只独立验了服务端契约（§2.10）与「该按钮经 `wbUrl()` 汇聚点、无新增绝对路径调用」（§2.4），按钮的 DOM 交互由写者套件 `tests/_test_phase_e_ui2.js` 覆盖、其文件与仓库逐字节进包（§2.6），我没有在真浏览器里点过。
-9. **windows-latest 上的真跑**：本机是 Linux，只能做「删掉 `socket.AF_UNIX`」的预演（E10，子进程 `PASS=159 FAIL=0 SKIP=12`）与静态检查（`hashlib`、`tempfile`、无 `AF_UNIX` 裸用）；Windows 实际的路径分隔符、`tar.exe`/`bash` 差异、node 版本等，要等 CI 结果确认。E10 已经把这变成常驻断言；`e11` 另把 CI 的 **shallow clone + 非 root** 形状也在本机做成常驻断言（`git clone --depth 1 file://…` 后只跑 `e8`/`e2b`），但**没有真的在 Windows runner 上跑过**——本轮 CI 之后仍以 CI 的 windows-latest 作业为准。
+9. **windows-latest 上的真跑**：本机是 Linux，只能做「整棵树删掉 `socket.AF_UNIX`／`socketserver.Unix*`／`os.geteuid`」的预演（E10，子进程 `PASS=201 FAIL=0 SKIP=13`，父段 8/0/0）与静态检查（`hashlib`、`tempfile`、无 `AF_UNIX` 裸用）；Windows 实际的路径分隔符、`tar.exe`/`bash` 差异、node 版本等，要等 CI 结果确认。E10 已经把这变成常驻断言（且把形状沿 `PYTHONPATH` 的 `sitecustomize` 传给孙进程，断言孙辈解释器为 `False False`）；`e11` 另把 CI 的 **shallow clone + 非 root** 形状也在本机做成常驻断言（`git clone --depth 1 file://…` 后只跑 `e8`/`e2b`/`e11`），但**没有真的在 Windows runner 上跑过**。task-20 修掉的 R12（平台措辞 + 守卫顺序）同样只能用同一份 Windows 形状输出复算（旧断言 `False` / 新断言 `True`），**真 Windows 以 CI 的 windows-latest 作业为准**。R14 提醒的边界同样只能靠这种预演发现：`e5` 在无 `AF_UNIX` 时已改为跳过 `verify-fpk.sh` 沙箱，所以 `scripts/verify-fpk.sh` 的网关探针**在真 Windows 上从未被本套件要求跑通**（它本来也只在本机/NAS 上跑）。
 10. **错包是否被任何人装过**：我只能证明 GitHub 侧 `download_count = 0`、且设备 `/vol1/@appcenter/workbuddy2api/server/**` 与仓库（= 错包 payload）逐字节一致，因此**即使有人装了错包，跑着的也是同一份代码**；但「有没有人装过」这件事我无法从任何一边验证，只能采信 Lead 的说明。另：重指 tag 后 Release 资产会被重建，我**没有对 GitHub Release 做任何写操作**（全程只读下载），这一步由 Lead 执行。
 11. **R10 在真 Windows 上的表现**：我在 Linux 上用 Windows 会拼出的同一串 URL（`file://C:\…`）实测 git 报 rc 128，据此判定原写法有跨平台风险；Lead 已改成 `pathlib.Path(...).as_uri()` 并复测关闭（§2.14）。但**没有在 Windows runner 上跑过**修正后的套件，且若该 runner 的 `bash` 不在 PATH 上，那 5 条行为用例会走 `skipTest`（rc 0）而不是真跑。以 CI 的 windows-latest 作业为准。
 
@@ -447,8 +495,9 @@ $ bash scripts/build-fpk.sh --print-version
 ## 6. 交付物与指纹
 
 - 报告：本文档（`docs/phase-e-verify.md`，不在 fpk payload 内）。
-- 验证套件：`tests/_test_phase_e_verify.py`（2290 行，116110 字节，sha256 `f5fe81a94f9932bea728d341e96852fd9ded444e4d9dfc7bfd1f2a96fb571c28`）。**14 段**：`e1_suites` / `e2_gateway` / `e2_peer_matrix` / `e3_mount` / `e4_credit` / `e5_package` / `e6_device` / `e7_hardening` / `e8_delivery` / `e9_cockpit_export` / `e10_platform_sim` / `e11_ci_rehearsal` / `e12_released_pkg` / `e13_release_pipeline`；支持段名子串过滤，环境变量 `WB_PHASE_E_STRICT`、`WB_PKG`、`WB_DASHBOARD_PATH`、`WB_GO_IMPORT_GO`、`WB_COCKPIT_SAMPLE`、`WB_WRONG_PKG`，并可在无 `socket.AF_UNIX` 的平台（段记 SKIP）与 shallow clone / 非 root runner 上整跑；`e12` 在没有已发布错包副本时记 SKIP（CI 走这条）；`e13` 的所有 repo fixture 都在 `tempfile` 里建（不写工作树、不需要网络）。
+- 验证套件：`tests/_test_phase_e_verify.py`（2491 行，129406 字节，sha256 `7ca9f61cb75e615697b7ce0a18ad0fe3e65da9ab81603ba1de7709fcd09c74ff`）。**14 段**：`e1_suites` / `e2_gateway` / `e2_peer_matrix` / `e3_mount` / `e4_credit` / `e5_package` / `e6_device` / `e7_hardening` / `e8_delivery` / `e9_cockpit_export` / `e10_platform_sim` / `e11_ci_rehearsal` / `e12_released_pkg` / `e13_release_pipeline`；支持段名子串过滤，环境变量 `WB_PHASE_E_STRICT`、`WB_PKG`、`WB_DASHBOARD_PATH`、`WB_GO_IMPORT_GO`、`WB_COCKPIT_SAMPLE`、`WB_WRONG_PKG`，并可在无 `socket.AF_UNIX` 的平台（段记 SKIP）与 shallow clone / 非 root runner 上整跑；`e12` 在没有已发布错包副本时记 SKIP（CI 走这条）；`e13` 的所有 repo fixture 都在 `tempfile` 里建（不写工作树、不需要网络）。task-20 的改动（两批）：第一批 = `HAS_GIT` + `SKIP_NO_UNIX`/`SKIP_NO_ROOT`/`ENV_SKIP_REASONS` 常量、`e11` uid 断言重写（R12）、`e5` 包版本断言状态感知（R13）、`e8`/`e13` 缺工具走 SKIP、三处「钉别人测试条数」放松；第二批 = `e10` 改成整棵树 Windows 形状（`PLATFORM_SIM_CUSTOMIZE` 走 `PYTHONPATH`）+ 孙辈解释器形状断言、`e5` 在无 `AF_UNIX` 时跳过 `verify-fpk.sh` 沙箱（R14）。全套 **PASS=266 FAIL=0 SKIP=2**（分段：e1 10 / e2 14 / e2b 4-0-1 / e3 32 / e4 26 / e5 56 / e6 3 / e7 10 / e8 14-0-1 / e9 35 / e10 8 / e11 11 / e12 12 / e13 31）。改动行号（`git diff -U0`，新文件行号）：`71`（HAS_GIT）、`92-103`（共用理由常量）、`112` / `125`（needs_unix/needs_root 用常量）、`1153` / `1157`（e5 取 `pkg_version`）、`1250-1279`（e5 verify-fpk：无 `AF_UNIX` 先 SKIP + R14 登记）、`1284-1313`（e5 verify-fpk 状态感知判定）、`1370-1378`（e8 缺 git gate）、`1748-1800`（`PLATFORM_SIM_CUSTOMIZE`）、`1802-1860`（e10 的 `PYTHONPATH` 传递 + 孙辈形状断言）、`1972-2002`（e11 uid 断言 + 两条防空跑）、`2004-2022`（`register("R12 …")`）、`2275-2279`（e13 bash/git 守卫）、`2376-2380` / `2385-2396` / `2416-2418`（三处条数断言放松）。
+- 本报告：`docs/phase-e-verify.md`（503 行）。报告自身的 sha256 只在最后一次编辑之后才定得下来，所以写在这里会立刻失效——我在交给 Lead 的收口消息里给出最终 sha256（写本行不改行数，故行数在定稿前就已稳定）。
 - 最终包指纹（我独立复算，未改动）：`dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk`，412737 字节，sha256 `5edc6c972e206181b4efeb49fd1c804a5ccb232b6c63a0ce5ed76498d64bbc27`，md5 `d45e598420425a9f992895445f3ef1ff`，manifest `checksum`（app.tgz md5）`7d66e48d4d7738192c0cf7499eb06666`。
 - 已发布错包指纹（只读下载物，`/tmp/wb-wrongpkg/WorkBuddy2API-Hub_1.6.10.3_all.fpk`）：411262 字节，sha256 `c5b7da5fe4f35a5c8ef3327cb192227f9d86a6b86ed40744586a0d3945e25351`，md5 `402ddfd3ebaa9a7f58ed89babe9a74de`，manifest `version = 1.6.10.3` / `checksum = 36039fe3d92f180b1a5e96256fc974be`（§2.13）。
-- 本条验证结论对应的工作树：HEAD `55dfad2`（tag `v1.6.17.1` 已打，`cat-file -t` = `tag`），本轮我的改动只有 `tests/_test_phase_e_verify.py` 与 `docs/phase-e-verify.md` 两个文件，仍未 `git commit`（git 由 Lead 做）；此刻 `git status --porcelain` 里另有 packager 在改的 `scripts/build-fpk.sh`、`.github/workflows/{build-fpk,sync-upstream}.yml`、`README.md`、`docs/phase-e-release-notes.md` 与未跟踪的 `tests/_test_release_pipeline.py`（树里套件数随之 85→86，README 已同步为「86 个套件：67 个 Python + 19 个 JS」）。**包内文件一个字节未动**：412737 字节的包仍然有效、无需重打包，`verify-fpk.sh` 对它仍是 71 passed / 0 failed。
+- 本条验证结论对应的工作树：task-18 那一刻是 HEAD `55dfad2`（tag `v1.6.17.1` 已打，`cat-file -t` = `tag`）；task-20 复跑时 HEAD 已是 `9b6c630`（`v1.6.17.1` 在 `adac7eb` 上，即 HEAD 越过该 tag 一个提交）。本轮我的改动只有 `tests/_test_phase_e_verify.py` 与 `docs/phase-e-verify.md` 两个文件，仍未 `git commit`（git 由 Lead 做）；task-20 复跑时 `git status --porcelain` 只剩 `M docs/phase-e-release-notes.md`、`M docs/phase-e-verify.md`、`M tests/_test_phase_e_verify.py`（packager 的 `scripts/**`、`.github/**`、`README.md`、`tests/_test_release_pipeline.py` 均已提交；树里 86 个套件，README 已同步为「86 个套件：67 个 Python + 19 个 JS」）。**包内文件一个字节未动**：412737 字节的包仍然有效、无需重打包；`verify-fpk.sh` 对它当前报 `70 passed / 1 failed`（唯一红 `the package is what this tree builds`，因为本树此刻派生 `1.6.17.2`，见 §2.6 与 R13）——HEAD 回到发布 tag 时同一命令仍是 71 passed / 0 failed。
 

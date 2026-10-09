@@ -68,6 +68,7 @@ HAS_UNIX = hasattr(socket, "AF_UNIX")
 #: external steps are skipped when their tool is absent.
 HAS_TAR = shutil.which("tar") is not None
 HAS_BASH = shutil.which("bash") is not None
+HAS_GIT = shutil.which("git") is not None
 
 
 def sha256_file(path):
@@ -88,6 +89,18 @@ def md5_file(path):
     return h.hexdigest()
 
 
+#: The two "this host cannot run that probe" reasons, as shared constants.
+#: They are compared against in e11, so the assertion must not re-type the
+#: prose and must accept either one: which guard fires first is the platform's
+#: choice (Windows has neither AF_UNIX nor `geteuid`, so `needs_unix()` wins
+#: there; a POSIX CI runner has AF_UNIX but cannot switch uids, so
+#: `needs_root()` wins). Pinning one sentence is what turned the
+#: windows-latest leg red in CI run 37891379131.
+SKIP_NO_UNIX = "本平台没有 socket.AF_UNIX（Windows）：网关 socket 传输不存在"
+SKIP_NO_ROOT = "切 uid 需要 root（CI runner 非 root）：本段跳过"
+ENV_SKIP_REASONS = (SKIP_NO_UNIX, SKIP_NO_ROOT)
+
+
 def needs_unix(label):
     """Skip (and answer True) when this host has no AF_UNIX transport.
 
@@ -96,7 +109,7 @@ def needs_unix(label):
     """
     if HAS_UNIX:
         return False
-    skip(label, "本平台没有 socket.AF_UNIX（Windows）：网关 socket 传输不存在")
+    skip(label, SKIP_NO_UNIX)
     return True
 
 
@@ -109,7 +122,7 @@ def needs_root(label):
     """
     if getattr(os, "geteuid", lambda: -1)() == 0:
         return False
-    skip(label, "切 uid 需要 root（CI runner 非 root）：本段跳过")
+    skip(label, SKIP_NO_ROOT)
     return True
 
 
@@ -1137,9 +1150,11 @@ def e5_package():
                                             stdout=subprocess.PIPE).stdout
                              .decode("utf-8", "replace").splitlines())
         manifest = os.path.join(tmp, "manifest")
+        pkg_version = ""
         if os.path.exists(manifest):
             text = open(manifest, encoding="utf-8", errors="replace").read()
             fields = dict(re.findall(r"^(\w+)\s*=\s*(.*)$", text, re.M))
+            pkg_version = fields.get("version") or ""
             note("manifest", {k: fields.get(k) for k in
                               ("appname", "version", "platform", "display_name",
                                "service_port", "checksum")})
@@ -1232,17 +1247,70 @@ def e5_package():
     if not HAS_BASH:
         gate("bash 可用（跑 scripts/verify-fpk.sh 的必要条件）", "本机没有 bash")
         return
+    # scripts/verify-fpk.sh drives the payload over its *unix* gateway socket
+    # (it imports socket.AF_UNIX inside a probe, and cmd/main is checked for
+    # --unix-socket), so on Windows the sandbox cannot run at all: the probes die
+    # with "AttributeError: module 'socket' has no attribute 'AF_UNIX'". Judging
+    # that as a package defect would be wrong -- the package is fine, the probe
+    # transport does not exist there. Everything above (payload identity, naming,
+    # manifest, checksum) is transport-independent and keeps running.
+    if not HAS_UNIX:
+        register("R14 verify-fpk 的网关探针依赖 socket.AF_UNIX",
+                 "scripts/verify-fpk.sh:330/:379 socket.socket(socket.AF_UNIX, SOCK_STREAM); "
+                 ":126 断言 cmd/main 带 --unix-socket。Windows 上没有 AF_UNIX，"
+                 "整个沙箱跑不起来（实测同一份包在 Windows 形状的进程里 67 passed / 4 failed，"
+                 "多出的三条全是网关探针）。故本段在无 AF_UNIX 时跳过沙箱调用，"
+                 "只记一条 SKIP，不判缺陷。")
+        skip("verify-fpk 沙箱（网关探针需要 socket.AF_UNIX）",
+             "本平台没有 socket.AF_UNIX（Windows）：verify-fpk 的网关探针跑不了"
+             "（包内的 tar/命名/manifest/checksum 断言上面已经全跑过）")
+        return
+    # What this checkout would build *right now*. verify-fpk.sh ends with
+    # "the package is what this tree builds": it compares the packaged manifest
+    # version with this derived value. That holds while HEAD is the released tag
+    # and stops holding the moment HEAD moves one commit past it (the builder then
+    # names the next ordinal), so the shape is judged instead of a bare count.
+    derived = ""
+    pv = subprocess.run(["bash", "scripts/build-fpk.sh", "--print-version"], cwd=ROOT,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+    if pv.returncode == 0:
+        plines = [ln.strip() for ln in
+                  pv.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+        derived = plines[-1] if plines else ""
     verify = subprocess.run(["bash", "scripts/verify-fpk.sh", PKG_PATH], cwd=ROOT,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             timeout=600)
     text = verify.stdout.decode("utf-8", "replace")
-    note("verify-fpk 尾行", [ln for ln in text.splitlines() if ln.strip()][-2:])
-    match = re.search(r"(\d+) passed, (\d+) failed", text)
-    if match:
-        check("verify-fpk: 0 failed", int(match.group(2)) == 0, match.group(0))
-    else:
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", text)  # verify-fpk colours its output
+    note("verify-fpk 尾行", [ln for ln in plain.splitlines() if ln.strip()][-2:])
+    match = re.search(r"(\d+) passed, (\d+) failed", plain)
+    same_tree = bool(pkg_version) and derived == pkg_version
+    if not match:
         gate("verify-fpk 打印了汇总行", text[-300:])
-    check("verify-fpk 退出码 0", verify.returncode == 0, verify.returncode)
+    else:
+        n_pass, n_fail = int(match.group(1)), int(match.group(2))
+        named = [ln.split("failed:", 1)[1].strip() for ln in plain.splitlines()
+                 if ln.strip().startswith("failed:")]
+        note("包版本 vs 本树派生版本",
+             {"package": pkg_version, "deriving": derived, "same_tree": same_tree,
+              "failed_names": named})
+        if same_tree:
+            check("verify-fpk: 0 failed（HEAD 仍在包对应的发布 tag 上）", n_fail == 0,
+                  "%s | failed=%s" % (match.group(0), named))
+        else:
+            # The tree has moved past the tag, so exactly one assertion may object
+            # - the one that compares the package with what this tree builds - and
+            # it must object *by name*. Every other assertion still has to pass.
+            check("verify-fpk 只反对「包版本 != 本树派生版本」这一条（树已越过发布 tag）",
+                  n_fail == 1 and named == ["the package is what this tree builds"]
+                  and bool(pkg_version) and derived != pkg_version,
+                  "%s | %s | package=%s deriving=%s" % (match.group(0), named,
+                                                        pkg_version, derived))
+            check("verify-fpk 的其余断言仍成规模（不是脚本半途夭折）", n_pass >= 60,
+                  n_pass)
+    check("verify-fpk 退出码 0，或仅因树越过 tag 而 1",
+          verify.returncode == 0 or (verify.returncode == 1 and not same_tree),
+          verify.returncode)
 
 
 # ---------------------------------------------------------------------------
@@ -1299,6 +1367,15 @@ def e6_device():
 
 def e8_delivery():
     section("WP-E4 e8 — 交付纪律：提交前/提交后都成立 + 设备上跑的就是交付版")
+    # Every fact in this section is a git question (HEAD, shallow, tag objects,
+    # `ls-files dist`, `status --porcelain`). Asking them without git would raise
+    # FileNotFoundError and turn a missing tool into a FAIL - the same mistake
+    # class as the e11 uid-matrix assertion (run 37891379131): environment, not
+    # defect. Absent git means SKIP.
+    if not HAS_GIT:
+        gate("交付纪律（HEAD / tag / 工作树 / dist 未入库，需要 git 才问得出）",
+             "本机没有 git")
+        return
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                           stdout=subprocess.PIPE).stdout.decode().strip()
     note("HEAD", head)
@@ -1669,19 +1746,43 @@ def e9_cockpit_export():
 PLATFORM_SIM = '''\
 """Re-run the suite with the AF_UNIX pieces of this platform removed."""
 import runpy
-import socketserver
 import sys
+
+# The sitecustomize.py this section puts on PYTHONPATH has already removed
+# socket.AF_UNIX / socketserver.Unix* and os.geteuid for this interpreter *and*
+# for every grandchild it spawns, so this script only has to re-enter the suite.
+_target = sys.argv[1]
+sys.argv = [_target]
+runpy.run_path(_target, run_name="__main__")
+'''
+
+PLATFORM_SIM_CUSTOMIZE = '''\
+"""Windows-shaped interpreter: no socket.AF_UNIX, no socketserver.Unix*, no geteuid.
+
+CPython imports sitecustomize at startup when its directory is on PYTHONPATH, so
+putting this file there makes the shape apply to the whole process tree - the
+child that runs the suite *and* the grandchildren it spawns (e11 shells out to a
+shallow clone and to a non-root child). Deleting the attributes inside one
+process instead is what let the windows-latest wording bug (R12) slip past the
+first version of this rehearsal: the grandchildren kept a full Linux socket
+module and never produced the AF_UNIX skip text CI complained about.
+"""
+import os
 import socket
+import socketserver
 
 for _mod, _names in ((socket, ("AF_UNIX",)),
-                     (socketserver, ("UnixStreamServer", "UnixDatagramServer"))):
+                     (socketserver, ("UnixStreamServer", "UnixDatagramServer",
+                                     "ThreadingUnixStreamServer",
+                                     "ThreadingUnixDatagramServer",
+                                     "ForkingUnixStreamServer",
+                                     "ForkingUnixDatagramServer"))):
     for _name in _names:
         if hasattr(_mod, _name):
             delattr(_mod, _name)
 
-_target = sys.argv[1]
-sys.argv = [_target]
-runpy.run_path(_target, run_name="__main__")
+if hasattr(os, "geteuid"):
+    del os.geteuid
 '''
 
 
@@ -1698,10 +1799,19 @@ def e10_platform_sim():
         script = os.path.join(tmp, "no_af_unix.py")
         with open(script, "w", encoding="utf-8") as fh:
             fh.write(PLATFORM_SIM)
+        # sitecustomize.py on PYTHONPATH reaches every interpreter in the tree -
+        # this child *and* the grandchildren it spawns (e11 shells out to a
+        # shallow clone and to a non-root child). Removing the attributes only
+        # inside this child would leave those grandchildren with a full Linux
+        # socket module, which is how the windows-latest wording bug (R12)
+        # slipped past the first version of this rehearsal.
+        with open(os.path.join(tmp, "sitecustomize.py"), "w", encoding="utf-8") as fh:
+            fh.write(PLATFORM_SIM_CUSTOMIZE)
         env = dict(os.environ)
         env["WB_E1_NESTED"] = "1"          # e1 would launch run_all all over again
         env["WB_E10_NESTED"] = "1"
-        env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [tmp, ROOT, env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
         done = subprocess.run([sys.executable, script, os.path.abspath(__file__)],
                               cwd=ROOT, env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, timeout=280)
@@ -1723,6 +1833,30 @@ def e10_platform_sim():
         check("平台预演：没有 Traceback（没有未捕获的 AttributeError）",
               "Traceback (most recent call last)" not in text,
               [ln for ln in text.splitlines() if "Error" in ln][:3])
+        # Teeth check: e11 spawns its own children, and those grandchildren must
+        # see the Windows shape too (AF_UNIX missing wins over the root check).
+        # They cannot be observed through e11 here: e11 skips itself inside a
+        # nested run (WB_E1_NESTED/WB_E11_NESTED guard, so it never recurses), so
+        # no "uid 矩阵为什么被跳过" line exists in this output. The mechanism the
+        # hand-off relies on is PYTHONPATH: every interpreter started with this
+        # env imports the sitecustomize above. Probe exactly that, at depth.
+        env_probe = dict(env)
+        env_probe.pop("WB_E1_NESTED", None)
+        env_probe.pop("WB_E10_NESTED", None)
+        shape = subprocess.run(
+            [sys.executable, "-c",
+             "import os, socket; print(hasattr(socket, 'AF_UNIX'), hasattr(os, 'geteuid'))"],
+            cwd=ROOT, env=env_probe, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, timeout=60)
+        shape_out = shape.stdout.decode("utf-8", "replace").strip()
+        note("平台预演：孙辈解释器的形状（AF_UNIX, geteuid）", shape_out)
+        check("平台预演：同一 PYTHONPATH 下新起的解释器也是 Windows 形状"
+              "（e11 的子跑继承同一 env，这就是 R12 的复现机制）",
+              shape_out == "False False", (shape.returncode, shape_out))
+        check("平台预演：e11 在嵌套预演里自我跳过（所以上面那条形状断言才是覆盖）",
+              any("CI 预演" in ln and "[SKIP]" in ln for ln in text.splitlines())
+              or "[SKIP] CI 预演" in text,
+              [ln.strip() for ln in text.splitlines() if "CI 预演" in ln][:2])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1835,10 +1969,53 @@ def e11_ci_rehearsal():
               child2.returncode == 0, (child2.returncode, tail2))
         check("非 root 模拟：FAIL == 0", match2 is not None
               and int(match2.group(2)) == 0, tail2)
+        fails2 = [ln.strip() for ln in text2.splitlines()
+                  if ln.strip().startswith("[FAIL]")]
+        # Which guard wins is the platform's choice, not ours. A POSIX runner has
+        # AF_UNIX but (as CI) cannot switch uids, so e2b ends in the `needs_root()`
+        # skip; Windows has no AF_UNIX *and* no `geteuid`, so `needs_unix()`
+        # (tests/_test_phase_e_verify.py:619) fires first and the reason text is
+        # the AF_UNIX one. Pin the ITEM by name plus an environment-shaped
+        # reason instead of one exact sentence: asserting that sentence is what
+        # turned the windows-latest leg red in run 37891379131. Still not
+        # vacuous - the item must be present, must carry an environment reason,
+        # and must not be a FAIL.
+        uid_skips = [s for s in skips2 if "e2b peer uid 矩阵" in s]
+        uid_fails = [f for f in fails2 if "e2b peer uid 矩阵" in f]
+        # Accept either shared environment reason (see ENV_SKIP_REASONS); the
+        # ITEM name is the thing pinned, not one exact sentence.
+        uid_reason_ok = any(any(reason in s for reason in ENV_SKIP_REASONS)
+                            for s in uid_skips)
+        note("非 root 模拟：uid 矩阵为什么被跳过",
+             (uid_skips or uid_fails or ["（没有 e2b 的任何行）"])[0][:150])
         check("非 root 模拟：uid 矩阵记为 SKIP（不是 FAIL）",
-              any("切 uid 需要 root" in s for s in skips2), skips2[:4])
+              bool(uid_skips) and uid_reason_ok and not uid_fails,
+              {"skips": skips2[:4], "fails": fails2[:4]})
+        # Guard against the assertion silently testing nothing: the child has to
+        # have reached e2b (segment filter matched) and produced exactly that one
+        # skip - two ways the row above could read "no FAIL" while measuring air.
+        check("非 root 模拟：e2b 段确实被跑到（段名过滤命中，不是空跑）",
+              "e2b peer uid 矩阵" in text2, tail2)
+        check("非 root 模拟：子跑恰好 PASS=0 FAIL=0 SKIP=1（只有 uid 矩阵那一项）",
+              match2 is not None and match2.group(0) == "PASS=0 FAIL=0 SKIP=1",
+              match2.group(0) if match2 else tail2)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    register("R12 平台措辞/守卫顺序",
+             "Windows 既没有 socket.AF_UNIX 也没有 os.geteuid，所以 e2b 的 "
+             "needs_unix()（tests/_test_phase_e_verify.py:619）先于 needs_root() 命中，"
+             "skip 文案是 AF_UNIX 那条；此前 e11 只认「切 uid 需要 root」这一句，"
+             "于是 windows-latest 腿假红（CI run 37891379131）。现在断言钉住"
+             "「e2b peer uid 矩阵这一项被跳过」+「理由是共用常量 ENV_SKIP_REASONS "
+             "里的环境理由之一」+「绝不是 FAIL」，并加两条防空跑断言。"
+             "同类审计（Windows / 无 AF_UNIX 下逐条复核）：AF_UNIX 相关探针"
+             "（e2 socket 半段 / e2b / e3 / e6 / e7）都由 needs_unix 或 HAS_UNIX 门住；"
+             "setpriv+chown 类只出现在 needs_root 之后；/vol1/** 只读探针先判目录存在；"
+             "tar/bash/git 三个外部工具各有一道 gate，缺工具走 SKIP；"
+             "文本文件读取全部显式 encoding（无 cp1252 陷阱）；"
+             "路径比较都已 .replace(os.sep, '/')（e8:1410 与 _tree_digest）；"
+             "唯一断言产品措辞的地方是本套件自己的日志字符串（gateway: peer uid）"
+             "与 unittest 的 Ran/OK 字样，均与平台无关。")
 
 
 # --------------------------------------------------------------------------
@@ -2095,8 +2272,11 @@ def e13_release_pipeline():
           and 'ls-remote --exit-code --tags origin "refs/tags/${ours}"' in sync_text)
     check("同步工作流推 tag 前先确认 origin 上没有（幂等，不重复推）",
           'ls-remote --exit-code --tags origin "refs/tags/${upstream_tag}"' in sync_text)
-    if not HAS_BASH:
-        skip("发布流水线行为验证（fixture 里跑 build-fpk.sh）", "本平台没有 bash")
+    if not HAS_BASH or not HAS_GIT:
+        missing = ", ".join(n for n, ok in (("bash", HAS_BASH), ("git", HAS_GIT))
+                            if not ok)
+        skip("发布流水线行为验证（fixture 里跑 build-fpk.sh）",
+             "本平台没有 %s" % missing)
         return
     tmp = tempfile.mkdtemp(prefix="wb-e13-")
     try:
@@ -2193,15 +2373,27 @@ def e13_release_pipeline():
             gate("packager 的 tests/_test_release_pipeline.py 存在", "文件不在")
             return
         rc, out = _suite_run(os.path.join("tests", "_test_release_pipeline.py"), ROOT)
-        check("packager 的套件在本树独立跑绿（Ran 8 tests / OK）",
-              rc == 0 and "Ran 8 tests" in out and "OK" in out,
+        ran8 = re.search(r"Ran (\d+) tests", out)
+        check("packager 的套件在本树独立跑绿（Ran <n> tests / OK）",
+              rc == 0 and ran8 is not None and int(ran8.group(1)) > 0
+              and "OK" in out,
               "rc=%d tail=%r" % (rc, out.strip().splitlines()[-1] if out.strip() else ""))
         env = dict(os.environ)
         env["PATH"] = ""
         env.pop("PYTHONPATH", None)
         rc, out = _suite_run(os.path.join("tests", "_test_release_pipeline.py"), ROOT, env=env)
-        check("bash/git 都不在 PATH 上时该套件 5 条 SKIP 而不是崩（Windows 形状）",
-              rc == 0 and "skipped=5" in out, "rc=%d tail=%r" % (rc, out.strip().splitlines()[-1] if out.strip() else ""))
+        # Not "skipped=5": that pins the other owner's test count (add a case
+        # there and this line goes red for no defect). What matters is the shape
+        # - the suite still runs (static cases), the behaviour cases that need
+        # bash/git skip instead of crashing, exit code 0.
+        m_ran = re.search(r"Ran (\d+) tests", out)
+        m_skip = re.search(r"skipped=(\d+)", out)
+        n_ran = int(m_ran.group(1)) if m_ran else -1
+        n_skip = int(m_skip.group(1)) if m_skip else 0
+        check("bash/git 都不在 PATH 上时行为用例 SKIP 而不是崩（静态用例照跑，Windows 形状）",
+              rc == 0 and n_ran > 0 and n_skip >= 1 and n_skip < n_ran,
+              {"rc": rc, "ran": n_ran, "skipped": n_skip,
+               "tail": out.strip().splitlines()[-1] if out.strip() else ""})
         clone = os.path.join(tmp, "depth1")
         uri = pathlib.Path(ROOT).resolve().as_uri()
         rc, out = git_text(["clone", "--quiet", "--depth", "1", uri, clone])
@@ -2221,8 +2413,10 @@ def e13_release_pipeline():
             check("clone 确实是 depth 1（CI 的 tests job 就是这种 checkout）",
                   is_shallow(clone))
             rc, out = _suite_run(os.path.join("tests", "_test_release_pipeline.py"), clone)
+            ran_deep = re.search(r"Ran (\d+) tests", out)
             check("depth-1 clone 里 packager 套件也绿（CI 形状）",
-                  rc == 0 and "Ran 8 tests" in out and "OK" in out,
+                  rc == 0 and ran_deep is not None and int(ran_deep.group(1)) > 0
+                  and "OK" in out,
                   "rc=%d tail=%r" % (rc, out.strip().splitlines()[-1] if out.strip() else ""))
         with open(suite, "r", encoding="utf-8") as handle:
             suite_text = handle.read()

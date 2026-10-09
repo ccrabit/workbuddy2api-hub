@@ -33,15 +33,17 @@
 
 | 项 | 值 |
 |---|---|
-| 文件 | `WorkBuddy2API-Hub_1.6.17.1_all.fpk` |
-| 大小 | 411251 字节（401.6 KiB） |
-| sha256 | `a787acaaed5455da86059bd308fb0bf21ade13fe3e71d572489c273708c7e108` |
-| 包内 `app.tgz` 的 md5（即 `manifest` 里声明的 `checksum`） | `380f6c5fb598c92b456baf1b885340f7` |
+| 文件 | `WorkBuddy2API-Hub_1.6.17.1_all.fpk`（即本 Release 的附件） |
 | 旁置校验文件 | `WorkBuddy2API-Hub_1.6.17.1_all.fpk.sha256` |
+| payload | 26 个文件：`server/**` 21 个（与仓库逐字节一致）+ `ui/config`、`ui/images/64.png`、`ui/images/256.png`、`config/privilege`、`config/resource` |
 
-校验：`sha256sum -c WorkBuddy2API-Hub_1.6.17.1_all.fpk.sha256`，或直接与上表比对。
+校验：
 
-上表是**这个 Release 里的包**（CI 从 tag 构建）；自己在本机跑 `scripts/build-fpk.sh` 得到的包字节不同（tar 成员时间戳不同 → `app.tgz` 与 `checksum` 随之不同），但 **payload 的 26 个文件逐文件 md5 完全一致**——两边装出来的东西是同一个。这一版也对这个发布件跑过完整的包级验收（71 项断言全过，含包身份、`manifest` 与文件名的三处一致、payload 与仓库逐字节一致、网关免密两种形态）。
+```sh
+sha256sum -c WorkBuddy2API-Hub_1.6.17.1_all.fpk.sha256
+```
+
+这里不写死 sha256，是因为**每次构建的字节都不一样**：tar 成员时间戳一变，`app.tgz` 与其在 `manifest` 里声明的 `checksum` 就跟着变。所以判据是 payload 而不是字节：自己在本机跑 `scripts/build-fpk.sh` 得到的包与 Release 附件 **26 个文件逐文件 md5 完全一致**，只有字节数与 `checksum` 不同——两边装出来的东西是同一个。本次发布件本身也跑过完整的包级验收：**71 项断言全过**（包身份、文件名 / `manifest` / 目录三处一致、payload 与仓库逐字节一致、网关免密的两种形态），Release 附件旁边的 `.sha256` 就是它的真实指纹。
 
 ## 安装 / 升级
 
