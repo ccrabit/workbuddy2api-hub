@@ -2245,9 +2245,16 @@ def e13_release_pipeline():
         win_shape = ("file://"
                      + "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\wb-release-pipeline-x\\work")
         rc, url_out = git_text(["ls-remote", win_shape])
-        check("反证：裸拼出来的形状在 git 眼里仍是非法 URL（rc≠0、no path specified）",
-              rc != 0 and "no path specified" in url_out,
+        # Only the refusal is asserted: the wording is the platform's, and
+        # Windows words it "does not appear to be a git repository" where Linux
+        # says "no path specified". The control below is what proves the call
+        # itself is sound, so this stays a counter-assertion either way.
+        check("反证：裸拼出来的形状在 git 眼里不是可用的 URL（rc≠0）",
+              rc != 0,
               "rc=%d out=%r" % (rc, (url_out.splitlines() or [""])[0]))
+        rc_control, _ = git_text(["ls-remote", pathlib.Path(ROOT).resolve().as_uri()])
+        check("对照：同一次调用配上 pathlib 造出的 URL 能读到仓库（rc=0）",
+              rc_control == 0, "rc=%d" % rc_control)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
