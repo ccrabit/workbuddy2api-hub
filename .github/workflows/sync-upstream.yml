@@ -7,14 +7,29 @@ name: Sync from upstream
 #     tagged v<upstream release>.<commits since it>, and the package is built
 #     and attached to a release of that tag;
 #   * merge conflict -> aborted (no half-merged repository), an issue is opened
-#     or updated, and the run fails so the failure is visible in the Actions
-#     list as well.
+#     or updated, the conflicted files and the merge commands go into the run
+#     summary, and the run fails so the failure is visible in the Actions list
+#     as well - including when Issues are switched off and no issue can exist.
 #
 # The tag carries a fourth component because upstream tags a release days after
 # the commits that make it: "v1.6.10.7" says "upstream v1.6.10 plus the seven
 # commits we have on top". fnOS only offers an upgrade for a bigger number, and
-# scripts/build-fpk.sh derives the version the same way, so a tag and the
-# package built from it always agree.
+# scripts/build-fpk.sh derives the same number, so a tag and the package built
+# from it agree - provided the checkout can see an upstream release tag at all.
+# A fresh CI checkout of this fork sees the fork's own remote only, which is how
+# the release tag v1.6.17.1 once built a package called 1.6.10.3. Two things
+# keep that from happening again: this workflow mirrors upstream's release tags
+# to origin on every run, and build-fpk.yml hands the pushed tag down as VERSION
+# instead of leaving the version to a derivation.
+#
+# The conflict path below opens or comments on an issue, and it fails the run
+# either way. These are two independent signals on purpose: a conflict has to be
+# loud even when the issue cannot be written. Issues have to be enabled on this
+# repository (Settings -> General -> Features -> Issues) for the issue half to
+# work - without them `gh issue create` fails with "Resource not accessible by
+# integration (createIssue)" - so the step checks `has_issues` first, falls back
+# to an ::error:: annotation plus the run summary (with the conflicted files and
+# the merge commands), and only then exits non-zero.
 #
 # This fork is not a mirror: the default branch also carries the fnOS layer
 # (fnos/**, the gateway changes in wb_proxy.py and dashboard.html, the packaging
@@ -56,6 +71,30 @@ jobs:
           git fetch --tags --prune upstream
           echo "upstream $(git rev-parse --short "upstream/${UPSTREAM_BRANCH}")"
 
+      # Mirror upstream tags to origin: this fork's version scheme asks "what is
+      # the newest upstream release tag this checkout can see", and a fresh CI
+      # checkout sees this fork's remote only. Every upstream release tag is
+      # mirrored, not just the newest one, and on every run - including the runs
+      # where there is nothing to merge, which is exactly when the fork's tags
+      # can fall behind without anyone noticing.
+      # A tag pushed with GITHUB_TOKEN does not start a workflow run, so these
+      # tag pushes are only something to look at; the package job below is the
+      # explicit `uses:` call.
+      - name: Mirror upstream tags
+        run: |
+          set -e
+          mirrored=0
+          for upstream_tag in $(git tag --merged "upstream/${UPSTREAM_BRANCH}" --list 'v*' \
+            | grep -E '^v[0-9]+(\.[0-9]+){2}$' | sort -V); do
+            if git ls-remote --exit-code --tags origin "refs/tags/${upstream_tag}" > /dev/null 2>&1; then
+              continue
+            fi
+            git push origin "refs/tags/${upstream_tag}"
+            echo "mirrored upstream tag ${upstream_tag}"
+            mirrored=$((mirrored + 1))
+          done
+          echo "${mirrored} upstream tag(s) mirrored to origin"
+
       - name: Merge upstream
         id: merge
         run: |
@@ -82,16 +121,23 @@ jobs:
               echo "${behind} commit(s) from \`${upstream_ref}\` are now on \`${branch}\`."
             } >> "$GITHUB_STEP_SUMMARY"
           else
+            # Read the conflicted paths before aborting: `Report a conflict` runs
+            # in a later step, where the working tree is clean again and there is
+            # nothing left to list.
+            conflicted="$(git diff --name-only --diff-filter=U | tr '\n' ' ' | sed 's/ *$//')"
             git merge --abort
             echo "merged=false" >> "$GITHUB_OUTPUT"
             echo "conflict=true" >> "$GITHUB_OUTPUT"
+            echo "conflicted=${conflicted}" >> "$GITHUB_OUTPUT"
             echo "Merging ${upstream_ref} conflicted; the merge was aborted."
+            echo "conflicted paths: ${conflicted:-<none reported>}"
           fi
 
       - name: Report a conflict
         if: steps.merge.outputs.conflict == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFLICTED: ${{ steps.merge.outputs.conflicted }}
         run: |
           set -e
           branch="${{ github.event.repository.default_branch }}"
@@ -99,6 +145,12 @@ jobs:
           body="$(cat <<EOF
           Merging \`upstream/${UPSTREAM_BRANCH}\` into \`${branch}\` failed, so the sync stopped and
           the merge was aborted - this fork is still exactly where it was.
+
+          Conflicted files:
+
+          \`\`\`
+          ${CONFLICTED:-<none reported>}
+          \`\`\`
 
           Resolve it by hand:
 
@@ -114,13 +166,55 @@ jobs:
           EOF
           )"
 
-          number="$(gh issue list --state open --search "in:title \"${CONFLICT_TITLE}\"" \
-            --json number --jq '.[0].number // empty' | head -1)"
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --body "$body"
-          else
-            gh issue create --title "${CONFLICT_TITLE}" --body "$body"
+          # The issue is the durable half of "fail loudly"; the red run is the
+          # other half, and it must not depend on the issue. Issues can be
+          # switched off on the repository, and then `gh issue create` fails with
+          # "Resource not accessible by integration (createIssue)" - three
+          # scheduled runs did exactly that and left no trace but a red run. So:
+          # try the issue when it is possible, and always report loudly.
+          issues="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .has_issues 2>/dev/null || echo unknown)"
+          if [ "$issues" = "true" ]; then
+            number="$(gh issue list --state open --search "in:title \"${CONFLICT_TITLE}\"" \
+              --json number --jq '.[0].number // empty' | head -1)"
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body "$body" || issues="failed"
+            else
+              gh issue create --title "${CONFLICT_TITLE}" --body "$body" || issues="failed"
+            fi
           fi
+
+          if [ "$issues" != "true" ]; then
+            if [ "$issues" = "failed" ]; then
+              why="Opening or updating the issue failed (Resource not accessible by integration), so the detail is in this run's summary instead."
+            else
+              why="This repository has Issues disabled (Settings -> General -> Features -> Issues), so no issue was opened. Enabling them is all it takes: this step opens or updates the issue by itself once they are on."
+            fi
+            echo "::error::${CONFLICT_TITLE}: ${why}"
+            {
+              echo "### Upstream sync blocked by a merge conflict"
+              echo
+              echo "${why}"
+              echo
+              echo "Conflicted files:"
+              echo
+              echo '```'
+              echo "${CONFLICTED:-<none reported>}"
+              echo '```'
+              echo
+              echo "Resolve it by hand:"
+              echo
+              echo '```bash'
+              echo "git remote add upstream https://github.com/${UPSTREAM_REPO}.git  # once"
+              echo "git fetch upstream"
+              echo "git checkout ${branch}"
+              echo "git merge upstream/${UPSTREAM_BRANCH}       # fix the conflicts"
+              echo "git push origin ${branch}"
+              echo '```'
+              echo
+              echo "Run: ${run_url}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           exit 1
 
       - name: Tag this state as a release
@@ -139,15 +233,9 @@ jobs:
             exit 0
           fi
 
-          # Mirror it so the fork can say which upstream release it is based on.
-          # A tag pushed with GITHUB_TOKEN does not start a workflow run, so
-          # this tag is only something to look at; the package job below is the
-          # explicit `uses:` call.
-          if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null 2>&1; then
-            git push origin "refs/tags/${tag}"
-            echo "mirrored upstream tag ${tag}"
-          fi
-
+          # Upstream's release tags were already mirrored to origin right after
+          # the fetch, so the tag below is visible to anyone who checks this fork
+          # out - see the "Mirror upstream tags" step.
           # What this exact tree would be built as - the same number the tag
           # gets, so the release, the tag and the fpk all carry one version.
           version="$(bash scripts/build-fpk.sh --print-version)"

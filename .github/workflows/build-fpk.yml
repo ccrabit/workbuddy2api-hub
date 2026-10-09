@@ -2,7 +2,8 @@ name: Build the fnOS package
 
 # Three ways in:
 #   * a v* tag pushed to this fork by hand - a release of this fork, named
-#     v<upstream release>.<commits since it> (see sync-upstream.yml),
+#     v<upstream release>.<commits since it> (see sync-upstream.yml). A release
+#     tag on HEAD is the version as-is, whatever tags this checkout can see.
 #   * the "Run workflow" button, to build a package from a branch: that only
 #     produces a build artifact, never a release,
 #   * a `uses:` call from sync-upstream.yml, which already knows the tag.
@@ -40,7 +41,25 @@ jobs:
         env:
           PACKAGER: ${{ github.repository_owner }}
           PACKAGER_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: bash scripts/build-fpk.sh
+          # A pushed tag IS the release: hand its version down instead of letting
+          # the script derive it, because derivation reads the tags this checkout
+          # can see and a fresh checkout of this fork may not see upstream's -
+          # which is how the tag v1.6.17.1 once built 1.6.10.3. Empty on a branch
+          # build, where the derived version is the only answer there is.
+          TAG_REF: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: |
+          set -e
+          if [ -n "${TAG_REF}" ]; then
+            expected="${TAG_REF#v}"
+            derived="$(bash scripts/build-fpk.sh --print-version)"
+            if [ "${derived}" != "${expected}" ]; then
+              echo "::error::tag ${TAG_REF} asks for version ${expected}, but this tree derives ${derived} - refusing to publish a package the tag does not name"
+              exit 1
+            fi
+            echo "tag ${TAG_REF} builds version ${expected}"
+            export VERSION="${expected}"
+          fi
+          bash scripts/build-fpk.sh
 
       - name: Run the package through its lifecycle
         run: bash scripts/verify-fpk.sh

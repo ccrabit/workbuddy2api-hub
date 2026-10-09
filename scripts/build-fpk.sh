@@ -25,6 +25,15 @@
 # commits that make it - so a build from plain master has to be able to say
 # "newer than 1.6.10" without inventing an upstream tag of its own.
 #
+# A release tag sitting exactly on HEAD outranks all of that: "v1.6.17.1" on
+# HEAD IS version 1.6.17.1, whatever else the checkout can or cannot see. The
+# derivation below is a guess about intent; a tag is the intent. It also has to
+# be environment-independent: a fresh clone of this fork sees only the fork's
+# tags, so deriving v1.6.17.1 from them once produced 1.6.10.3 in CI while the
+# maintainer's tree (which had fetched upstream's v1.6.17) said 1.6.17.1.
+# sync-upstream.yml mirrors upstream's three-component tags to this fork so the
+# guess stays right for untagged builds too.
+#
 # The next release is one more than the newest release tag of the same base
 # (see release_tags below), so publishing v1.6.10.1 makes the next build
 # 1.6.10.2 - there is no counter to keep in sync by hand.
@@ -100,6 +109,18 @@ owner_of_github_url() {
 
 # ---------------------------------------------------------------- version ----
 
+# A release tag of this fork sitting exactly on HEAD ("v1.6.17.1"). When there
+# is one it is the answer: the tag is the release intent, and unlike
+# upstream_tag() it does not care which remote tags this checkout happens to
+# see. Four components, so the -alpha<k> process builds and upstream's own
+# tags are both ignored.
+head_release_tag() {
+    git -C "$REPO_ROOT" tag --points-at HEAD 2>/dev/null \
+        | grep -E '^v[0-9]+(\.[0-9]+){3}$' \
+        | sort -V \
+        | tail -1
+}
+
 # The newest upstream release tag this tree contains. Upstream tags a release
 # with three components ("v1.6.10"); this fork's releases add a fourth
 # ("v1.6.10.3"), and `git describe --abbrev=0` would happily hand one of those
@@ -139,11 +160,20 @@ next_release_ordinal() {
     printf '%s' "$((newest + 1))"
 }
 
-# release (the default): 1.6.10.2 - what a tag and a release get.
+# release (the default): 1.6.10.2 - what a tag and a release get. A release tag
+#                         on HEAD is taken as-is (v1.6.17.1 -> 1.6.17.1).
 # alpha:                  1.6.10.2-alpha3 - a process build for the device,
 #                         numbered by the commits made since the last release.
+#                         A release tag on HEAD does not change this: an alpha
+#                         build stays a guess by construction, and the released
+#                         tag is not something to build "again, plus alpha".
 derive_version() {
-    local mode="${1:-release}" tag base ordinal last ahead
+    local mode="${1:-release}" tag base ordinal last ahead head_tag
+    head_tag="$(head_release_tag)" || head_tag=""
+    if [ -n "$head_tag" ] && [ "$mode" != "alpha" ]; then
+        printf '%s' "${head_tag#v}"
+        return 0
+    fi
     tag="$(upstream_tag)" || tag=""
     if [ -n "$tag" ]; then
         base="${tag#v}"
