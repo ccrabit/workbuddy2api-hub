@@ -34,12 +34,14 @@
 | 项 | 值 |
 |---|---|
 | 文件 | `WorkBuddy2API-Hub_1.6.17.1_all.fpk` |
-| 大小 | 412737 字节（403.1 KiB） |
-| sha256 | `5edc6c972e206181b4efeb49fd1c804a5ccb232b6c63a0ce5ed76498d64bbc27` |
-| 包内 `app.tgz` 的 md5（即 `manifest` 里声明的 `checksum`） | `7d66e48d4d7738192c0cf7499eb06666` |
+| 大小 | 411251 字节（401.6 KiB） |
+| sha256 | `a787acaaed5455da86059bd308fb0bf21ade13fe3e71d572489c273708c7e108` |
+| 包内 `app.tgz` 的 md5（即 `manifest` 里声明的 `checksum`） | `380f6c5fb598c92b456baf1b885340f7` |
 | 旁置校验文件 | `WorkBuddy2API-Hub_1.6.17.1_all.fpk.sha256` |
 
 校验：`sha256sum -c WorkBuddy2API-Hub_1.6.17.1_all.fpk.sha256`，或直接与上表比对。
+
+上表是**这个 Release 里的包**（CI 从 tag 构建）；自己在本机跑 `scripts/build-fpk.sh` 得到的包字节不同（tar 成员时间戳不同 → `app.tgz` 与 `checksum` 随之不同），但 **payload 的 26 个文件逐文件 md5 完全一致**——两边装出来的东西是同一个。这一版也对这个发布件跑过完整的包级验收（71 项断言全过，含包身份、`manifest` 与文件名的三处一致、payload 与仓库逐字节一致、网关免密两种形态）。
 
 ## 安装 / 升级
 
