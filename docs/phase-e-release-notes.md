@@ -52,12 +52,13 @@
 
 - 测试套件：`python3 tests/run_all.py --jobs 4` → **86 passed / 0 failed / 0 skipped**（新增 `tests/_test_release_pipeline.py`，8 项：四段 tag 定版、CI 当时的混合 tag 集合仍按 HEAD tag 定版、只有 release tag 的 shallow clone 仍报该 tag、alpha 与无 tag 仍能报版本、构建 workflow 传 `VERSION` 并断言、同步 workflow 镜像上游 tag、冲突路径在 Issues 关闭时仍然大声失败）。
 - 包级验收：`bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.17.1_all.fpk` → **71 passed / 0 failed**（含包身份三处一致、模块完整性、四个禁止目录、包内 `server/**` 与仓库逐字节一致，以及带/不带 `X-Trim-Username` 两种免密形态）。
-- Phase E 验收清单：**PASS = 200 / FAIL = 0**。
+- Phase E 独立验收清单（含平台预演与发布流水线复核）：**PASS = 261 / FAIL = 0 / SKIP = 2**（两条 SKIP 是「本机没有 AF_UNIX / 不是 root」这类环境项，非缺陷）。
 
 ## 已知限制
 
 - **真机上的移动端渲染没有逐项验证**：布局自适应用的是沙箱里的浏览器等价复现，窄屏观感请在真机上再看一眼。
-- **每日同步此前没有成功跑过一次**：2026-10-06 / 10-07 / 10-08 三次定时 run 全红（版本派生取错基线、冲突 issue 建不出来），修复见下节；下一次定时 run 才是修复后的第一次真跑。仓库的 **Issues 仍未启用**（需要仓库设置权限才能打开），在此之前冲突会以 `::error::` + run summary 的形式报出，不会静默。
+- **每日同步此前没有成功跑过一次**：2026-10-06 / 10-07 / 10-08 三次定时 run 全红，三次都是上游与飞牛层在同一批文件上**真实冲突**（`README.md`、`dashboard.html`、`tests/run_all.py`、`wb_proxy.py`）——按设计中止合并、交人裁决；而当时的冲突上报依赖 issue，仓库 **Issues 是关的**，`gh issue create` 直接失败，于是只剩一条没有任何解释的红 run。现在冲突路径不再依赖 Issues（见下节），但**冲突本身仍然要人工合并**：上游动到我们改过的文件，当天的同步就会停下，这正是「绝不在同步流程里自动解决冲突」的代价。
+- **仓库 Issues 仍未启用**（Lead 的 token 没有仓库设置权限，勾选由仓库所有者做）：在此之前冲突以 `::error::` 注解 + 此次 run 的 summary（含冲突文件清单与手工合并命令）报出，不会静默；勾上之后同一段代码会自动开始建 issue，不需要再改 workflow。
 - **日志窗口维持上游的终端配色**，未按看板主题适配。
 - 版本号规则：上游出 `v1.6.18` 之后基线整体上移为 `1.6.18.x`，`1.6.17.x` 不会越过它。
 - `appname` 不能改（见上），本版不提供改名迁移方案。
@@ -80,3 +81,4 @@
   3. `.github/workflows/sync-upstream.yml`：每次同步（不止发布那一次）把上游的三段 tag 全部镜像到 origin，这样任何 checkout 都能看到基线 tag；头部注释里那句「tag 与包版本总是一致」已改成它成立的前提。
 - 顺带修：冲突路径原本只靠 `gh issue create` 报信，而仓库当时 **Issues 是关的**，于是 10-06 至 10-08 三次同步全红却一条 issue 都没有（`GraphQL: Resource not accessible by integration (createIssue)`）。现在这条路径**不依赖 Issues 是否打开**：先 `gh api … --jq .has_issues` 判断，开着就照旧建/更新 issue；关着（或建 issue 仍被拒）就输出 `::error::` 注解，并把冲突文件清单与手工合并命令写进该次 run 的 summary，然后照样非零退出。**要拿回 issue 那一半，只需在 Settings → General → Features 里把 Issues 勾上**，这一步会自动开始建 issue；至少不会再出现「红了但没人知道为什么」。
 - 回归门：新增 `tests/_test_release_pipeline.py`，覆盖两种环境——① 复现 CI 当时的 tag 集合（三段 tag 只到 `v1.6.10`，另有 `v1.6.10.1/.2`，HEAD 上是 `v1.6.17.1`）：未修代码在此报 **`1.6.10.3`**，与 CI 日志逐字一致；② `git clone --depth 1 --branch v1.6.17.1` 的 shallow clone（除该 tag 外什么都看不见）：未修代码回落到 `fnos/manifest` 报 **`1.6.10`**。两种环境修后都必须报 `1.6.17.1`。另有静态断言盯住构建 workflow 的 `VERSION` 传递与相等断言、同步 workflow 的 tag 镜像、以及冲突路径的 `has_issues` / `::error::` / run summary / 中止前读取冲突路径。**修脚本前该套件 6 红，修后 8 项全绿。**
+- 本次 Release 的处理：`v1.6.17.1` 这个 tag 被**重指到修好流水线的提交**，用修复后的流水线重新构建，并删掉那个 `1.6.10.3` 的错包附件。重指前核对过两件事：① 错包与本机包的 payload **26 个文件逐文件 md5 完全相同**（差别只有 `manifest` 的 `version`/`checksum` 两行，以及 tar 成员时间戳带来的字节差），② 新旧提交在 `dashboard.html`、`wb_proxy.py`、`fnos/**`、`pricing`、`LICENSE` 上**没有差异**——所以这个 Release 里的代码和你设备上已经装的那份是同一份，重新下载不会改变行为。包名与版本号保持 `1.6.17.1`，不需要卸载重装。
