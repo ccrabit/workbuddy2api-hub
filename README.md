@@ -1,9 +1,7 @@
 # WorkBuddy2API-Hub — 国际版、国内版多账号网关中枢
 
-> ⏸️ **暂停更新（预计 10 天）**：从 **2026-09-29** 起暂停发布新版本，预计 **10 天**后恢复；期间 issue 与 PR 照常收，但合并与回复会慢一些。已发布的版本不受影响，照常可用；恢复更新后会删掉这段说明。
-
 <p align="center">
-  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.6.10-2496ED?style=flat-square" alt="Version 1.6.10"></a>
+  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.6.17-2496ED?style=flat-square" alt="Version 1.6.17"></a>
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square" alt="Python">
   <img src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square" alt="OpenAI API">
   <img src="https://img.shields.io/badge/Dual_Realm-Intl_&_CN-0DBD8B?style=flat-square" alt="Dual Realm">
@@ -18,12 +16,16 @@
 - **模型目录对齐官方桌面端**：剔除代码补全通道与底层专线变体，能力与规格按桌面端宣告；
 - **设备指纹隔离 (`derive_id`)**：以账号 UID 稳定派生机器码与会话标识，防多号关联风控；
 - **OAuth 免客户端登录**：看板点链接完成授权即自动入库；
+- **桌面客户端凭据导入**：直接读本机已登录的 WorkBuddy 桌面端账号，客户端加密存储的 token 也能就地解密；
 - **国内版自动化**：每日签到、成长任务与积分任务自动接取点亮领奖、猫猫日常旅行与连续打卡；
 - **国际版每日活跃打卡**：自动建网页端会话并接上沙箱把这一轮真正跑完（ACP over HTTP+SSE），全自动领满官方每日活跃 30/50 积分奖励；
 - **后台定时调度器**：09:00/21:00 国内签到旅行与国际版活跃打卡 · 22:00 保活 · 01:00 夜猫；
-- **双协议支持**：Chat Completions 与 Responses API（Codex / Claude Code）；
-- **Web 看板**：指标卡片、模型性能与用量大表、实时请求流水一屏可查；浅色/深色主题（默认跟随系统，右上角切换）、手机端布局，手机浏览器或飞牛 App 里都能用。
-- **看得懂的数字**：Token 量按 K / M / B / T 自动换单位（悬停看精确值），模型明细里直接标出该模型**每 M tokens 多少积分**；「设置」页顶部有一份「使用说明」，列出 API 地址、直连地址与应用中心入口，可以一键复制。
+- **限额（保留积分 · 每日 Token · 每日积分 · 按模型 Token）**：四条账号级护栏集中在看板同一张表里，默认按**全局默认**生效、同时管住国际版与国内版；需要时可单独给某一版本设值，留空即继承全局。积分花超只服务免费模型、单模型 token 用满只禁该模型，次日 0 点解封（默认全部关闭）；
+- **OpenRouter 价估算**：把请求 token 按 OpenRouter 公布的模型价折算成等价花费（按条件定价的模型按每条请求的输入长度与时间取档），定价按版本留档、刷新间隔可配，每条请求都标出用的是哪一版，人民币/美元可切，看板多处并列展示；**上游新增模型无需改代码即可自动进入取价**（取价输入 = 内置目录 ∪ 网关实时目录；两次取价之间就被调用就按需补价；带渠道后缀的名字向基准模型继承，命不中就不定价），仍未定价的模型在面板列出原因，可手填 OpenRouter id 收口；
+- **三协议支持**：Chat Completions、Responses API（Codex）与原生 Anthropic Messages API（Claude Code / Anthropic SDK）；
+- **Web 看板**：指标卡片、模型性能与用量大表、按 API Key 的用量归属、实时请求流水一屏可查。
+- **积分与权益包明细查看**：完整解析账号各套餐包/加量包额度、已用、剩余、生效状态及有效期周期，看板一键弹窗并支持实时刷新；
+- **Web 看板**：指标卡片、模型性能与用量大表、实时请求流水一屏可查。
 
 > ⚡ **Vibe Coding 产物**：本项目为 100% Vibe Coding 协同产物，由人类开发者提出架构与业务意图，AI 助手端到端完成逆向分析、链路调度、WAF 指纹脱敏与界面编写。
 
@@ -54,6 +56,8 @@
 
 打开看板需要先输入**面板访问密码**（默认 `admin`），它与 API Key 相互独立：密码只用于打开看板，可在「设置」页修改（或启动时用 `--panel-password` 指定），以 PBKDF2-SHA256 摘要存于 `accounts/settings.json`（不存明文）；登录状态保存在浏览器会话中，关闭浏览器或重启网关后需重新输入。
 
+**本机/局域网自用免手输**：打开看板时可在 URL 后带上 `?pwd=面板密码`，看板会自动填入并直接登录，无需再手动输入，例如 `http://127.0.0.1:8788/?pwd=admin`。适合本机或受信任的局域网内自用；**公网暴露时不要使用**——密码会留在浏览器历史记录、地址栏以及可能的反向代理访问日志中。注意这与局域网共享里的 `?key=` 不同：`?key=` 只把 API Key 存下来供 `/v1` 接口调用，并不会自动登录面板。
+
 > 首次登录后请立即修改默认密码。
 
 ### 3. 局域网共享模式
@@ -79,56 +83,85 @@
 - **添加与生成**：输入名称后点「生成随机 Key」，可随时复制；
 - **出口绑定**：可固定走 🌐 国际版（`www.workbuddy.ai`）或 🇨🇳 国内版（`copilot.tencent.com`）；不绑定则跟随看板顶部的全局出口开关；
 - **模型限制**：可为每个 Key 填写允许调用的模型（如 `deepseek*`、`gpt-6-astra`，支持 `*` 通配，多个用逗号分隔）；留空表示不限制。不在列表内的模型请求在本机直接返回可读的 400，既不会送达上游、也不会消耗任何额度——用来挡掉客户端背景请求偷偷调用的付费模型；
-- **启停与删除**：可单独启用 / 停用，删除即刻失效；所有 Key 保存在 `accounts/settings.json`，重启保持；
+- **启停与删除**：可单独启用 / 停用；删除会立刻抹掉密钥（该 Key 再也无法调用），但条目本身以只读形式留在「设置」页底部的「已删除」折叠区，好让看板里的历史用量仍然显示它的名字；所有 Key 保存在 `accounts/settings.json`，重启保持；
+- **用量归因**：看板「数据指标」页在账号表下方多一张按 API Key 归属的表——每个 Key 的请求数、Token、缓存命中、积分与模型分布（窗口内最多列 5 个模型，其余并入「其他」），口径与账号表一致，两表的请求数应当相等。该维度从升级后开始记录，更早的请求会一直留在「(切换前)」一行里；没绑定出口却两个出口都用过的 Key 会标成「跟随 · 混合」，它的积分是两套价格相加的结果；
 - **防冲突**：面板保存过 Key 后，启动命令或脚本里的旧参数（如 `--api-key`）自动失效；
 - **区域自检**：Key 绑定的出口与其请求的模型不匹配时（如用国际版 Key 调国内独占的 `deepseek-v4-pro`），直接返回可读的 400 校验错误，而不是上游晦涩的 WAF 拒流报错。
 
 ### 5. Docker 容器化部署
 
-自带完整容器配置，零外部依赖：
+本项目提供预编译双架构镜像（`linux/amd64` 与 `linux/arm64`），公开发布在 GHCR 及 Docker Hub，**无需克隆代码、无需本地编译**，提供多种开箱即用的部署与更新方式：
+
+#### 方式一：一键快速部署与更新（推荐，小白与云服务器首选）
+
+在终端中执行以下命令，脚本将全自动检测环境、创建配置并完成拉取启动：
 
 ```bash
-docker compose up -d          # 后台启动（自动构建）
-docker compose logs -f        # 查看网关日志
+# 官方源（可直连 GitHub 环境）：
+curl -fsSL https://raw.githubusercontent.com/ardeyouxipianyi/workbuddy2api-hub/main/quick-deploy.sh | bash
+
+# 国内网络 / NAS 加速（遇到 Connection reset 等连接报错时使用）：
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/ardeyouxipianyi/workbuddy2api-hub/main/quick-deploy.sh | sudo bash
 ```
 
-也可直接用 `docker run`：
+- **权限提示**：NAS（如飞牛 fnOS）普通用户若无直接操作 Docker 的权限，请在管道后追加 `sudo bash`；
+- **后续升级**：再次运行相同的命令即可无感平滑升级，账号配置与用量数据绝不丢失。
+
+#### 方式二：NAS / Web 面板单文件 Compose 部署（飞牛 fnOS / 群晖 / 1Panel 等）
+
+在 NAS 或面板的 Compose 界面直接新建项目并粘贴以下内容保存启动，无需拉取项目源码：
+
+```yaml
+services:
+  wb-proxy:
+    image: ghcr.io/ardeyouxipianyi/workbuddy2api-hub:latest   # 或 ardeyouxipianyi/workbuddy2api-hub:latest
+    container_name: wb-proxy
+    restart: unless-stopped
+    ports:
+      - "8788:8788"          # 左侧宿主端口可自选；右侧必须与下面的 PORT 一致
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8788
+      # - API_KEY=your_secret_key   # 留空则自动生成并打印在启动日志
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./accounts:/app/accounts    # 账号凭证与配置（更新/重建容器不丢）
+      - ./usage:/app/usage          # 用量流水日志（更新/重建容器不丢）
+```
+
+- **更新方法**：在面板中点击「拉取最新镜像并重启」，或在对应目录执行：
+  ```bash
+  docker compose pull && docker compose up -d
+  ```
+
+#### 方式三：Watchtower 全自动静默更新（彻底躺平）
+
+希望系统在每次 GitHub 发布新版本时自动静默升级，可启动 Watchtower 仅监控 `wb-proxy`（每 24 小时检查一次更新）：
 
 ```bash
-docker run -d --name wb-proxy --restart unless-stopped -p 8788:8788 \
-  -v $(pwd)/accounts:/app/accounts -v $(pwd)/usage:/app/usage \
-  -e API_KEY=your_secret_key $(docker build -q .)
+docker run -d --name wb-proxy-watchtower --restart unless-stopped \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower:latest --interval 86400 --cleanup wb-proxy
 ```
 
-每次 GitHub Release 发布后，也可从 GHCR 拉取预编译镜像运行（正式版同步更新 `latest`，预发布版只有版本标签）：
+#### 补充说明与排错
 
-```bash
-docker pull ghcr.io/ardeyouxipianyi/workbuddy2api-hub:latest
-docker run -d --name wb-proxy --restart unless-stopped -p 8788:8788 \
-  -v $(pwd)/accounts:/app/accounts -v $(pwd)/usage:/app/usage \
-  -e API_KEY=your_secret_key ghcr.io/ardeyouxipianyi/workbuddy2api-hub:latest
-```
+- **持久化数据安全**：`./accounts` 与 `./usage` 两个目录由宿主机持久化挂载，容器更新或销毁重建均不会影响已保存的账号和请求用量。
+- **命令行快捷启动（docker run）**：
+  ```bash
+  docker run -d --name wb-proxy --restart unless-stopped -p 8788:8788 \
+    -v $(pwd)/accounts:/app/accounts -v $(pwd)/usage:/app/usage \
+    ghcr.io/ardeyouxipianyi/workbuddy2api-hub:latest
+  ```
+- **开发者本地源码构建**：需调试或修改代码时，运行 `docker compose -f docker-compose.build.yml up -d --build`。
+- **鉴权说明**：容器以 `--lan` 启动，无显式 `API_KEY` 时会自动生成高强度 Key 写入 `./accounts/settings.json` 并打印在日志中：
+  `docker compose logs wb-proxy | grep -i "api key"`。
+- **报错 `pull access denied ... repository does not exist`**：镜像名若省略了 Registry 地址（如写成了 `ardeyouxipianyi/workbuddy2api-hub`），Docker 默认访问 Docker Hub。若遇网络受阻，请确保镜像名补全为 `ghcr.io/ardeyouxipianyi/workbuddy2api-hub:latest`；GHCR 包是公开的，拉取无需登录。
 
-GHCR 新包默认私有；如需免登录拉取，首次发布后在 Packages 设置中将其改为 Public。保持私有时需先登录 `ghcr.io`。
+- **目录权限（PUID/PGID）**：容器默认以 root（`0:0`）运行，与历史行为一致。想以宿主用户身份跑，就在 compose 里设 `PUID=$(id -u)` / `PGID=$(id -g)`（或写进 `.env`），并确保 `./accounts`、`./usage` 对该 uid 可写；`docker run` 也可直接加 `--user $(id -u):$(id -g)`。
+- **健康检查**：镜像自带 `HEALTHCHECK`（每 30s 请求一次 `/health`），`docker ps` 的 STATUS 列会显示 healthy/unhealthy，编排器也可直接探活。
 
-- **持久化目录**：`./accounts`（账号凭证与活动区域）与 `./usage`（请求流水与指标快照）；
-- **配置参数**：环境变量 `API_KEY`、`PORT`；
-- **改 `PORT` 要同步改端口映射**：`PORT` 只决定容器内监听哪个端口，`-p HOST:CONTAINER` 的**右侧必须与之一致**，例如 `-e PORT=9000 -p 9000:9000`；只改 `PORT` 而映射仍是 `8788:8788`，请求会打到没人监听的端口上。用 compose 时 `ports` 与 `PORT` 要同时改（默认的 `8788:8788` + `PORT=8788` 本来就一致）。
-- **鉴权**：容器以 `--lan` 启动（监听 `0.0.0.0`），会生成 API Key 写入 `./accounts/settings.json`，并打印在启动日志里：
-  `docker compose logs wb-proxy | grep -i "api key"`。不带这个 Key 调 `/v1` 会收到 401；想用自己的 Key 就传 `-e API_KEY=...`。
-
-### 6. 飞牛 fnOS 应用包（.fpk）
-
-`fnos/` 里是原生 Python 版应用包——不依赖 Docker，直接用飞牛自带的 `python3`（缺失时回退到应用商店的 `python312`），账号与用量落在 `/var/apps/workbuddy2api/var/`，装完从桌面图标或应用中心即可打开看板：
-
-```bash
-bash scripts/build-fpk.sh          # 产出 dist/workbuddy2api_<版本>.fpk
-bash scripts/verify-fpk.sh         # 本机把安装→启动→导入账号→升级→卸载跑一遍
-```
-
-在飞牛「应用中心 → 手动安装」里选这个 .fpk 即可；装好后应用中心/桌面点「打开」，看板在飞牛里内嵌打开、已登录飞牛的用户**免输看板密码**（直连 `http://<NAS>:8788/` 仍要面板密码）。manifest、生命周期脚本、数据目录与打包细节见 [fnos/README.md](fnos/README.md)。推 `v*` tag 时 CI 会自动构建并把 `.fpk` 挂到同名 Release，另有一个每天同步上游的 workflow（合不上就开 issue 并失败，不会留下半个合并）。
-
-### 7. 测试
+### 6. 测试
 
 全部测试集中在 `tests/`，一条命令跑完：
 
@@ -137,9 +170,9 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 33 个套件：27 个 Python + 6 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
-- CI（`.github/workflows/tests.yml`）跑同一条命令：Ubuntu 上 python 3.9 与 3.12（3.9 是本项目声称的最低版本），Windows 上 python 3.12。
+- 77 个套件：60 个 Python + 17 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- CI（`.github/workflows/tests.yml`）跑同一条命令：Ubuntu 上 python 3.9 与 3.12（3.9 是本项目声称的最低版本），Windows 上 python 3.12。推送 `v*` tag 时额外断言 **tag == 源码版本**（`wb_proxy.py` 里的两处版本串必须先一致，`-ci` 演练 tag 豁免）。
 
 ---
 
@@ -173,15 +206,49 @@ python tests/run_all.py realm      # 只跑名字里含 realm 的
 - **每日 01:00**：深夜时段自动执行夜猫子任务；
 - **国际版动态自适应**：切换至国际版视图时，看板顶部提供「每日活跃打卡 (国际版)」一键触发按钮。
 
-### 5. 保留积分（避免余额被用尽）
-看板「设置 → 保留积分」可设定一个最低余额，账号剩余积分低于该值时不再接单，账号行会显示「保留积分」标记。
+### 5. 限额（保留积分 · 每日 Token · 每日积分 · 按模型 Token）
 
-- 上游在余额耗尽后会给账号发提醒短信，设一个阈值即可避免余额被用到 0；
-- 填 `0` 表示关闭，这是默认值；
-- 判定依据是最近一次查询到的余额（看板「积分」列），从未查询过余额的账号不受影响；
-- 账号只是停止接单，仍留在池中并继续定时任务（签到与猫猫旅行本身是赚积分），充值后自动恢复可用。
+看板「设置 → 限额」把四条账号级护栏放在**同一张表**里，每行一条护栏、每列一个作用域：
 
-### 6. 本地网络工具（可选，默认关闭）
+| 护栏 | 作用 |
+| --- | --- |
+| 保留积分 | 账号余额低于该值时不再接单，避免余额被用尽后触发上游的提醒短信 |
+| 每日 Token 限额 | 账号当日消耗的 token 达到该值时暂停接单，请求自动切到其他账号 |
+| 每日积分限额 | 账号当日消费的积分达到该值后只服务免费模型，需要花积分的模型自动切号 |
+| 按模型每日 Token 限额 | 账号在单个模型上当日消耗的 token 达到该值时只禁该模型，同账号其他模型照常 |
+
+**全局默认 + 可选分版本**：每条护栏的「全局默认」同时作用于**国际版**与**国内版**；勾上「分别设置国际版 / 国内版」后，可以为某一版本单独设值，该版本**留空即继承全局默认**（输入框占位符会写出它继承到的数字）。取消勾选再保存，等于把两个版本的覆盖值一起清回继承。每条护栏填 `0` 表示关闭该项，这是默认值。
+
+判定与恢复：四条护栏都按**本地时间 0 点**自动解封，且都只在请求路径生效（定时任务不受影响）；每条护栏都是**单账号独立计数**，A 号用满不影响 B 号。免费/付费以**各出口自己的模型目录**为准——同一个模型 id 在不同出口的免费状态可以不同，未知模型按付费处理（保守）。账号行会显示「保留积分」「积分限额」徽章与 `模型 · N tok 达限` 标记（悬停看今日用量）；某个出口的全部账号都达额时，该出口的请求返回 `429`（文案说明本地 0 点恢复，`Retry-After` 指向 0 点）。四条护栏共用同一份增量扫描（`daily_usage_stats`），请求热路径开销不变。
+
+存储：四条护栏存成 `accounts/settings.json` 里的一组 `limits` 映射（`{"global": …, "intl": …, "cn": …}`，`null` 表示继承全局）。升级时旧版写在外层的四个扁平键会在第一次读取时自动折进来并从外层删除，所以即使回滚也不会读到旁边那份过期数字。
+
+
+### 6. OpenRouter 价估算（等价 token 花费）
+
+把每条请求的 token 消耗按 **OpenRouter 公布的模型价**折算成等价金额，回答「这些 token 放在 OpenRouter 上值多少钱」——与账号实际扣除的积分（`credit`）是两个口径，看板里并列显示：
+
+- **总开关（默认开启）**：「设置 → OpenRouter 价估算 → 启用价估算」，也可直接写 `accounts/settings.json` 的 `pricing_enabled`。开关缺省即开启，只有显式 `false` 才算关闭，所以升级上来的老配置行为不变；关掉它图的是省掉算价与渲染开销（日志上万行时 `/usage` 的响应差别明显）。关闭后除开关本身外整块功能从界面上撤掉——价格列、「API 等价花费」卡片、取价子控件与未定价清单一并隐藏；后端也不向 OpenRouter 取价、不登记按需补价、不为任何请求折算金额，`/pricing/refresh` 与 `/pricing/mapping` 返回「价估算已关闭，请先启用」。**重新打开会补算关闭期间的请求**——关闭期间没有取价，打开时立刻抓一次（不等下一个间隔），那一份价按 `policy_ref_at` 的补算分支落到关闭期间那些行上并标 `*`；`usage.jsonl` 里的历史行与策略表**一个字都不改写**，金额始终是读时算的，所以补算不需要回写日志。关闭期间第一次被调用、内嵌快照里也没有的模型，靠打开后的这次取价进策略表，同样能补上。
+- **定价来源**：OpenRouter 模型目录（`/api/v1/models`，美元 / 每 token，按版本里的汇率折算成人民币）。取的是**模型级公布价**——OpenRouter 模型页上展示的那个数字，对应它默认路由的那家 provider；同一个模型在 OpenRouter 上往往由多家 provider 承接、价格各异（实测 `deepseek-v4.1-flash` 有 33 家、`gpt-6-astra` 有 7 家），换一家可能更便宜，所以这个数是「OpenRouter 公布的该模型价格」，不是「最省的买法」。`wb_pricing.py` 里另内嵌一份快照作为出厂价（镜像自包含，无需额外文件），供还没有历史的机器兜底；`_fetch_pricing.py` 用来重新生成它（`--embed` 回写内嵌副本、`--dry-run` 只打印）。
+- **计价口径**：输入按缓存命中/未命中两档单价拆分（`cached_tokens`），输出单独单价，乘上 token 数再按汇率折算。输出的 token 数取上游的 `completion_tokens`，它**已经包含推理 token**（上游把 `reasoning_tokens` 记在 completion 内，实测与 1.5 万条历史行都如此，`total_tokens = prompt + completion`），所以推理 token 不另计——单独再加会重复计费；这条前提有测试钉住。OpenRouter 上有不少模型是**按条件定价**的，条件写在条目的 `overrides` 里，共两类，都会被原样搬进快照的 `bands`：
+  - **按输入长度**：超过阈值后改用更贵的价——`gpt-6-astra`、`gpt-5.5`、`gpt-5.4`、`gpt-5.6-*` 在 272000 token 以上翻倍，`grok-4.7` 在 200000 以上翻倍（OpenRouter 的 `overrides` 是按阈值升序排列的）；
+  - **按时段（UTC）**：`hy3`、`hy3-x`、`hy4-preview` 系列——北京时间 08:00–24:00 比 00:00–08:00 贵，`hy3` 约贵 60%。
+
+  计价时按每条请求的输入长度与时间在 `bands` 里取**最紧的那一条**，取不到就退回该模型的基准价，所以最坏退化成单一价而不会算成 0。`overrides` 里的缓存写入价与音频价计不了：本地 usage 日志只记 prompt / completion / reasoning / cached，没有对应的 token 数。既没有厂商一手页，也没有本地维护的峰谷表，各处展示的都是同一个口径。
+- **定价策略与引用**：网关每隔一段时间（「设置 → 定价刷新」，默认 **5 分钟**，单位即分钟，填 0 关闭自动刷新）去 OpenRouter 取一次价。周期短并没有额外代价：只有价格真的变了才写策略与时间轴，价格不动时每个周期只是一次 HTTP GET。每份价格按**内容**存成一条独立的「定价策略」（模型 + 各档价 + 汇率一起做哈希当 id），内容相同的只存一条：同一个模型若走出 A → B → A，表里始终只有 A、B 两条，第三次直接指回 A。另有一条**时间轴**声明每个模型在各时刻生效的是哪一条策略，只在生效分配真的变化时才追加一行——价格长期不动时，取再多次也不会长大。
+  - **每条请求记的是「引用了哪条策略」**，不内嵌价格：`usage.jsonl` 每行带 `cost_policy`（策略 id）。计价按这个 id 直接查，所以之后调价不会改写之前的数字；悬停里会写出策略 id 与它首次取到的时刻。
+  - 请求发生在某模型**还没有价**的时候，用之后第一次取到的价补算，并在金额后标 `*`。
+  - **无用策略会被清掉**：抓取后若产生了新策略，就顺带清理一次——没有任何请求引用、且已不是当前生效的那条会被删；每个模型至少留一条，刚取到的那批不动。
+  - 所有汇总——按模型、按账号、按区间的——都是把每条请求各自的估算**加起来**，而不是拿汇总 token 乘一个单价重算。
+  - 面板上能看当前生效的是哪一份（可展开逐模型查看）、策略表条数、上次/下次取价时间与最后一次失败原因，也能点「立即取价」手动取一次。
+- **新增模型自动取价（无需改代码）**：取价的候选清单 = 内置目录 `wb_catalog.py` ∪ 网关**实时目录**里新增的模型（intl / cn 两个区域各自的实时目录一起并进来，与 `/v1/models` 走同一套过滤，别名与 `-sg`/`-x` 之类付费档位不进清单），所以上游新上架一个名字，5 分钟内就会进入取价并出现在策略表/时间线里；若它在这两次取价之间就被调用，**第一笔请求**也会带上价——按需补价用最近一次抓取留在内存里的目录登记策略，请求路径不发任何网络请求，命不中还是老老实实未定价。匹配顺序是「面板手填覆盖 → 人工覆盖表 `OVERRIDES` → 名字归一化后全等且唯一 → **变体后缀继承**（剥掉 `-lkeap`、`-taiji`、`-volc`、`-sg` 这类渠道/发行后缀，拿基名重走前三步，仍要求唯一命中）」，继承来的策略记 `via=variant` 与 `inherited_from`，面板能看出这条价不是同名匹配来的；`-f`/`-dev`/`-x` 故意不剥（它们是 hub 自己的档位，单价可能不同）。这条规则可在「设置 → 定价刷新 → 变体后缀继承」整体关掉，关掉即恢复「只有覆盖表与同名匹配才定价」。整套匹配仍然遵循「宁可漏也不错」：多轮都没命中的就不写价，费用列显示 `—`。
+- **未定价可见化与手填收口**：`/pricing` 返回未定价清单，每条带分类——`alias`（`default-model` 一类虚拟别名，不是模型，不计入缺口统计）、`or_missing`（OpenRouter 无对应）、`variant_unmatched`（剥后缀后仍无唯一基准），并给出相似度 top 3 候选（**仅建议，绝不自动采用**）。面板「设置 → 定价刷新」下可直接展开逐条查看，为某条模型手填一个 OpenRouter id 并「登记」：映射写进数据目录的 `pricing-overrides.json`（运行期覆盖，不改源码里的 `OVERRIDES`，升级镜像不丢），登记后立即触发一次取价；留空提交即删除该映射。
+- **`_fetch_pricing.py` 支持 `--extra-ids-file <path>`**（离线内置快照工具）：默认仍只读内置静态目录、不引入网络依赖，需要额外 id 时给一份「每行一个模型名」的文件即可，与运行时的并集输入同一条 `build_snapshot()` 路径。
+- **展示位置**：数据指标看板 KPI 卡片「OpenRouter 价估算」（跟随今日/本周/本月/全部区间切换）、各账号用量透视**最后一列**、模型性能与用量一览**最后一列**（含合计行）、网关与运维页「OpenRouter 价估算」卡片、最近请求**最后一列**（逐条金额，悬停可看完整定价策略，见下条；补算的金额后带 `*`）。
+- **悬停即可看清单条请求的价是怎么来的**：最近请求最后一列的金额带一个自绘气泡，鼠标停上去给出——**三档原始单价**（缓存命中输入 / 缓存未命中输入 / 输出，USD / 每百万 token，按策略原样显示、不做折算）、版本里的汇率与折算说明、**匹配来源的完整证据链**（`direct` 给出命中的 OpenRouter id；`override` 给出「原名 → 映射到的 id」；`variant` 给出「原名 → 基准名 → OpenRouter id」并标明剥掉的后缀）、命中的**条件档位与该档三档价**、策略 id 与它首次取到的时刻、以及补算标记 `*`；没有定价的行仍只说「该模型暂无定价数据」，不编数字。这些字段由 `/usage/recent` 每行直接带出（`cost_rates`、`cost_unit`、`cost_currency`、`cost_usd_cny`、`cost_or_id`、`cost_via`、`cost_inherited_from`、`cost_override_from`、`cost_band_note`、`cost_via_derived`），面板不为展示再开接口，未定价整组为 `null`、与 `cost_cny` 同口径。气泡挂在 `body` 上且 `pointer-events: none`，不会抢走鼠标；表格每 5 秒整体重画，重画后按行键复位回同一行。**加这些字段没有动计价口径**：`policy_id` 的算法一字未改，全量 15176 行逐行的 `source` 与改动前 0 条失配，历史策略 id 逐条不变；早于 `via` 字段写下的策略行没有记录可查，气泡按当前映射表推断并明确标注是推断（`via_derived=true`），映射表改过或指不到就不认。
+- **人民币 / 美元一键切换**：金额按快照汇率换算，选择记在浏览器本地，刷新后保留；快照覆盖不到的模型显示 `—` 并计入「未覆盖」提示，不做猜测。当前未覆盖的只有 4 个真实名字：OpenRouter 尚未收录的 `kimi-k2.8-preview`、目录里对应 Claude-3.7/4.0-Sonnet 的 `default-1.1` / `default-1.2`（OpenRouter 无同名条目），以及 `kimi-k2-instruct-taiji`（剥掉 `-taiji` 后基名仍无唯一对应）；它们都在面板未定价区列出原因与候选，可按需手填映射。另有 5 个档位别名（`default-model` 等）本就不是真实模型，只在清单里标注、不计入缺口统计。
+
+### 7. 本地网络工具（可选，默认关闭）
 
 部分客户端（如 Codex App）会在 Responses 请求里宣告 `web_search` / `web_fetch` 这类服务端工具，而上游没有对应的执行器——声明送上去，模型看得到工具却没有执行器，客户端最后只拿到一句 unsupported call。
 
@@ -204,20 +271,17 @@ python tests/run_all.py realm      # 只跑名字里含 realm 的
 2. 选择要登录的区域（国际版 / 国内版），点击弹出的官方授权链接并在浏览器完成登录；
 3. 程序自动检测回调，完成后账号自动加入账号池，无需手动复制凭证。
 
-### 方式二：用 JSON 文件导入账号
+### 方式二：从本地桌面应用导入（Windows）
+1. 让 **WorkBuddy 桌面客户端保持运行并已登录**（网关要从它的进程内存里取解码密钥，这一步不能省）；
+2. 看板点 **「扫描桌面客户端账号」**，弹窗里会列出本机 `.info` 里已登录的国际版 / 国内版账号；
+3. 若提示凭据已加密，先点弹窗里的 **「回收密钥」**（只读，实测 1 秒内完成），再点账号行的 **「导入」**。
 
-看板「账号 → 导入账号」选一个账号 JSON 文件即可：导入前先做一次预演（新增 / 覆盖 / 跳过 / 无效 各几条、分别是哪些 UID），确认后才落盘。支持的文件形态：
+关于加密凭据：
 
-- **本网关导出的文件**：`{"format":"workbuddy-accounts","accounts":[…]}`（导出后手工删改过的文件同样能读）；
-- **账号数组**：`[{"accessToken":…,"refreshToken":…}, …]`；
-- **单个账号对象**：`{"accessToken":…}`——只有一条凭据时直接存成文件；
-- **cockpit tools 等工具的导出**：`[{"uid":"…","access_token":"…","refresh_token":"…","expires_at":1767225600000,"domain":"www.workbuddy.ai"}]`。这是同一份凭据的 snake_case 写法（`access_token` / `refresh_token` / `expires_at` / `enterprise_id`），`expires_at` 是**毫秒**；导入时按两种拼写查找，`realm` 缺失就按 token 或 `domain` 推断；
-- **桌面客户端凭据**：`{"account":{…},"auth":{…}}` 的嵌套写法。
-
-同 UID 的账号默认跳过，勾选「覆盖同 UID 账号」才会替换（连同其凭证）。UID 只保留字母、数字、`-`、`_`，其余字符导入时替换成 `_`。
-
-### ~~方式三：从本地桌面应用导入（暂不可用）~~
-~~桌面客户端自 2026-09-24 起把 `accessToken` / `refreshToken` 改成加密存储（`$wbEncrypted` 信封）。扫描仍能读到文件，但拿不到可用的 token——导入后每个请求都会返回 401（聊天、刷新凭证、查积分都会被拒）。看板上的「扫描桌面客户端账号」入口已暂时隐藏，**请改用上面的 OAuth 方式添加账号**。~~
+- 桌面客户端从 2026-09-24 起把 `accessToken` / `refreshToken`（国内版还有 `nickname` / `phoneNumber`）存成 `$wbEncrypted` 信封，网关按客户端 `packages/at-rest-crypto` 的同一套方案（AES-256-GCM + `WB-AAD` 帧头）就地解密，导入的仍是可直接使用的 token；
+- 解码密钥（`atRestSecretKey`）编译在客户端的原生模块里、磁盘上没有明文，只能从**正在运行的**桌面端进程内存里找回来。密钥只保存在网关进程内存中，不落盘、不写日志，网关重启后重新回收一次即可；
+- 这一步只读目标进程的私有内存（`OpenProcess(PROCESS_VM_READ)` + `ReadProcessMemory`），不会向客户端写任何东西；提示权限不足时，以管理员身份启动网关再试一次；
+- 仅 Windows 可用；Docker / Linux / macOS 下请用方式一。
 
 ~~相关代码保留未删（前端 `scanDesktop()` 与后端 `/accounts/import/desktop` 都在），等解密打通或改走其他凭据来源之后再放出来。~~
 
@@ -238,6 +302,26 @@ export OPENAI_BASE_URL="http://127.0.0.1:8788/v1"
 export OPENAI_API_KEY="你在看板设置中添加并绑定的API_Key"
 ```
 
+### Claude Code (原生 Anthropic Messages API)
+
+网关同样原生实现 Anthropic Messages 协议（`/v1/messages`，流式与非流式），Claude Code / Anthropic SDK 可以直连，不再经过 Responses 转换层：
+
+```bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8788"
+export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
+```
+
+模型名沿用网关的官方对齐 ID（如 `deepseek-v4.1-flash`、`gpt-6-astra`、`glm-5.3`）。
+
+协议映射与边界（都按 Anthropic 官方 Messages 规格实现）：
+
+- `system`（字符串或文本块数组）→ 上游 system 消息；`text` / `image` / `document` / `tool_use` / `tool_result` 内容块双向转换；`tools` + `tool_choice` + `disable_parallel_tool_use`、`stop_sequences`、`metadata.user_id`、`thinking` / `output_config.effort` 全部映射到上游对应字段；
+- 流式输出是原生事件序列：`message_start` → `content_block_start` / `content_block_delta`（`text_delta` / `input_json_delta`）→ `content_block_stop` → `message_delta`（含 `stop_reason` 与用量）→ `message_stop`；
+- 鉴权接受 `x-api-key` 或 `Authorization: Bearer`，错误一律用 Anthropic 的 `{"type":"error","error":{"type":...}}` 信封；
+- 服务端工具（`web_search` 等，Anthropic 侧执行的）上游不支持，会被丢弃并在 system 里注明，不会伪造调用；
+- `thinking` / `redacted_thinking` 块不会回放（上游不提供可验证签名）；`top_k`、`cache_control`、`context_management` 与 `betas` 会被忽略；
+- `/v1/messages/count_tokens` 返回的是网关的 CJK 感知估算值（与用量统计同一套估算器），**不是**官方分词器的精确值。
+
 ---
 
 ## 五、看板与接口一览
@@ -246,12 +330,19 @@ export OPENAI_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 「数据指标看板」页顶部可切换统计口径：**今日 / 本周 / 本月 / 全部历史 / 自定义**。本周自周一零点起算、本月自 1 号零点起算，自定义可指定起止时间（任一侧留空表示不限）。切换后 KPI 卡片、账号用量透视表与模型性能表会一起切到同一窗口。
 
+每个主页面（「账号网关」「数据指标看板」「网关设置」）左侧都有一条区块导航：导航项由页面上实际存在的区块现场生成（不写死页面、也不写死清单，增删区块甚至新增页面都无需改导航代码），点击即可直达对应区块，滚动时自动高亮当前区块；点击后地址栏会带上 `#锚点`，便于分享链接或刷新后回到同一位置。被隐藏的区块不进导航，也不能作为锚点落点；区块不足两项的页面（例如只有一个视图的运行日志页）不显示侧栏。窄屏下侧栏自动收成可横向滑动的吸顶标签条。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | / | Web 用量与任务监控看板 |
 | POST | /v1/chat/completions | 标准 Chat Completions 接口 |
 | POST | /v1/responses | Responses API 协议接口 |
+| POST | /v1/messages | 原生 Anthropic Messages 协议接口（流式 / 非流式，`x-api-key` 或 `Authorization` 鉴权） |
+| POST | /v1/messages/count_tokens | Anthropic 计数接口（CJK 感知估算值，非官方分词器） |
 | GET | /v1/models | 官方对齐模型列表（含能力与规格宣告） |
+| GET | /pricing | 定价状态：当前生效策略、上次/下次取价时间、未定价清单（分类 + 候选） |
+| POST | /pricing/refresh | 立即取一次价（需面板会话） |
+| POST | /pricing/mapping | 手填 / 清除「模型 → OpenRouter id」运行期映射，随后自动取价（需面板会话） |
 | GET | /tasks | 国内版成长任务、连续打卡与猫猫日常状态 |
 | POST | /tasks/run | 触发国内成长任务全自动点亮与领奖 |
 | POST | /tasks/travel | 触发猫猫日常旅行（派出 / 领奖） |
@@ -262,17 +353,146 @@ export OPENAI_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 ## 六、版本更新记录 (Changelog)
 
-### v1.6.10.2（本分支：飞牛应用包与面板改造）
+### v1.6.17
 
-上游 `v1.6.10` 之上的一批改动，重点是把它变成一只**飞牛 OS 应用**，顺带把看板本身收拾了一遍。
+重磅生态兼容与架构演进版本：正式支持 Claude Code、修复 API Key 误覆盖、引入临期积分优先分派机制，并实现测试基础设施多进程并行加速：
 
-- **飞牛 fnOS 原生应用包**：`fnos/` + `scripts/build-fpk.sh`，不依赖 Docker，用飞牛自带 `python3`（缺失时回退应用商店的 `python312`）跑；带应用中心图标、生命周期脚本与卸载向导，账号与用量落在应用数据目录。详见 [fnos/README.md](fnos/README.md)。
-- **应用中心内嵌打开、免密码**：`ui/config` 走飞牛网关（`app.sock` + `/app/workbuddy2api`），已登录飞牛的用户点「打开」直接进面板；直连 `8788` 仍然要面板密码。身份头只在网关 socket 上、且对端是飞牛网关时才被采信，TCP 上伪造无效。
-- **用 JSON 文件导入账号**：支持本网关导出的文件、账号数组、单个账号对象、cockpit tools 的 snake_case 写法（`access_token` / `expires_at` / `enterpriseId`）以及桌面客户端的 `{"account":…,"auth":…}`；毫秒时间戳、JWT `exp` 兜底、cn/intl 域判断与 uid 清洗都在服务端做，18 条测试钉住。
-- **夜间模式**：默认跟随系统，右上角可手动三态切换，选择存在浏览器里；运行日志窗口跟着主题走（浅色一套浅灰控制台，深色仍是原来的终端配色），鼠标划过的高亮在深色下也柔和了。
-- **手机可用**：断点重排、表格卡片化、安全区适配，飞牛 App 或手机浏览器打开都不必左右拖。
-- **数字更可读**：Token 量自动换 K / M / B / T（悬停显示精确值），模型明细标注每 M tokens 的积分单价（按额度计费的模型显示「单价未知」而不是编造），设置页新增「使用说明」列出 API / 直连 / 应用中心三种地址并可一键复制。
-- **打包与发布**：`scripts/build-fpk.sh` / `scripts/verify-fpk.sh`（55 项断言），推 `v*` tag 由 CI 构建并挂到 Release；另有每天同步上游的 workflow，合不上就开 issue 并失败。
+- **全面兼容 Claude Code 接入**（[PR #180](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/180)，感谢 [@LeoK77S](https://github.com/LeoK77S)，issue #171）：自动将 `messages` 内部的 `system` 角色提取并与顶层 system 合并，彻底解决 Claude Code 调用 `/v1/messages` 报 400 失败的问题；
+- **修复 API Key 连续添加时误覆盖老 Key**（[PR #178](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/178)，感谢 [@LeoK77S](https://github.com/LeoK77S)，issue #175）：前端与服务端采用 upsert 语义同步，彻底杜绝连续添加 Key 导致老 Key 与出口绑定被意外软删除的问题；
+- **智能调度：平滑加权优先分派临期积分账号**（[PR #174](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/174)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：自动识别 7 天内即将过期的账号积分包，采用平滑加权轮询优先消耗快过期的账号额度，杜绝积分浪费；
+- **大幅提升用量统计与时序端点性能**（[PR #185](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/185)，感谢 [@aodianjun](https://github.com/aodianjun)）：内存缓存消除重复 stat，解决万级日志时面板与时序图加载慢的痛点；
+- **修复上游 live 目录只声明默认思考时丢掉可选档位**（[PR #177](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/177)，感谢 [@LeoK77S](https://github.com/LeoK77S)，issue #170）；
+- **账号工具栏新增「一键刷新全部凭证」**（[PR #179](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/179)，感谢 [@LeoK77S](https://github.com/LeoK77S)，issue #167）；
+- **数据指标看板「积分扣减历史」表头吸顶与账号昵称显示**（[PR #186](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/186)，感谢 [@LeoK77S](https://github.com/LeoK77S)）；
+- **测试基础设施全面升级**（[PR #181](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/181) ~ [PR #184](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/184)，感谢 [@teddyli18000](https://github.com/teddyli18000)，issue #151）：统一抽取严格标准的 `tests/_dom_stub.js`，支持 `--jobs 4` 多进程安全并发跑测试，测试耗时从 2 分钟缩短至 27 秒；
+- **看板 UI 全面优化**：彻底清理侧栏网格空隙恢复原生全宽布局，顶部卡片精简并突出账号可用对比。
+
+
+### v1.6.16
+
+重大稳定性与观测治理版本：涵盖账号熔断降权、工具调用防拆分修复、时序图表、全页面导航及多项深度优化：
+
+- **上游工具调用配对修复**（[PR #153](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/153)，感谢 [@Cekxri](https://github.com/Cekxri)）：自动合并被部分客户端拆散的连续 assistant tool_calls 批次并丢弃截断参数，根治 DeepSeek 报 400 失败；
+- **账号级软限流指数退避、熔断与降权治理**（[PR #163](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/163)，感谢 [@Cekxri](https://github.com/Cekxri)）：账号连续失败时自动指数退避，连续硬错误熔断，有效保护账号不被频繁失败打挂；
+- **402 余额不足账号精准冷却至次日 04:00**（[PR #157](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/157)，感谢 [@Cekxri](https://github.com/Cekxri)）：余额用尽账号避免频繁重试，支持余额恢复后实时提前解冻；
+- **面板新增 Token 时序图与积分扣减历史**（[PR #161](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/161)，感谢 [@Cekxri](https://github.com/Cekxri)）：新增 `/usage/timeseries` 时序聚合接口与看板可视化走势图；
+- **侧栏区块导航推广至所有主页面**（[PR #169](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/169)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：通用化侧边栏组件，网关运维与数据指标页均支持左侧吸顶导航与滚动高亮；
+- **系统提示词模式注入与 403 重试**（[PR #160](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/160)，感谢 [@Cekxri](https://github.com/Cekxri)）：支持 passthrough/custom/append 三种系统提示词模式；
+- **缓存命中别名归一化**（[PR #164](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/164)，感谢 [@Cekxri](https://github.com/Cekxri)）：消除别名遮蔽，客户端始终读取统一的真实缓存命中数；
+- **错误信封新增 gateway_hint 归因解释**（[PR #154](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/154)，感谢 [@Cekxri](https://github.com/Cekxri)）；
+- **面板一键同步账号昵称**（[PR #158](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/158)，感谢 [@Cekxri](https://github.com/Cekxri)）；
+- **会话亲和历史长度上限与号池弹性并发**（[PR #152](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/152)，感谢 [@ddddd-ren](https://github.com/ddddd-ren)）；
+- **四级模型上下文/输出查找链与输出上限探针**（[PR #165](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/165)、[PR #166](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/166)，感谢 [@Cekxri](https://github.com/Cekxri)）；
+- **看板 UI 深度打磨**：最近请求表格表头与数据全列居中对齐、模型与推理强度拆分为独立列、KPI 卡片双币种优雅对齐。
+
+
+### 未发布
+
+两项与「大请求 + 号池规模」相关的可调限制，默认行为不变：
+
+- **会话亲和加长度上限（`WB_AFFINITY_MAX_MSGS`，默认 400）**：前缀亲和把整段对话钉在同一个账号上以吃满上游的账号级 prompt cache，但对话上下文是单调增长的，于是那个账号要反复接收越来越大的请求体。实测某生产实例（wk4，333 个请求）请求体与上游断连率的关系：
+
+  | 消息条数 | 请求数 | 断连率 |
+  |---|---|---|
+  | < 150 | 82 | 0.0% |
+  | 150–300 | 59 | 3.4% |
+  | 300–400 | 64 | 7.8% |
+  | 400–500 | 50 | 10.0% |
+
+  断连（`TimeoutError` / `RemoteDisconnected`）触发重试，把 8.8s 的请求拖到 11.6s，首字延迟随之翻倍。超过上限的对话不再绑定账号，重新参与轮询：代价是丢掉前缀缓存，收益是断连与重试消失。设 `0` 关闭该上限，恢复原有行为。阈值不宜调低——同一实例 94% 的请求靠亲和拿到 98.5% 的缓存命中率。
+
+- **聊天并发上限可按号池规模自动取值（`WB_MAX_CONCURRENT_CHAT=auto`）**：原先是固定 32，与号池里有几个账号无关，5 个账号和 200 个账号的部署共用同一个值。设为 `auto` 后取「就绪账号数」，且不低于 32。仅扩容、不缩容：已在飞行的请求持有旧信号量的许可，缩容会让归还次数超过上限并触发 `BoundedSemaphore` 的 `ValueError`。默认仍是固定值 32，行为不变。
+
+- 新增 `tests/_test_affinity_length_cap.py`（13 项）：钉住阈值边界（`msgs == cap` 仍绑定、`cap + 1` 释放）、`0` 关闭上限、长对话的键稳定性、不同对话不碰撞、`None` / 空列表安全，以及并发上限的按池取值、下限回落、只增不减、固定值下为空操作、脏输入忽略与扩容后的许可计数。
+
+- **修复 `tests/run_all.py` 在非 UTF-8 控制台下崩溃**（Windows CI 长期红灯的根因）：各套件本身以 `PYTHONIOENCODING=utf-8` 运行、输出也按 utf-8 从日志读回，但 `run_all.py` **自己**再打印这行摘要时用的是控制台编码。Windows runner 的 stdout 是 cp1252，于是第一条含中文的摘要就抛 `UnicodeEncodeError` —— 而这时所有套件其实**已经全部通过**，是汇总环节把整轮判成了失败。main 上连续多个版本（含 v1.6.15 自身）的 Windows job 都是这么挂的。现在启动时把本进程的 stdout/stderr 重设为 utf-8，并以 `errors="replace"` 兜底（生僻码位退化成 `?` 而不是终止整轮）。新增 `tests/_test_run_all_encoding.py`（3 项）：分别在 cp1252 与 utf-8 下跑一个含中文摘要的套件，断言退出码为 0、输出里没有 `UnicodeEncodeError`，并确认摘要确实来自被选中的那个套件。
+
+- **一键刷新凭证**：账号工具栏新增批量按钮，等价于对池中每个账号点一次「刷新凭证」——后端 `/accounts/refresh` 不带 `uid` 时本就刷新整池，但看板上一直没有入口，`refreshAccounts()` 是没人调用的死代码（issue #167）。按钮在飞行期间禁用并显示「刷新中...」，结束后按成功数回报（全部成功为绿色，有失败则降级为黄色，并附上首个错误与失败条数），随后重画账号卡片让新凭证立刻可见。新增 `tests/_test_refresh_all_credentials.js`（10 项）：只发一次不带 `uid` 的请求、成功 / 部分失败 / 网络异常三档回报与配色、缺失 `error` 时兜底、刷新后必重载列表、按钮禁用与复位、按钮与英文词条确实在页面上。
+
+### v1.6.15
+
+里程碑版本：正式支持原生 Anthropic Messages 协议、完善企业版积分查询，以及多项重要修复与移动端体验优化：
+
+- **原生 Anthropic Messages 协议支持 (`/v1/messages`)**（[PR #147](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/147)，感谢 [@Cekxri](https://github.com/Cekxri)）：原生提供 `POST /v1/messages`（流式 / 非流式）与 `POST /v1/messages/count_tokens`，鉴权支持 `x-api-key` 与 `Authorization: Bearer`，支持完整的 Anthropic 原生 SSE 事件序列与双向工具调用映射，现可无缝接入 Claude Code、Cursor 等全套 Anthropic 客户端生态；
+- **修复设置页加载异常**（[PR #141](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/141)，issue #138）：修复 `loadSettings()` 遗漏 `pricingOn` 变量引发 ReferenceError 导致 API Key 列表与底部设置项无法加载的问题；
+- **企业版账号积分显示与护栏修复**（[PR #149](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/149)，感谢 [@johnsken-jerry](https://github.com/johnsken-jerry)）：适配企业空间计费接口，彻底解决企业账号积分查回为 0/0 以及误触保留积分拦截的问题；
+- **上游 SSE 超时保护与流式容错**（[PR #148](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/148)，感谢 [@Cekxri](https://github.com/Cekxri)）：增加上游 header/idle 读超时配置，防止流式挂起与死锁；
+- **移动端中英文切换优化**（issue #150）：中英双胶囊按钮重构为紧凑单按钮一键切换（中 ⇄ EN），与主题图标按钮完全对齐，彻底解决小屏下顶部 UI 挤压变形；
+- **修复多模态孤立函数输出报错**（[PR #145](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/145)，感谢 [@yorushikasama](https://github.com/yorushikasama)）：修复 Codex 等客户端在 `/v1/responses` 传递带图片的结构化输出时的 AttributeError 崩溃；
+- **防止陈旧 429 报错跨重启复活**（[PR #144](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/144)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：重启时自动清理过期的 `cooldownUntil`，消除历史冷却误报；
+- **模型用量占比基准校准**（[PR #140](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/140)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：表格百分比分母改为全体模型总 Token，避免第一名失真显示 100%；
+- **价估算胶囊开关体验优化**（[PR #142](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/142)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：开关改为即点即存交互并补齐英文翻译词条；
+- **测试环境 DOM 桩补全**（[PR #139](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/139)）。
+
+
+### v1.6.14
+
+重磅功能与体验升级版本，涵盖限额护栏统一矩阵、看板双语切换、设置项侧栏直达、估算开关以及多处界面优化：
+
+- **限额护栏统一配置表与国际/国内版独立阈值**（[PR #130](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/130)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：将「保留积分」、「每日 Token 限额」、「每日积分限额」、「按模型每日 Token 限额」合并为统一的矩阵配置表；支持针对国际版与国内版分别指定不同的限额阈值（留空自动继承全局，升级自动兼容无损迁移旧配置）；
+- **看板新增 CN/EN 中英双语切换与完整翻译**（[PR #134](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/134)，感谢 [@many1337](https://github.com/many1337)）：看板右上角支持一键切换简体中文与 English，内置全量前端英文化翻译字典并持久化记忆；
+- **设置页动态左侧锚点导航栏**（[PR #129](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/129)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：依据页面区块动态渲染左侧吸顶/浮动侧边栏，支持滚动高亮与点击直达，大幅改善多设置项下的查找体验；
+- **账号错误悬停查看完整响应与当前禁用总览**（[PR #132](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/132)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：账号卡片支持悬停查看上游完整报错（429 恢复时刻一眼可见）；新增「当前禁用账号与模型」总览表，集中感知限流与停用状态；
+- **增加 OpenRouter 价估算总开关**（[PR #133](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/133)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：为估价模块补齐总开关（默认开启），关闭后彻底停用后台抓取与逐行折算开销，提升大日志量下的处理性能；
+- **清理设置页合并冲突残留标记**（[PR #131](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/131)，issue #137）。
+- **原生 Anthropic Messages 协议（2026-10-07）**：`/v1/messages` 与 `/v1/messages/count_tokens` 全原生实现（流式事件序列、`x-api-key` 鉴权、Anthropic 错误信封、内容块与工具双向映射），Claude Code / Anthropic SDK 可直连；服务端工具、thinking 回放与 `top_k` / `cache_control` 的取舍见「四、客户端配置与接入」。
+
+
+### v1.6.13
+
+- **修复看板右上角颜色主题菜单按钮无法打开**（[PR #127](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/127)，感谢 [@LeoK77S](https://github.com/LeoK77S)）：修正 IIFE 作用域中 `toggleThemeMenu` 与 `selectTheme` 的全局导出时机，修复点击按钮报 `ReferenceError` 导致下拉菜单无法弹出的问题，现可正常手动选择「浅色 / 深色 / 跟随系统」；新增 `tests/_test_dashboard_theme.js` DOM 级可达性与交互回归测试；
+- **Docker 一键安装脚本补充国内网络加速与权限说明**（issue #126）：README 补充国内网络环境下通过 GitHub 代理加速拉取命令与 NAS 非 root 账户下的 `sudo bash` 说明。
+
+### v1.6.12
+
+- **Docker 部署与更新生态全面升级**（PR #125）：
+  - **一键部署与更新脚本 (`quick-deploy.sh`)**：终端仅需执行一行命令 `curl -fsSL https://raw.githubusercontent.com/ardeyouxipianyi/workbuddy2api-hub/main/quick-deploy.sh | bash`。首次运行自动检测环境并拉取启动；后续再次执行同一命令即可完成自动平滑升级，账号配置与历史用量绝不丢失；
+  - **NAS / 面板单文件 Compose 模板（免源码克隆）**：官方 `docker-compose.yml` 剔除 `build: .` 依赖，飞牛 fnOS、群晖、1Panel 等用户无需 `git clone`，直接复制粘贴 YAML 即可建站并支持面板一键更新；开发者本地构建单独拆分为 `docker-compose.build.yml`；
+  - **支持双镜像仓库推送（GHCR + Docker Hub）**：工作流新增对 Docker Hub（`ardeyouxipianyi/workbuddy2api-hub`）的自动同步推送，消除前缀缺省报错困扰，兼顾国内 Docker 镜像加速器拉取；
+  - **Watchtower 全自动静默更新**：提供开箱即用的 Watchtower 配置与命令，支持后台无感自动升级。
+
+
+### v1.6.11
+
+- **修复 Codex Responses 缺省 max_output_tokens 导致 32k 截断**（issue #121）：当客户端未显式传入输出上限时，网关自动根据模型目录中宣告的 `maxOutputTokens`（如 `deepseek-v4.1-flash` 为 128,000）进行兜底补全，避免长推理因触发上游默认 32k 限额而中断无正文。
+- **修复面板新增 API Key 时已有 Key 模型限制被清空**（issue #92）：补齐 `/settings` 接口返回的 API Key 列表中的 `models` 字段，防止前端重新打包保存时将未带限制的数组传回导致误清空。
+
+- **新增「每日积分限额」：账号当日积分花超后只服务免费模型**（默认 `0` 关闭，面板可设阈值）：账号当日消费的积分（按上游 `credit` 累计）达到阈值后，需要花费积分的模型自动切到其他账号，目录中标记为 `x0.00` 的免费模型照常服务——例如 `gpt-6-astra` 花满 50 积分后，免费期的 `deepseek-v4.1-flash` 不受影响。免费/付费判定以**各出口自己的模型目录**为准（同一 id 在不同出口可以一个免费一个收费），未知模型按付费处理（保守）。本地时间 0 点自动解封；单账号独立计数。账号行显示「积分限额」徽章，池子卡片显示「N 个达积分限额」，全部账号达额时返回 `429`（文案说明免费模型仍可用）。
+- **新增「按模型每日 Token 限额」**（默认 `0` 不限）：账号在单个模型上当日消耗的 token 达到阈值后，只把**该模型**切到其他账号，同一账号的其他模型不受影响——例如 `hy4-preview` 用满 2 亿后该模型被跳过，`deepseek-v4.1-flash` 仍可用。账号行显示 `模型 · N tok 达限` 标记；本地时间 0 点自动解封；单账号独立计数。
+- 两个限额与现有「每日 Token 限额」共用同一份增量扫描（`daily_usage_stats`），请求热路径开销不变；新增 `tests/_test_daily_credit_limit.py`（10 项），整套增至 30 个套件（25 个 Python + 5 个 JS）全绿。
+- **新增「OpenRouter 价估算（等价 token 花费）」**：把请求 token 按 OpenRouter 公布的模型价折算成等价金额，与账号实际扣除的积分并列展示。定价快照内嵌在 `wb_pricing.py`（单一来源：OpenRouter 目录，美元，按快照汇率折算；大多数模型一个价，按条件定价的模型（输入长度阈值或 UTC 时段）按每条请求取档），`_fetch_pricing.py` 可随时刷新（支持 `--embed` 回写内嵌、`--dry-run` 只打印，`--extra-ids-file` 额外覆盖一批名字），并按「面板手填覆盖 → 人工覆盖表 → 名字归一化全等 → 变体后缀继承」依次为模型取价。计价含缓存命中/未命中分档。看板显示位：数据指标看板 KPI 卡片、账号透视表最后一列、模型用量表最后一列（含合计）、网关页卡片、最近请求最后一列；**人民币/美元一键切换**，无定价模型显示 `—` 并计入「未覆盖」。
+- **定价按策略留档、定时自动刷新**：网关每隔一段时间（面板「设置 → 定价刷新」，默认 **5 分钟**，单位即分钟，填 0 关闭）去 OpenRouter 取一次价，按**内容**存成一条条独立的定价策略（同一模型同一份价格只存一条，A → B → A 只占两条），并用一条时间轴声明每个模型当前生效的是哪一条。`usage.jsonl` 每条请求记下它**引用了哪条策略**，计价按引用查——之后上游调价不会改写昨天已经算出的数字；当时还没有价的模型用之后第一次取到的价补算并标 `*`。没有任何请求引用、又已经不作数的策略会在抓取后清掉（每个模型至少留一条，刚取到的那批不动）。所有汇总都是把逐条估算相加，不拿汇总 token 乘单价重算。取价逻辑一并从 `_fetch_pricing.py` 移进 `wb_pricing.py`（Docker 镜像只 COPY `wb_*.py`，运行时取不到那个脚本），后者只负责生成出厂快照。
+- **取价间隔改为分钟计（默认 5 分钟），旧的小时配置自动折算**：此前该设置按小时计、存在 `pricing_refresh_hours`；现在统一为分钟并存 `pricing_refresh_minutes`，`settings.json` 里遗留的小时值在升级后第一次读取时按 ×60 折算写回新键、旧键删除（只迁移一次），所以「6 小时」不会变成「6 分钟」。0 仍表示关闭自动刷新，「立即取价」不受影响。
+- **上游新增模型无需改代码即可自动取价**：取价的候选清单从「只读 `wb_catalog.py`」改为 **静态目录 ∪ 网关实时目录里新增的模型**（intl 与 cn 两个区域各自的实时目录都会并进来，走 `/v1/models` 同一套过滤；某个区域取不到时该区域回落静态目录，一次抓取失败不会让覆盖变少）。两次取价之间新模型就被调用时，第一笔请求也会带价：`wb_pricing.ensure_policy()` 用最近一次抓取留在内存的目录按需登记策略，**请求路径零网络 I/O**，登记在 `RLock` 内完成、并发重复调用也只写一条，新登记会打一条 `[定价]` 日志。匹配链新增**变体后缀继承**（`VARIANT_SUFFIXES`：剥掉 `-lkeap` / `-taiji` / `-volc` / `-sg` 等渠道后缀，拿基名重走解析链，仍要求唯一命中），继承来的策略记 `via=variant` 与 `inherited_from` 供面板审计；设置页新增「变体后缀继承」开关（默认开，关掉即恢复只有覆盖表与同名匹配才定价）。`-f` / `-dev` / `-x` 不剥——它们是 hub 自己的档位，单价可能不同。匹配始终「宁可漏也不错」，多轮未命中的不写价。
+- **未定价模型可见化，并可在面板手填 OpenRouter id 收口**：`GET /pricing` 新增未定价清单，每条带分类（`alias` 虚拟别名，不计入缺口 / `or_missing` OpenRouter 无对应 / `variant_unmatched` 剥后缀后仍无唯一基准）与相似度 top 3 候选（**仅建议，绝不自动采用**）；面板「设置 → 定价刷新」下新增未定价区域，可为某条模型直接填 OpenRouter id「登记」，映射写入数据目录的 `pricing-overrides.json`（运行期覆盖，不改源码 `OVERRIDES`，升级镜像不丢），提交后立即触发一次取价；留空提交即删除映射。新增 `POST /pricing/mapping`。
+- **修好「立即取价」按钮的 404**（顺带）：`POST /pricing/refresh` 此前从未注册进 `do_POST`（`is_account_route` 不覆盖 `/pricing`），面板点「立即取价」实际收到 404；现在与 `/pricing/mapping` 一起走面板会话鉴权的新分支。新增文本级回归测试钉住这两条路由必须在 `do_POST` 里出现。
+- 新增 `tests/_test_pricing_auto.py`（40 项）：并集输入、按需补价（含并发幂等与写路径计价）、变体后缀继承与否决项（`kimi-k2-instruct-taiji`、`kimi-k2.8-preview`、5 个别名保持未定价）、缺口分类与候选、面板映射端点与开关。整套增至 32 个套件（27 Python + 5 JS），全绿。
+- **悬停即可看清一条请求的价是怎么来的**：最近请求最后一列的金额加了自绘气泡，给出三档原始单价（缓存命中/未命中输入、输出，USD 每百万 token）、汇率与折算说明、匹配来源的证据链（`direct` / `override` / `variant`，`variant` 还会写出基准名与剥掉的后缀）、命中的条件档位与该档单价、策略 id 与首次取到时刻、补算标记；没有定价的行仍只说「暂无定价数据」，不编 0。`/usage/recent` 每行直接带上 `cost_rates` / `cost_unit` / `cost_currency` / `cost_usd_cny` / `cost_or_id` / `cost_via` / `cost_inherited_from` / `cost_override_from` / `cost_band_note` / `cost_via_derived`，不为展示再开接口。**没有动计价口径**：`policy_id` 的算法一字未改，全量 15176 行逐行 `source` 与改动前 0 条失配，历史策略 id 逐条不变，已固化成测试。早于 `via` 字段写下的策略行按当前映射表推断并标注是推断（`via_derived=true`），指不到就不认。新增 `tests/_test_pricing_tooltip.py` 与 `tests/_test_pricing_tooltip.js`（夹具取自 2026-10-02 的线上现场），整套增至 34 个套件（28 Python + 6 JS），全绿。
+
+- **「扫描桌面客户端账号」重新可用：桌面端加密凭据现在能在网关里直接解密**（入口此前因加密改造被隐藏）：桌面客户端从 2026-09-24 起把 `accessToken` / `refreshToken`（国内版还连带 `nickname` / `phoneNumber`）改成 `$wbEncrypted` 信封存储，扫描只能读到信封文本，导入后聊天、刷新凭证、查积分一律 401，当时只能把入口摘掉、让用户改走 OAuth。现在按客户端 `packages/at-rest-crypto` 的同一套方案就地解密（`key = sha256(atRestSecretKey)`、`keyId = sha256(key)[:16]`、AAD 为 `WB-AAD\0` + 版本 + `LP(WBEF1/WBEV1)` + `LP("sym-v1")` + `u32(suite)` + `LP(keyId)` + 帧代码 + 两个 0），入口放回来了。
+  - 解码密钥只存在于客户端原生模块的运行内存里、磁盘上没有明文，所以网关从**正在运行的** `WorkBuddy.exe` 主进程内存里把它找回来（`OpenProcess(PROCESS_VM_READ)` + `VirtualQueryEx` + `ReadProcessMemory`，全程只读，不向目标进程写任何东西）；找到后用 keyblob 的 `protectorKeyId` 与一次 GCM 解封双重校验，校验不过就当没找到。密钥只留在网关进程内存中，不落盘、不进日志，网关重启后重新回收一次。
+  - 内存回收不再逐字节哈希。三档扫描、命中即止：先按 `atRestSecretKey` 字段名和孤立的 44 字符规范 base64 捞出密钥载荷直接推导（正则走 C 层，约 460 MB/s），不中再按 8 字节栅格逐窗口哈希，最后才逐字节兜底；内存段按 64 MB 切片后均分给多个扫描子进程，任意一个命中其余立刻收工。对比上游那版逐字节脚本（单进程 1.36 MB/s、12 进程 16 MB/s），实测 462 MB 的客户端内存 **0.8 秒**拿到密钥。
+  - 新模块 `wb_atrest.py` 只用标准库（自带 AES-256-GCM 与 GF(2^128) 实现，不引入任何 pip 依赖，绿色包内置的 Python 直接能跑）；并行用的是 `sys.executable` 拉子进程，而不是 `multiprocessing`——绿色包那份精简 Python 里根本没有这个模块，用它会直接报错。
+  - 实测完整链路（Windows + 真实客户端）：两个 `.info`（国内版 / 国际版）的 token 与昵称都正常解出并导入成功；导入后的国内版账号 `/accounts/test` 直接拿到模型回复，国际版账号的凭证查询接口返回真实积分（顺带确认导入的是可直接使用的那串 token，不是信封）。
+- **修掉区域判定的两处旧账**（手动导入 JSON 时「明明是国内版却进了国际版」就是这么来的）：`detect_realm_from_token()` 只认 `copilot.tencent.com` 与 `codebuddy.cn`，而国内版后来把出口换成了 `workbuddy.cn`（新版国内客户端的 JWT issuer 就是 `https://www.workbuddy.cn/…`），这类国内账号一律被判成国际版；JSON 里没有 `realm` 字段就会中招，而且一旦存错，导出再导入还会把这个错误一路带着。现在：
+  - 三个国内出口（`copilot.tencent.com` / `codebuddy.cn` / `workbuddy.cn`）都认，国际版认 `workbuddy.ai` / `codebuddy.ai`，两边都看不出时不再假装知道（`realm_evidence()` 返回空，由调用方决定怎么兜底）；
+  - 区域判定以 **token 自己的 issuer** 为准，域名只作兜底——同一台机器切区登录过时，`.info` 里的 `domain` 字段可能还是另一边的，不能让它盖过 token；
+  - 桌面凭据的文件名（`workbuddy-desktop.info` = 国内、`-ai.info` = 国际）退为提示：同一个文件里登录另一区域账号时按 token 归位；扫描列表和导入用的是同一套判断，不会再出现「列表里写着国内版、导入却跑进国际版」；
+  - `X-Domain` 头跟着最终区域走，不会拿着上一边的域名去请求另一边的出口；
+  - 新增 `tests/_test_desktop_realm.py`（19 项）：三个国内出口 × 域名/issuer 组合、过期的 `realm` 字段、显式 `realm` 覆盖、导出再导入不漂移。
+- 看板：工具栏入口放回；扫描结果新增「已加密 / 待解码」状态，遇到加密凭据会提示先点「回收密钥」（后端在同一接口上新增 `{"recoverKey": true}` / `{"forgetKey": true}` 两个动作，沿用面板鉴权），拿不到密钥时（客户端没开、非 Windows、权限不足）直接把原因显示出来，并引导回 OAuth。
+  - 新增 `tests/_test_desktop_atrest.py`（26 项：FIPS-197 的 AES-256 分组向量、信封往返 / 篡改 / 错钥 / 帧隔离、keyblob 自检、路径限制，以及拉起一个靶子进程真跑一遍内存回收、确认密钥不落盘），整套 31 个测试文件全绿。
+
+- **新增：积分与套餐权益包全维度明细查看与到期管理**：
+  - 参考 CodeBuddy 官方直连计费接口（`/billing/meter/get-user-resource-summary`、`get-user-resource-free-packages`、`get-user-resource-paid-packages` 与 `checkin-activity-status`），实现各账号积分与权益包的秒级同步与完整解析；
+  - **全维度信息透出**：解析各套餐包名称、子产品名称、发放来源/原因（如官方活动发放、裂变拉新、月度赠送等）、资源 ID、订单号、生效时间与精确到秒的到期时间、总容量、已用及剩余可用积分；
+  - **到期倒计时与临期提醒**：自动按当前时间计算剩余天数，区分「已过期」、「≤3天即将到期」、「≤7天到期提醒」及「长期有效」；账号池主表实时感知临期状态并在「积分」列透出警示徽章，弹窗内设「最近将过期」概览卡片；
+  - **交互体验与筛选排序**：看板支持 Tab 快速筛选（全部 / 有剩余 / 即将到期 / 已用完过期）、多字段模糊搜索（名称/代码/来源）以及四档动态排序（最快到期优先、剩余额度最大、已用最多、总容量最大），并支持一键实时向上游刷新；「积分」列精简为单入口（点击 `[明细]` / `[查询]` 徽章唤起窗口）。
+- **新增：看板明/暗主题切换（浅色 / 深色 / 跟随系统）**：
+  - 顶部右侧新增主题切换按钮，下拉可选「浅色」「深色」「跟随系统」三档，图标随当前偏好变化（太阳 / 月亮 / 显示器）；
+  - 全看板配色改为 CSS 变量驱动，深色主题（`[data-theme="dark"]`）覆盖背景、面板、边框、文字、徽章、模态遮罩等全套组件，`color-scheme` 同步切换；
+  - 偏好持久化到 `localStorage`（`wb-theme`），刷新与重开看板保持；内联脚本在 `<body>` 解析前即设定主题，避免首屏白闪；
+  - 「跟随系统」实时监听 `prefers-color-scheme` 变化，系统切换深浅色时看板即时跟随；移动端同步适配主题按钮尺寸。
 
 ### v1.6.10
 
