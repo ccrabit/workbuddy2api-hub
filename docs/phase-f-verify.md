@@ -11,6 +11,7 @@
 > 包对着**构建它的那个 tag 提交**验，设备对着**它自己那一版**包验，合并事实对着**HEAD 历史里最近一次合并**验；
 > 环境给不出答案时 `gate()`/SKIP 并写明理由（**绝不 FAIL**），能给答案的地方不许退化成 SKIP。
 > 三种环境（开发树 / depth-1 浅克隆 / Windows 形状）都必须 FAIL=0。
+> **task-29（WP-F10）** 又修掉 Windows 腿唯一一条真红：CRLF 检出 vs 套件用文本模式读源文件（R25，见 §2.14）。
 
 | 项 | 判定 | 通过 / 失败 / 跳过 | 证据 |
 |---|---|---|---|
@@ -25,15 +26,17 @@
 | 全量套件 `run_all.py --jobs 4` | **通过** | 122 / 0 / 0 | §2.9、E1 |
 | 平台形状（无 AF_UNIX / shallow clone / 非 root） | **通过** | 8+11 / 0 / 0 | §2.10、E10/E11 |
 | 交付说明与方案书一致性（F6 交叉核对，含设备状态带牙断言） | **通过** | 22 / 0 / 0 | §2.11、E15、R17/R23 |
-| **三环境 FAIL=0**（开发树 / depth-1 浅克隆 / Windows 形状） | **通过** | 351/0/3 · 253/0/15 · 8/0/0 | §2.12 |
-| **敏感性证明**（改坏输入必红） | **通过**（3 条） | 见 §2.13 | §2.13 |
+| **三环境 FAIL=0**（开发树 / depth-1 浅克隆 / Windows 形状） | **通过** | 352/0/2 · 253/0/15 · 8/0/0 | §2.12 |
+| **敏感性证明**（改坏输入必红） | **通过**（4 条） | 见 §2.13 | §2.13 |
 
-- **本套件合计（开发树）PASS=351 / FAIL=0 / SKIP=3**，exit 0（17 段；日志 `/tmp/wb-f9-full4.log`，80.2s）。
-  Lead 回填交付说明后的这一轮全绿；回填前是 `340 / 6 / 3`（`/tmp/wb-f9-full2.log`，6 条红 = R17/R23 四条 + 其派生两条）。
+- **本套件合计（开发树）PASS=352 / FAIL=0 / SKIP=2**，exit 0（17 段；日志 `/tmp/wb-f10-full.log`，81.6s）。
+  Lead 回填并提交交付说明后全绿：`351 / 0 / 3` → `352 / 0 / 2`（原来那条 `M scripts/build-fpk.sh` 引起的「包内文件有未提交改动」
+  gate 现在真跑并 PASS）；回填前是 `340 / 6 / 3`（`/tmp/wb-f9-full2.log`，6 条红 = R17/R23 四条 + 其派生两条）。
+  剩下 2 条 SKIP 是环境：① 以 uid 65534 起面板（沙箱父目录 `drwx------` 不可遍历）；② HEAD 上还没有 `fnos-*` tag。
 - **depth-1 浅克隆（CI 形状）**：用**已提交**的树跑 = `PASS=249 / FAIL=4 / SKIP=15`（唯一根因是提交里的交付说明还写着
   设备 1.6.17.1，另 3 条是派生）——**这是文档没提交，不是套件问题**；把**回填后**的交付说明放进同一个克隆再跑 =
   **`PASS=253 / FAIL=0 / SKIP=15`，exit 0**（`/tmp/wb-f9-ci3b.log`）。⇒ Lead 提交回填后 CI 即绿。
-- `python3 tests/run_all.py --jobs 4` → **122 passed, 0 failed, 0 skipped**（85.2s，exit 0；`/tmp/wb-f9-runall3.log`，其中本套件行 `PASS=351 FAIL=0 SKIP=3`）。
+- `python3 tests/run_all.py --jobs 4` → **122 passed, 0 failed, 0 skipped**（83.4s，exit 0；`/tmp/wb-f10-runall.log`）。
 - `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk` → 工作树上 **69 passed, 1 failed**
   （唯一失败 `every packaged file is byte-identical to the tree`，因为工作树已前移 24 个提交）；
   **在 tag 提交的检出上同一条命令 71 passed / 0 failed**（E5 实测）。「同一条命令在不同环境给不同数字」现在是
@@ -239,7 +242,7 @@ $ bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk | tail -2
 $ python3 tests/run_all.py --jobs 4
   ...
   122 passed, 0 failed, 0 skipped  (/vol2/1000/AgentWork/2api/workbuddy2api-hub)
-  total 85.2s with --jobs 4
+  total 83.4s with --jobs 4
 ```
 
 - 树里套件数（92 Python + 30 JS = 122）与 `README.md:134` 写的「122 个套件：92 个 Python + 30 个 JS」**逐字一致**；
@@ -279,8 +282,8 @@ $ python3 tests/run_all.py --jobs 4
 
 ### 2.12 三环境 FAIL=0（task-27 的硬要求）
 
-- **(a) 开发树**：本套件 `PASS=351 / FAIL=0 / SKIP=3`，exit 0（`/tmp/wb-f9-full4.log`）；
-  `python3 tests/run_all.py --jobs 4` = **`122 passed / 0 failed / 0 skipped`（85.2s，exit 0）**。
+- **(a) 开发树**：本套件 `PASS=352 / FAIL=0 / SKIP=2`，exit 0（`/tmp/wb-f10-full.log`）；
+  `python3 tests/run_all.py --jobs 4` = **`122 passed / 0 failed / 0 skipped`（83.4s，exit 0）**。
   交付说明回填前的那一轮是 `340 / 6 / 3` 与 `121 passed / 1 failed`（唯一红 = 本套件），差异全部来自 R17/R23 的文字。
 - **(b) depth-1 浅克隆（CI 形状）**：`git clone --quiet --depth 1 file://$PWD /tmp/wb-f9-ci3`（**必须用 `file://`**，
   普通本地路径会忽略 `--depth` 而把整段历史拷过来，那样预演什么都证明不了），再把套件复制进去：用**已提交**的树跑
@@ -312,6 +315,8 @@ $ python3 tests/run_all.py --jobs 4
 | 2 | 已发布资产副本尾部多 1 字节（`/tmp/wb-sens/badcopy.fpk`） | `WB_PUBLISHED_ASSET=/tmp/wb-sens/badcopy.fpk python3 -u tests/_test_phase_e_verify.py e14` | **30 / 1**：`已发布资产副本的字节数与 sha256 与报告常量一致 -> (577843, '1773d865ee2fab76')` |
 | 3 | 删掉 packager 套件里第 148 行调用点的 `cwd=`（`/tmp/wb-sens/pipeline_nocwd.py`） | `WB_RELEASE_PIPELINE_SUITE=/tmp/wb-sens/pipeline_nocwd.py python3 -u tests/_test_phase_e_verify.py e13` | **35 / 2**：`每个 subprocess.run 调用点都传了 cwd= -> {'call_sites': 5, 'sites_without_cwd': [148]}` |
 
+| 4 | 在 Linux 上造 **CRLF 检出**（`git -c core.autocrlf=true clone … /tmp/wb-crlf`：`dashboard.html` = 560303 B / 10188 个 CRLF / 0 个裸 LF） | 修前：`(cd /tmp/wb-crlf && python3 -u tests/_test_phase_e_verify.py e3)`；修后同一条命令 | 修前 **32 / 1**：`直连 GET / == dashboard.html + 本次语言替换（逐字节，上游缓存头契约） -> (473324, 463136, 'zh')`（与 CI 日志逐字符相同，差值 = 10188 = 行数）；修后 **33 / 0 / 0** |
+
 第 3 条还配了反证：只在注释里写 `cwd=` 的副本 `/tmp/wb-sens/pipeline_comment.py` → **该 check 仍 PASS**
 （而旧的 `count("subprocess.run(") == count("cwd=")` 计数门在同一份文件上会算成 `5 != 6` → 假红）。
 `tests/_test_release_pipeline.py` 里实测 5 个调用点（行 97/148/157/425/477）全部显式传了 `cwd=`。
@@ -322,10 +327,36 @@ E5 在 tag 检出上跑 `verify-fpk` 必须 0 failed、E8 的「设备 `server/*
 E14 的 fnpack 必须等于已发布资产。任何一环不在位（无 `dist/`、浅克隆、设备版本对不上、文档没回填）→
 `gate()`/SKIP 并写明理由，**绝不 FAIL**，也**绝不用别的版本的包冒充锚**。
 
+### 2.14 Windows 腿的 CRLF 根因（task-29 / R25）
+
+CI run `38061914772`（`b8174b2`）只有 `windows-latest / python 3.12` 一条腿红，红在步骤 `Run every suite`，
+artifact `11673721866` 里唯一根因套件是本套件、套件内唯一根因 check（日志 `:39`）：
+
+```
+[FAIL] 直连 GET / == dashboard.html + 本次语言替换（逐字节，上游缓存头契约）  -> (473324, 463136, 'zh')
+```
+
+- **根因**：GitHub 的 Windows runner 检出把 LF 转成 CRLF（本机 LF：`dashboard.html` 550115 B / 10188 行 / 0 个 CRLF；
+  runner 上 560303 B / 10188 个 CRLF）。服务端按磁盘字节原样吐，而 `dashboard_source()` 当时是**文本模式** `open(path, encoding=…)`，
+  通用换行把 CRLF 归一成 LF ⇒ 期望值每行少一字节，`473324 − 463136 = 10188` 正好是行数。
+  上游自己的套件就是按磁盘字节读的（`tests/_test_dashboard_cache_headers.py:130` 用 `"rb"`、`:201` 用 `"ab"`），
+  所以这是**测试侧口径错**，不是产品缺陷——**没有改任何产品代码**。
+- **改法**（`tests/_test_phase_e_verify.py:831-840`，`dashboard_source()`）：改成 `open(path, "rb")` 再
+  `.decode("utf-8", "replace")`，并加注释说明「Windows 检出可能是 CRLF，服务端吐的是磁盘字节」。
+  调用点（`:1172` 的语言替换）不用改（替换目标串不含换行）。
+- **同类点位审计**（要求 5）：在套件里搜了「`open(` + `read()` + 与 HTTP 响应/包载荷逐字节比」的四种形态 ——
+  ① `expected = …` 只有这一处（`grep -n "expected ="` 唯一命中，且 `body ==`/`== body` 也只此一处）；
+  ② 包载荷 ↔ **git 树**走 `payload_differs_from_git()`（`:391-406`），比的是 `git show <tag>:<path>` 的 blob 字节（LF），
+  **与检出换行无关**；③ 包载荷 ↔ **工作树**的 `payload_differs_from_tree()`（`:409-424`）是磁盘字节比磁盘字节，
+  且 e5 里它的用途正是「解释 verify-fpk 为什么会报 payload 不一致」，期望值由同一个 drift 列表算出（CRLF 下两边同时变化，判定不变）；
+  ④ 设备侧比对（e8/e6）读的是**设备上的安装文件**与**包 payload**，两边都来自同一个包，与仓库换行无关。
+  ⇒ 套件里**没有第二处**「文本读源码 vs 线上字节」的脆弱点。
+- **灵敏度**：§2.13 第 4 条 —— 同一份 CRLF 检出上「修前 32/1（差值 10188）→ 修后 33/0/0」，LF 检出（开发树）始终 33/0/0。
+
 ## §3 缺陷与登记项
 
-本阶段**没有发现任何未修复的产品缺陷**：当前开发树上本套件 `351 / 0 / 3`、`run_all --jobs 4` 122 passed / 0 failed。
-以下 10 条是登记项（`register()`，不计 PASS/FAIL），按「Lead 交付前必须处理」排序：
+本阶段**没有发现任何未修复的产品缺陷**：当前开发树上本套件 `352 / 0 / 2`、`run_all --jobs 4` 122 passed / 0 failed。
+以下 11 条是登记项（`register()`，不计 PASS/FAIL），按「Lead 交付前必须处理」排序：
 
 | 编号 | 事项 | 性质 | 归属 / 建议 |
 |---|---|---|---|
@@ -339,6 +370,7 @@ E14 的 fnpack 必须等于已发布资产。任何一环不在位（无 `dist/`
 | **R15** | 「现有仓库本身够格被召回」在 push 之前不成立 | 结论更正（文档与实际不符） | 上架说明改成「push 之后才可被代码搜索索引」 |
 | **R18** | `docker-publish.yml` / `release-checksums.yml` 在我们树里是 100755（上游 100644） | 噪音（内容一字未改） | 交付前 `chmod 644` 清掉；来源是 Phase E 的 `55dfad2`/`9dff35f` |
 | **R24** | 设备面板仍是默认密码（`panel_password_is_default: true`） | 设备配置，不是代码缺陷 | 交付说明里提一句；网关 socket 免密与它无关 |
+| **R25** | 验收套件用**文本模式**读 `dashboard.html` 再与 HTTP 响应逐字节比 → 只有 Windows 腿红（CRLF 检出） | **已修**（task-29，测试侧口径错、产品代码一字未动） | `dashboard_source()`（`tests/_test_phase_e_verify.py:831-840`）改成 `open(path, "rb").read().decode(...)`；同类点位审计结论与敏感性证明见 §2.14 / §2.13 第 4 条 |
 
 **R15 的完整证据**（这条是 Lead 主动要求我独立复核的，我复核的结论是「方向对、但前提缺一句」）：
 
@@ -401,7 +433,8 @@ E14 的 fnpack 必须等于已发布资产。任何一环不在位（无 `dist/`
 4. **Release/上架动作本身**：本阶段没 push、没打 tag、没发 Release（我也不允许做），这几步只有用户决定后才能做。
 5. **`/v1` 在网关 socket 上免 API key 的影响面**：我只能证明「uid 0 或应用自身 uid 连 socket 打 `/v1` 不带头也 200，
    TCP 仍 401」；真机上有没有第三个用户能碰到这个 socket，取决于 NAS 的权限模型，需要真机确认。
-6. **第二轮平台真机**（Windows 控制台、非 UTF-8 环境）：e10/e11 在本地复算过形状，真 Windows 以 CI 为准。
+6. **Windows 腿**：e10/e11 在本地复算形状；真实 `windows-latest / python 3.12` 腿在 CI run `38061914772` 上跑完过整套，
+   当时唯一红就是 R25（已在 task-29 修）。修后 Windows 的最终判定仍以你再跑一次 CI 为准（我没有 push 权限，也没 push）。
 
 ## §5 有意口径差异（写进交付说明用）
 
@@ -422,16 +455,15 @@ E14 的 fnpack 必须等于已发布资产。任何一环不在位（无 `dist/`
 
 | 文件 | 行数 / 字节 | sha256 |
 |---|---|---|
-| `tests/_test_phase_e_verify.py` | 3741 行 / 198877 字节 | `636c2faa30fb043ce8e1fde3cfe8a16ed7d140e716fb89aa67f6d9ef863a2056` |
+| `tests/_test_phase_e_verify.py`（task-29 后） | 3746 行 / 199251 字节 | `166ed5102cfff33ff70bb59ad91b6f59be2509199f43763ef4ab6c15bed71d5b` |
 | `dist/WorkBuddy2API-Hub_1.6.19_all.fpk`（本机重建后） | 577330 B | `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98` |
 | `/tmp/wb-published/WorkBuddy2API-Hub_1.6.19_all.fpk`（已发布资产副本） | 577842 B | `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c` |
 
 - 本报告：`docs/phase-f-verify.md`（自有 sha256 不写在正文里——写进来就会因为这一行立刻失效）。
-- 工作树状态（`git status --porcelain`，HEAD = `39a16f6`「Merge upstream/main (5b5b5c1) into the fnOS fork」）：
-  `M docs/phase-f-delivery.md`（Lead 回填 R17/R23，**未提交**）、`M docs/phase-f-version-policy.md`、
-  `M docs/phase-f-verify.md`（本报告）、`M scripts/build-fpk.sh`（packager 的 R19 修复）、
-  `M tests/_test_phase_e_verify.py`（我的套件）、`M tests/_test_release_pipeline.py`（packager 的套件）。
-- **发布 tag**：`fnos-1.6.19`（annotated）→ `26c2bcc`，是 HEAD 的祖先（HEAD 领先 24 个提交）。
+- 工作树状态（`git status --porcelain`，HEAD = `b8174b2`「chore(release): fix the payload, make the acceptance suite state-aware」）：
+  只有两个被改文件，都是我的写域 —— `M tests/_test_phase_e_verify.py`（task-29 的 R25 修复）、`M docs/phase-f-verify.md`（本报告）。
+  Lead 已把 task-27 的套件与报告提交为 `b8174b2`（含交付说明回填与 packager 的 R19/R21/R22 修复），所以工作树其余部分是干净的。
+- **发布 tag**：`fnos-1.6.19`（annotated）→ `26c2bcc`，是 HEAD 的祖先（`git describe` = `fnos-1.6.19-25-gb8174b2`，领先 25 个提交）。
 - 包内文件（`server/**`、`ui/**`、`fnos/**`、`scripts/**`）在这个窗口里**没有被任何人改过**——
   e5 的逐字节比对与 e8 的未提交改动门就是这条的看门人。
 - 我不 `git commit`、不 push、不打 tag、不动设备、不重建包（`dist/`、`build/` 的单写者是 Lead/packager）。

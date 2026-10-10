@@ -830,8 +830,13 @@ def _read_account_file(directory, uid):
 
 def dashboard_source():
     path = os.environ.get("WB_DASHBOARD_PATH") or os.path.join(ROOT, "dashboard.html")
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        return fh.read()
+    # Read the bytes and decode: a Windows checkout can be CRLF, and the panel
+    # serves the file's on-disk bytes verbatim. Text mode's universal newlines
+    # would silently normalise CRLF to LF, so the expected string would be one
+    # byte per line shorter than the response (upstream's own
+    # tests/_test_dashboard_cache_headers.py reads "rb" for the same reason).
+    with open(path, "rb") as fh:
+        return fh.read().decode("utf-8", "replace")
 
 
 # ---------------------------------------------------------------------------
