@@ -7,18 +7,26 @@
 
 ## 1. 包与已发布资产
 
+> **Phase G 状态（2026-10-10 深夜 → 10-11 凌晨，你选了「以后本地发布 + 上架 FnDepot」之后）**：GitHub 上**所有自建 workflow 已删除**（只剩上游自带、只在 `v*` 触发的 `release.yml`），发布改为本地流程；`fnos-1.6.19` 的 Release 资产已**本地重建并覆盖**（同一版本号，含第二次上游合并 + R19/R25/R26），tag 重指到最终提交。详细 runbook 见 `docs/phase-g-local-release.md`，方案见 `docs/phase-g-plan.md`。
+>
+> **因此：§1 的指纹以本轮为准，§2.2 的第 1 条（同步工作流）在 Phase G 已被删除而作废（保留为历史记录）。**
+
+## 1. 包与已发布资产
+
 | 项 | 值 |
 |---|---|
 | 文件 | `dist/WorkBuddy2API-Hub_1.6.19_all.fpk` |
-| 大小 | 577330 B（563.8 KiB） |
-| sha256 | `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98` |
-| manifest checksum | `27d6795c7ba2a4db89f1e82fabef6ef0`（= 包内 `app.tgz` 的 md5） |
-| 载荷 | **40 个文件** = `server/` 35 个（25 个 `*.py` + `LICENSE`/`dashboard.html`/`fnpack.json`/`pricing/pricing.json`/`fndepot/ICON.PNG`/`release/portable.txt` + `wrt/openwrt/workbuddy2api/` 4 个）+ `ui/` 3 个 + `config/` 2 个，`.pyc` 与 `__pycache__` **0 命中** |
+| 大小 | 591004 B |
+| sha256 | `ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7` |
+| manifest checksum | `a3ebd7e23b35f1927f2242934f6a1757`（= 包内 `app.tgz` 的 md5） |
+| 载荷 | **39 个文件** = `server/` 34 个（25 个 `*.py` + `LICENSE`/`dashboard.html`/`pricing/pricing.json`/`fndepot/ICON.PNG`/`release/portable.txt` + `wrt/openwrt/workbuddy2api/` 4 个）+ `ui/` 3 个 + `config/` 2 个，`.pyc` 与 `__pycache__` **0 命中**；根 `fnpack.json` **不入包**（自指清单，见 `docs/phase-g-local-release.md` §6/§8） |
 | 版本 / appname | `1.6.19` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
 | 显示名 | `WorkBuddy2API-Hub` |
-| **已发布 Release 资产** | tag `fnos-1.6.19` 的 Release（id `408987082`，published `2026-10-10T14:03:36Z`）挂的是 **CI 构建**的 `WorkBuddy2API-Hub_1.6.19_all.fpk`：**577842 B**、sha256 `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`、app.tgz md5 `806ce4e9ac0cda75485d34ed04657230`。它与上面这份**载荷逐文件相同、gzip 外壳字节不同**（原因见 §7 R22）⇒ `fnpack.json` 填的是**资产**的值 |
+| **已发布 Release 资产（2026-10-11 覆盖重建）** | tag `fnos-1.6.19` 的 Release（id `408987082`）现在挂的**就是上面这一个字节**：**591004 B**、sha256 `ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7`、app.tgz md5 `a3ebd7e23b35f1927f2242934f6a1757`（本地构建 → 本地上传，不再经 CI，所以「本地包 == 资产」逐字节成立） |
 
-**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。这份重建包与设备上那份**同版本号**，区别只是它已剔除 R19 那 3 个 `release/__pycache__/*.pyc`（内容其余部分逐字节相同）。
+**历史指纹（均已被上面的覆盖，留档）**：Phase F 的本机构建 `577330 B` / `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98`；Phase F 由 CI 构建并首发的资产 `577842 B` / `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`（app.tgz md5 `806ce4e9ac0cda75485d34ed04657230`）。两者与设备的载荷逐文件相同。
+
+**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别是**第二次上游合并改动的 6 个文件**（`dashboard.html`、`wb_proxy.py`、`wb_accounts.py`、`wb_scheduler.py`、`wb_tasks.py`、`fnpack.json`）+ 本包不再内嵌 `fnpack.json`；同版本号覆盖安装会被应用中心接受（若被拒，按上面的卸载口径处理）。
 
 **升级后请重点看**：
 1. 应用中心点「打开」→ 是否**免密**直接进面板（这是本轮要修的毛病：以前飞牛会话老化后又会弹密码）。
@@ -80,8 +88,9 @@
 
 | 门 | 结果 |
 |---|---|
-| `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk` | **71 passed / 0 failed**（在 tag 提交 `fnos-1.6.19` 的工作树里跑：「包就是这棵树构建的」真跑并通过）。**从主树跑是 69 passed / 1 failed**——唯一失败名 `every packaged file is byte-identical to the tree`，因为主树已领先该 tag 24 个提交（第二次上游合并动了 6 个载荷文件），属「发布后稳态」，不是包的问题 |
-| `bash scripts/verify-fpk.sh <已发布资产>` | **71 passed / 0 failed**（把 Release 资产下载回来跑） |
+| `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk`（Phase G，本包） | **70 passed / 0 failed**（HEAD 无 tag，所以比有 tag 时少跑 1 条 tag 断言；R19 的 `.pyc` 与 R22 的自指 `fnpack.json` 都已在 Phase G 修掉，不再有「发布后稳态漂移」那条 69/1） |
+| 同上，把 tag 打回 HEAD 之后 | **71 passed / 0 failed**（新增的那条 `the tag on HEAD names this version` 真跑） |
+| `bash scripts/verify-fpk.sh <已发布资产>`（Phase F 首发那份） | **71 passed / 0 failed**（把 Release 资产下载回来跑，验证过） |
 | `python3 tests/run_all.py --jobs 4` | 见 §4.1 / §4.3 |
 | 包结构 | 40 个载荷文件（`server/` 35 + `ui/` 3 + `config/` 2）、25 个 server `*.py` 全部可解析、`__pycache__`/`*.pyc` 零命中、port 8788、`wb_export.py` 在包内 |
 | 独立终验（F5/F9） | 见 §4.2 / §4.3 |
@@ -112,12 +121,20 @@
 - 这三条敏感性证明（**改坏必红**，原始输出在 `docs/phase-f-verify.md` §2.13）：包副本里 `server/wb_export.py` 翻一位 → e5 变 `58/2`；已发布资产副本尾部多 1 字节 → e14 变 `30/1`；删掉发布流水线套件里一个 `cwd=` 调用点 → e13 变 `35/2`。
 - 这次合并顺带暴露验收套件的一个**真实脆弱点**（R20）：它原来把历史对象（`db9e58b`）和「HEAD 上的 tag 是 v1.6.17.1」写死，于是 ①`push` 后 CI 的 depth-1 检出里根本没有 `db9e58b`、②发布后 HEAD 上的 tag 变成 `fnos-1.6.19`，两处都会让它在 **CI 三平台全红**（tests run `38058101228` / `38058324670`）。现已改成「先探对象在不在，不在就按项目名 SKIP 并给理由」，「能给出答案的不许退化成 SKIP」。
 
+### 4.4 Phase G（本地发布 + 删掉 CI）之后的门
+- `python3 tests/run_all.py --jobs 4` → **122 passed / 0 failed / 0 skipped**（53.5s，exit 0）。删除 5 个自建 workflow 曾一度让 29 条断言变红（`118 passed / 4 failed`），已由 F10 的 task-35 改成「钉在保留能力上」，并做了有牙证明（把旧 workflow 恢复进副本 `/tmp/wb-g-teeth`：三个发布套件各恰好 1 条红，无连带）。
+- `python3 tests/_test_phase_e_verify.py` → **PASS=349 / FAIL=0 / SKIP=3**（run_all 内 341/0/3）。
+- `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk` → **70 passed / 0 failed**；tag 打回 HEAD 后 71/0。
+- `du -sh .` 由 24M 降到 21M（`build/`、`__pycache__/`、`.pytest_cache/`、`suite-logs/` 全部清掉；`dist/` 1.6M 保留）。
+- 独立性：F10 的报告 `docs/phase-g-verify.md`，登记项 R27–R30。
+
 ## 5. 真机状态（只读核查，我方未改设备）
 - `/var/apps/workbuddy2api/manifest`：`version = 1.6.19`、`display_name = WorkBuddy2API-Hub`、`distributor = ccrabit`、`checksum = be761a0f2715cd903edcf8e88d4198f9`。
 - **这个 checksum 就是「你自装的那份本地包」**（重建前的 601800 B 版，留证 `/tmp/wb-r19-old-dist-1.6.19.fpk`）——也就是我在发布前 `present` 给你的那份。时间线一致：`server/**` mtime 20:18、服务进程 20:19 起。⇒ **设备升级是你做的，我方只做只读核查**。
 - 所以设备载荷 = 已发布资产载荷（40 个文件，逐字节相同）**+ 3 个额外的 `server/release/__pycache__/*.cpython-311.pyc`**（R19 的痕迹，对运行无影响；§6 已根治）。
 - 真机端到端（socket 上**不带** `X-Trim-Username`）：`/panel/status` → `{authenticated: true, via_gateway: true, panel_password_required: true, direct_port: 8788}`；`GET /app/workbuddy2api/` → 200，且带 `<base href="/app/workbuddy2api/">`、`window.__WB_BASE__="/app/workbuddy2api"`、`window.__WB_VIA_GATEWAY__=true`；banner 版本 `1.6.19`。⇒ **免密口径与挂载前缀契约在真机实装件上成立**（只剩「应用中心点击打开 / 安装过程 UI」没验）。
 - 另记：设备面板仍是默认密码（`panel_password_is_default: true`），建议改掉。
+- **Phase G 复核（只读，2026-10-11）**：设备仍未被动过；设备上的 `server/**` 与 Phase F 那版**已发布资产**（`/tmp/rel-old.fpk`，40 个载荷文件）逐字节相同，本包相对它只改了第二次上游合并涉及的那 6 个文件、且不再内嵌 `fnpack.json`。设备 manifest 的 `checksum` 与那一版资产的 `app.tgz` md5 不同（`be761a0f…` vs `806ce4e9…`），因为设备是从我们在发布前 `present` 给用户的那次本地构建装的——**换行/mtime 会让同一棵树两次构建的外壳字节不同（R22），所以「设备 = 哪个包」只能按载荷逐文件比对**。
 
 ## 6. 残余登记（都不影响这一版可用性）
 | 编号 | 是什么 | 状态 |
@@ -127,24 +144,40 @@
 | R21 | 排除式与 `.gitignore` 漂移（`logs/`、`suite-logs/`、`python/`、`.sdk-cache/`、`wrt/ipk/`、`wrt/apk/`、`.pytest_cache/`、`*.zip`、`*.pyo`…）；根治方向 = 暂存源改用 `git ls-files` | 本阶段**不修**（当前无实际污染），登记在 `docs/phase-f-version-policy.md` §10 |
 | R22 | 同一提交两次构建的 `app.tgz` md5 不同（tar 成员目录 mtime + gzip 外壳）⇒ 只能比**载荷内容**或**已发布资产 sha256**；方向 `--mtime=@<提交时间> --sort=name --owner=0 --group=0 --numeric-owner` + `gzip -n` | 本阶段**不修**，登记在 `docs/phase-f-version-policy.md` §10 |
 | R23 | 本文档原先把设备版本写成 1.6.17.1，与设备实况（1.6.19，你自装）不符 | **已修**（§1 / §5） |
+| R24 | 被 `run_all.py` 拉起的验收套件自己又嵌套跑一整轮 run_all（Linux 只占一半额度，Windows 会撞 300s 上限） | **已修**（`WB_RUN_ALL=1` 时改为跑 harness 冒烟 `_test_lifecycle.py`；被拉起 26.8s → 独立运行行为一字未变） |
+| R25 | 套件用**文本模式**读 `dashboard.html` 再逐字节比对响应，Windows 检出的 CRLF 被通用换行吃掉 ⇒ CI 上 `473324 != 463136` | **已修**（改二进制读后解码；CRLF 检出上修前 32/1 → 修后 33/0，已用 `git -c core.autocrlf=true clone` 双向坐实） |
+| R26 | 同上 R24 的动机更正（CI 停用后「Windows 超时」不再是动机，但去重本身成立） | 已随 F10 报告登记 |
+| R27 | `dist/` 里那份是「新树的候选包」，不等于任何一次已发布资产 | **已修**（Phase G 把候选包本身变成发布件：本地构建 → 本地上传，同一字节） |
+| R28 | 交付说明 §1 的本机构建指纹被新一轮重建取代 | **已修**（本表已回填最终指纹 591004 / `ac11f7f6…` / `a3ebd7e2…`） |
+| R29 | 设备锚点原来取 `dist/` 里那一版（已不是发布件） | **已修**（设备锚点改取发布件副本 `/tmp/wb-published`；Phase G 后改取实时下载的资产） |
+| R30 | Phase G 的删除尚未进 HEAD，e16 的状态感知 | **已修**（e16 已按状态判断；Phase G 提交后为终态） |
 
 ## 7. 还没做 / 需要你决定
 
 **没做**
-- 修好后的同步工作流**仍未在真实 GitHub 上跑过**（push 之后我会用 `workflow_dispatch` 手动触发一次证明它绿）。
-- FnDepot **尚未实际收录我们**（中心仓库 `valid_sources.txt` 实测 62 行、不含我们；GitHub 代码搜索索引也没追上）。
+- ~~修好后的同步工作流仍未在真实 GitHub 上跑过~~ → **Phase G 已按你的要求把这个工作流连同其余 4 个自建 workflow 一起删除**（`workflow_dispatch` 也从来跑不了：PAT 没有 Actions 写权限，实测 403）。以后发版是**本地流程**（`scripts/build-fpk.sh` + `scripts/gh-release.py`，runbook `docs/phase-g-local-release.md`），没有 CI 可等。
+- FnDepot **尚未实际收录我们**（中心仓库 `valid_sources.txt` 实测 62 行、不含我们；GitHub 代码搜索 `filename:fnpack.json` 的 41 条里也没有我们）。
 - 应用中心「点击打开」的安装后 UI 流程、真机移动端自适配，需要你在浏览器里看一眼。
 - 终验报告 §5 另列 6 条「做不到」的：真实 GitHub 跑同步、真机装包、FnDepot 实际收录、push/tag/Release 动作本身、网关 socket 上 `/v1` 免 key 的真机影响面、真 Windows 腿（以 CI 为准）。
 
-**发布收尾（2026-10-10 你批准「按完整顺序执行」后已完成）**
+**发布收尾（Phase F，2026-10-10 你批准「按完整顺序执行」后完成；机制已被 Phase G 取代，留档）**
 1. ✅ push `main`：`316eb8f → 26c2bcc`。
 2. ✅ 打并推送 annotated tag **`fnos-1.6.19`** → `build-fpk.yml` 跑通、**自动创建 Release**（id `408987082`）并挂上 CI 构建的包。
 3. ✅ 从 Release 读回**资产**的 sha256 与字节数（注意：CI 构建的包与本机 `dist/` 那份**载荷逐文件相同、gzip 字节不同**，所以 `fnpack.json` 填的是资产的值）。
 4. ✅ 回填 `fnpack.json` 的 `sha256`/`size` 并单独提交推送（`3d54173`，不需要新 tag）。
-5. ⏳ FnDepot 中心仓库每天 16:00 UTC 重生成 `valid_sources.txt` —— 等它收录。
+
+**Phase G 发布收尾（2026-10-11，本地流程）**
+1. ✅ 提交 Phase G 全部改动（删 5 个 workflow、`scripts/gh-release.py`、runbook、`fnpack.json` 不入包、验收套件对齐）。
+2. ✅ `git tag -f -a fnos-1.6.19` 重指到该提交，push `main` 与 tag（tag 决定 `--print-version`，也决定设备看到的应用版本）。
+3. ✅ `python3 scripts/gh-release.py release-upload` 覆盖上传本机构建的 `591004 B` 包 + `.sha256`（clobber）——**资产就是本机 `dist/` 这一个字节**，不再有「CI 包 vs 本机包」两套。
+4. ✅ Release 正文换成 Phase G 说明（`docs/phase-g-release-body.example.md` 打底，附最终指纹）。
+5. ✅ 按**资产**指纹回填根 `fnpack.json` 的 `sha256 = ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7` / `size = 591004` / `updated_at`，单独提交推送。
+6. ⏳ FnDepot 中心仓库每天 16:00 UTC 重生成 `valid_sources.txt` —— 等它收录（配合新建的 `ccrabit/FnDepot` 源仓库）。
 
 **需要你决定 / 动手**
 1. GitHub 仓库 **Issues 开关**：同步冲突时「开 issue」依赖它（我的 PAT 没有 administration 权限，要你到 Settings → General → Features 勾上）。
-2. 是否要为 FnDepot **另建一个非 fork、名字含 `fndepot` 的仓库**做收录兜底？我倾向**先不建**，用现有仓库加代码搜索这条路。
+2. ~~是否要为 FnDepot 另建一个非 fork、名字含 `fndepot` 的仓库？~~ → **你已拍板：建**（Phase G）。理由：中心仓库的召回有一支只保留名字含 `fndepot` 的仓库，而本仓库是上游 fork 且名字不含它，`valid_sources.txt` 里 62 条有 61 条名字含 `fndepot`；新建后由它承载 `fnpack.json`（FPK 仍用绝对 URL 指向本仓库的 Release 资产）。**需要一个能建仓的 classic token**（细粒度 token 建仓实测 403，见 §7 第 5 条）。
 3. 建议轮换/删除 `/root/.gh-token`（它在本会话里出现过）。
 4. 设备面板还是默认密码，建议改掉。
+5. **`/root/.gh-token-classic` 还不存在**：你在 m07049 只发了 `chmod 600 /root/.gh-token-classic` 这一行命令，但那个文件还没建（`ls` 报 No such file or directory）。请把 classic token 写进去再回话：
+   `printf '%s' 'ghp_你的token' > /root/.gh-token-classic && chmod 600 /root/.gh-token-classic`（`wc -c` 应约 40，不要有多余换行）。我会先只读验证再建 `ccrabit/FnDepot`。

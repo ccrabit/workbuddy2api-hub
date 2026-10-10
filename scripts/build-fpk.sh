@@ -215,6 +215,11 @@ derive_version() {
 build_payload() {
     rm -rf "$PAYLOAD_DIR"
     mkdir -p "${PAYLOAD_DIR}/server"
+    # fnpack.json is the FnDepot source manifest for the repository root: its
+    # sha256/size fields can only ever describe the package they travel in, so a
+    # copy inside the payload is self-referential and stale the moment we
+    # backfill those fields after a build. Nothing in the app reads it (the FnDepot
+    # client fetches the repository copy by URL), so it stays out of the package.
     tar -C "$REPO_ROOT" -cf - \
         --exclude='./.git' \
         --exclude='./.github' \
@@ -237,6 +242,7 @@ build_payload() {
         --exclude='./docker-compose*' \
         --exclude='./.dockerignore' \
         --exclude='./.gitignore' \
+        --exclude='./fnpack.json' \
         --exclude='./_fixbats.py' \
         . | tar -C "${PAYLOAD_DIR}/server" -xf -
 

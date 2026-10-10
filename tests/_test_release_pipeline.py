@@ -18,18 +18,21 @@ The contract now is: a release of this fork is tagged fnos-<upstream version>
 (fnos-1.6.19), the package version is exactly that number, and a build with no
 such tag on HEAD is a process build (-alpha<k>) that cannot be mistaken for a
 release. This file gates both halves of that - the script (behaviourally, in a
-throwaway git repository) and the workflows that carry the number from the tag
-to the package (statically, plus the tests workflow's own gate, executed).
+throwaway git repository) and the repository state around it (statically).
 
-Two of the gates below are deliberately shown to have teeth: one reverts the
-script to the pre-phase-F namespace and asserts the contract check fails, and
-one feeds the old mirror step to the static check and asserts it is rejected.
-A gate that cannot fail is a comment.
+Phase G deleted every workflow this fork maintained, so the static half now says
+what the release path *is* instead of what the workflows were:
+`.github/workflows/` holds upstream's `release.yml` and nothing of ours, nothing
+under `.github/` schedules itself, and the steps the deleted workflows carried
+live in the local tools (`scripts/build-fpk.sh`, `scripts/gh-release.py`) and in
+`docs/phase-g-local-release.md`. Two of the gates below are deliberately shown to
+have teeth: one reverts the script to the pre-phase-F namespace and asserts the
+contract check fails, and one feeds the old mirror step to the static scan and
+asserts it is caught. A gate that cannot fail is a comment.
 
 Point WB_RELEASE_PIPELINE_ROOT at another checkout to check that tree instead -
-that is how the red half of the evidence was produced. Bash or git missing
-skips the behavioural half (the Windows runners stay useful) and PyYAML missing
-skips the workflow-execution half; the static gates always run.
+that is how the red half of the evidence was produced. Bash or git missing skips
+the behavioural half; the static gates always run.
 """
 
 import io
@@ -38,16 +41,20 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ROOT = os.path.dirname(TESTS_DIR)
-BUILD_WORKFLOW = os.path.join(".github", "workflows", "build-fpk.yml")
-SYNC_WORKFLOW = os.path.join(".github", "workflows", "sync-upstream.yml")
-TESTS_WORKFLOW = os.path.join(".github", "workflows", "tests.yml")
+WORKFLOWS_DIR = os.path.join(".github", "workflows")
+UPSTREAM_RELEASE_WORKFLOW = os.path.join(WORKFLOWS_DIR, "release.yml")
 SCRIPT = os.path.join("scripts", "build-fpk.sh")
+GH_RELEASE = os.path.join("scripts", "gh-release.py")
+RUNBOOK = os.path.join("docs", "phase-g-local-release.md")
+GH_SUBCOMMANDS = ("sha256", "release-get", "release-create", "release-upload",
+                  "release-edit", "tag-create")
 RELEASE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 PROCESS_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+-alpha[0-9]+$")
 
@@ -62,6 +69,31 @@ OLD_MIRROR_STEP = """
             git push origin "refs/tags/${upstream_tag}"
           done
 """
+
+# Phase G: there is no workflow left to scan, so the check that upstream's tags
+# never enter this fork's refs/tags runs over the text artifacts that *do* exist.
+MIRROR_PATTERN = re.compile(r"refs/tags/\$\{upstream_tag\}|git push[^\n]*--tags")
+
+
+def mirrors_upstream_tags(text):
+    """True when a piece of text pushes upstream's tags into this fork."""
+    return MIRROR_PATTERN.search(text) is not None
+
+
+def repository_texts(root):
+    """Every readable text artifact under .github/ and scripts/, path -> text."""
+    out = {}
+    for base in (".github", "scripts"):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, base)):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for name in filenames:
+                path = os.path.join(dirpath, name)
+                try:
+                    with open(path, encoding="utf-8") as handle:
+                        out[os.path.relpath(path, root)] = handle.read()
+                except (OSError, UnicodeDecodeError):
+                    continue
+    return out
 
 
 def repository_root():
@@ -291,159 +323,170 @@ class VersionContractTests(FixtureTests):
             self.assert_release_version(pre_fix, "9.9.9")
 
 
-class WorkflowGateTests(unittest.TestCase):
-    """The workflows: which tag they answer to, and what they may push."""
+class PhaseGRepositoryTests(unittest.TestCase):
+    """Phase G: none of our workflows are left, and the local path carries them.
+
+    Every assertion below was about a file this repository maintained. Those
+    files are gone - deliberately, and with no dispatch fallback - so each one is
+    re-pointed at the capability that survived: which tags may start what, who
+    may push where, and which local tool does the job now.
+    """
 
     def setUp(self):
         self.root = repository_root()
 
-    def workflow(self, relative):
-        path = os.path.join(self.root, relative)
-        self.assertTrue(os.path.isfile(path), "%s is missing" % relative)
-        return read_text(path)
+    def path(self, relative):
+        return os.path.join(self.root, relative)
 
-    def test_the_build_workflow_answers_to_the_fnOS_namespace(self):
-        text = self.workflow(BUILD_WORKFLOW)
-        self.assertIn(
-            'tags: ["fnos-*"', text,
-            "a release of this fork is tagged fnos-X.Y.Z, so that has to start a build",
-        )
-        self.assertIn(
-            "TAG_REF: ${{", text,
-            "the build workflow has to notice the pushed tag instead of letting the script guess",
-        )
-        self.assertIn(
-            "${TAG_REF#fnos-}", text,
-            "the tag has to lose its fnos- prefix before it can be a package version",
-        )
-        self.assertRegex(
-            text, r"(?m)^\s*export VERSION=",
-            "the tag version has to reach the script as VERSION",
-        )
-        self.assertIn(
-            "--print-version", text,
-            "the build workflow has to read the derived version back so it can compare",
-        )
-        self.assertIn("::error::", text, "a version mismatch has to be reported as an error annotation")
-        self.assertRegex(text, r"(?m)^\s*exit 1\s*$", "a version mismatch has to fail the job")
+    def read_file(self, relative):
+        self.assertTrue(os.path.isfile(self.path(relative)), "%s is missing" % relative)
+        return read_text(self.path(relative))
 
-    def test_the_sync_workflow_schedules_three_attempts_a_day(self):
-        text = self.workflow(SYNC_WORKFLOW)
-        for slot in ('cron: "17 3 * * *"', 'cron: "23 9 * * *"', 'cron: "41 15 * * *"'):
-            self.assertIn(slot, text, "the sync has to survive a dropped scheduled run: %s" % slot)
-
-    def test_the_sync_workflow_never_pushes_upstream_tags_into_this_fork(self):
-        text = self.workflow(SYNC_WORKFLOW)
+    def test_only_upstreams_release_workflow_is_left(self):
+        names = sorted(os.listdir(self.path(WORKFLOWS_DIR)))
+        self.assertEqual(
+            ["release.yml"], names,
+            "a workflow of ours is back: phase G deleted them on purpose and added no dispatch fallback",
+        )
+        text = self.read_file(UPSTREAM_RELEASE_WORKFLOW)
+        self.assertIn('"v*"', text, "upstream's own workflow answers to upstream's tags")
         self.assertNotIn(
-            "refs/tags/${upstream_tag}", text,
-            "upstream's tags must stay out of this fork: they collide with a later fetch and "
-            "they are the namespace upstream's own release workflow acts on",
+            "fnos-", text,
+            "that file is upstream's, unchanged: it cannot know this fork's fnos- namespace, "
+            "so it never fires on a release of ours",
         )
-        self.assertIn("ls-remote", text, "what upstream has is asked of the upstream remote instead")
-        self.assertIn("fnos-", text, "releases of this fork are tagged fnos-X.Y.Z")
 
-    def test_the_static_check_rejects_the_old_mirror_step(self):
-        # Sensitivity half for the check above.
-        text = self.workflow(SYNC_WORKFLOW)
-        self.assertNotIn("refs/tags/${upstream_tag}", text)
-        with self.assertRaises(AssertionError):
-            self.assertNotIn("refs/tags/${upstream_tag}", text + OLD_MIRROR_STEP)
-
-    def test_the_sync_workflow_publishes_only_a_newer_upstream_release(self):
-        text = self.workflow(SYNC_WORKFLOW)
+    def test_nothing_under_github_schedules_itself(self):
+        texts = repository_texts(self.root)
         self.assertIn(
-            "ls-remote --tags --refs origin", text,
-            "what this fork has already published has to be read from origin, not from the local tags",
+            UPSTREAM_RELEASE_WORKFLOW.replace(os.sep, "/"), 
+            {name.replace(os.sep, "/") for name in texts},
+            "the scan has to see upstream's file, or an empty scan proves nothing",
         )
-        self.assertRegex(
-            text, r"not newer than", "a version that is already published must not be published again",
+        scheduled = sorted(
+            name for name, text in texts.items()
+            if "on: schedule" in text or re.search(r"(?m)^\s*cron:", text)
         )
-        self.assertIn("fnos-${version}", text, "the release tag has to be built from the upstream version")
+        self.assertEqual([], scheduled, "GitHub must not run anything for this fork any more")
+
+    def test_the_local_release_tool_covers_every_publishing_step(self):
+        text = self.read_file(GH_RELEASE)
+        for command in GH_SUBCOMMANDS:
+            # The registration may wrap across lines, so match the call, not a line.
+            self.assertRegex(
+                text, r'add_parser\(\s*"%s"' % re.escape(command),
+                "the local tool has to keep the step release-checksums.yml / release.yml did: %s" % command,
+            )
+        self.assertIn(
+            'DEFAULT_REPO = "ccrabit/workbuddy2api-hub"', text,
+            "the upload has to target this fork's repository",
+        )
+        self.assertIn("WB_GH_TOKEN", text, "the token comes from the environment first")
+        self.assertIn("/root/.gh-token", text, "then from a file outside the repository")
         self.assertNotRegex(
-            text, r"fnos-[0-9]+\.[0-9]+\.[0-9]+\.",
-            "no release tag of this fork carries a fourth component",
+            text, r"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}",
+            "no token may ever be committed",
         )
 
-    def test_the_sync_workflow_keeps_a_conflicted_merge_visible(self):
-        text = self.workflow(SYNC_WORKFLOW)
-        self.assertIn(
-            "sync-conflict/", text,
-            "a conflict has to leave the conflicted merge somewhere a human can pick it up",
+    def test_the_local_release_tool_runs_and_refuses_an_empty_command(self):
+        # Executed, offline, with no token: the plumbing the runbook calls has to
+        # exist and behave (exit 2 = usage, and the help lists every step).
+        python = sys.executable or "python3"
+        usage = subprocess.run(
+            [python, self.path(GH_RELEASE)], cwd=self.root,
+            capture_output=True, text=True, timeout=120,
         )
-        self.assertIn("git push --force", text, "the conflict branch is pushed, not left in the runner")
-        self.assertIn(
-            "--diff-filter=U", text,
-            "the conflicted paths have to be read before the merge is aborted, or there is nothing to report",
+        self.assertEqual(2, usage.returncode, usage.stdout + usage.stderr)
+        helped = subprocess.run(
+            [python, self.path(GH_RELEASE), "--help"], cwd=self.root,
+            capture_output=True, text=True, timeout=120,
         )
-        self.assertIn(
-            "has_issues", text,
-            "the conflict path has to ask whether Issues can be used before relying on them",
+        self.assertEqual(0, helped.returncode, helped.stdout + helped.stderr)
+        for command in GH_SUBCOMMANDS:
+            self.assertIn(command, helped.stdout, "the help has to list %s" % command)
+
+    def test_no_text_artifact_pushes_upstream_tags_into_this_fork(self):
+        texts = repository_texts(self.root)
+        offenders = sorted(name for name, text in texts.items() if mirrors_upstream_tags(text))
+        self.assertEqual(
+            [], offenders,
+            "upstream's tags must stay out of this fork: they collide with a later fetch and they are "
+            "the namespace upstream's own release workflow acts on",
         )
-        self.assertIn(
-            "::error::", text,
-            "a conflict has to be an error annotation on the run, not only an exit code",
+        # Sensitivity half: the step the fork used to run has to be caught, or
+        # this scan is a comment.
+        self.assertTrue(
+            mirrors_upstream_tags(OLD_MIRROR_STEP),
+            "the scan has to reject the pre-phase-F mirror step",
         )
-        self.assertIn(
-            "GITHUB_STEP_SUMMARY", text,
-            "the conflict detail (files, resolution commands) has to be written into the run summary",
-        )
+        script = self.read_file(SCRIPT)
+        self.assertIn("ls-remote --tags --refs upstream", script,
+                      "what upstream has is asked of the upstream remote instead")
+
+    def test_the_runbook_is_the_checklist_for_a_local_release(self):
+        text = self.read_file(RUNBOOK)
+        for step in ("python3 tests/run_all.py --jobs 4",
+                     "bash scripts/build-fpk.sh",
+                     "bash scripts/verify-fpk.sh",
+                     "gh-release.py sha256",
+                     "gh-release.py release-upload",
+                     "gh-release.py tag-create",
+                     'git tag -a "${TAG}"'):
+            self.assertIn(step, text, "the runbook has to keep the step: %s" % step)
+        self.assertIn("只有 `release.yml`", text,
+                      "the checklist has to assert the workflow directory holds upstream's file only")
+        self.assertIn("不恢复任何 CI", text,
+                      "dropping CI has to be a stated decision, not a silent omission")
 
 
-class TagAssertWorkflowTests(unittest.TestCase):
-    """The tests workflow's tag gate, executed with synthetic tag names."""
+class TagNamespaceGateTests(FixtureTests):
+    """Only fnos-X.Y.Z is a release tag - the rule the deleted gate executed.
 
-    def setUp(self):
-        self.root = repository_root()
-        self.bash = shutil.which("bash")
-        if not self.bash:
-            self.skipTest("needs bash on PATH")
-        path = os.path.join(self.root, TESTS_WORKFLOW)
-        if not os.path.isfile(path):
-            self.skipTest("no %s under %s" % (TESTS_WORKFLOW, self.root))
-        try:
-            import yaml
-        except ImportError:
-            self.skipTest("needs PyYAML to read the workflow")
-        job = yaml.safe_load(read_text(path))["jobs"]["version-assert"]
-        runs = [step["run"] for step in job["steps"] if "run" in step]
-        self.assertEqual(1, len(runs), "expected exactly one run step in the version-assert job")
-        self.run_step = runs[0]
-        source = os.path.join(self.root, "wb_proxy.py")
-        if not os.path.isfile(source):
-            self.skipTest("no wb_proxy.py under %s" % self.root)
-        match = re.search(r'"version"\s*:\s*"([^"]+)"', read_text(source))
+    tests.yml carried a `version-assert` job: a release tag had to name the
+    source version. Phase G deleted the job, and the rule now lives where a
+    version is actually derived - `scripts/build-fpk.sh`, which is the only thing
+    that turns a tag into a package version. Executed like the other behavioural
+    gates: in a throwaway repository that holds a copy of the tree.
+    """
+
+    def source_version(self):
+        text = read_text(os.path.join(self.work, "wb_proxy.py"))
+        match = re.search(r'"version"\s*:\s*"([^"]+)"', text)
         self.assertIsNotNone(match, "wb_proxy.py has no overview version string")
-        self.overview = match.group(1)
+        return match.group(1)
 
-    def gate(self, tag):
-        tmp = tempfile.mkdtemp(prefix="wb-tag-assert-")
-        self.addCleanup(shutil.rmtree, tmp, True)
-        script = os.path.join(tmp, "gate.sh")
-        write_text(script, self.run_step)
-        env = dict(os.environ)
-        env["GITHUB_REF_NAME"] = tag
-        return subprocess.run(
-            [self.bash, script], cwd=self.root, capture_output=True, text=True, env=env, timeout=120,
+    def test_a_tag_that_names_the_source_version_is_the_package_version(self):
+        source = self.source_version()
+        self.tag("fnos-%s" % source)
+        self.assert_release_version(self.work, source)
+        self.assertRegex(self.version_at(self.work), RELEASE_VERSION)
+
+    def test_a_tag_that_names_another_version_is_caught_by_the_comparison(self):
+        # Sensitivity: the deleted gate compared the tagged version with the
+        # source version, and that comparison has to stay able to say no.
+        source = self.source_version()
+        self.tag("fnos-9.9.9")
+        tagged = self.version_at(self.work)
+        self.assertEqual("9.9.9", tagged, "the tag on HEAD is what the script has to answer")
+        self.assertNotEqual(
+            source, tagged,
+            "a tag naming another version has to be detectable, or the gate checks nothing",
         )
 
-    def test_a_release_tag_that_names_the_source_version_passes(self):
-        result = self.gate("fnos-%s" % self.overview)
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+    def test_a_tag_outside_the_fnOS_namespace_is_not_a_release(self):
+        # `release-1.6.19` names nothing the fork can publish: the answer has to
+        # be a process version, which cannot be mistaken for a release.
+        self.tag("release-%s" % self.source_version())
+        self.assertRegex(
+            self.version_at(self.work), PROCESS_VERSION,
+            "only a fnos-X.Y.Z tag on HEAD may name a release of this fork",
+        )
 
-    def test_a_release_tag_that_names_another_version_fails(self):
-        result = self.gate("fnos-9.9.9")
-        self.assertNotEqual(0, result.returncode, "a tag that names another version has to be rejected")
-        self.assertIn("::error::", result.stdout + result.stderr)
-
-    def test_historical_tags_are_still_accepted(self):
-        for tag in ("v%s" % self.overview, "v%s.1" % self.overview):
-            result = self.gate(tag)
-            self.assertEqual(0, result.returncode, "%s: %s" % (tag, result.stdout + result.stderr))
-
-    def test_a_tag_outside_both_namespaces_is_rejected(self):
-        result = self.gate("release-%s" % self.overview)
-        self.assertNotEqual(0, result.returncode, "only v* (historical) and fnos-* tags are releases")
-        self.assertIn("::error::", result.stdout + result.stderr)
+    def test_a_historical_upstream_tag_is_not_a_fork_release(self):
+        # v* is upstream's namespace; the fork releases on fnos-* only, so even a
+        # three-part v tag on HEAD leaves the build a process build.
+        self.tag("v%s" % self.source_version())
+        self.assertRegex(self.version_at(self.work), PROCESS_VERSION)
 
 
 class PayloadHygieneTests(FixtureTests):

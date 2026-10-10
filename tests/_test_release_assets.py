@@ -14,8 +14,11 @@ thing:
     launchers start as `python\\python.exe` - not a source-only archive that
     happens to share the name;
   * nothing may write a Draft Release on the strength of a reduced test run:
-    every release mutation needs the whole matrix, and the legs are read from
-    tests.yml so a leg dropped there cannot silently weaken the gate.
+    every release mutation needed the whole matrix, and the legs were read from
+    tests.yml so a leg dropped there could not silently weaken the gate. Phase G
+    deleted that workflow (there is no CI in this repository any more), so what
+    stays pinned is the parser that had to name every leg, plus the repository
+    state that says the matrix file is not coming back.
 
 Run with: python tests/_test_release_assets.py
 """
@@ -24,6 +27,7 @@ import glob
 import hashlib
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -36,9 +40,10 @@ import matrix_legs  # noqa: E402
 import portable_runtime  # noqa: E402
 import release_tools as tools  # noqa: E402
 
-# The legs the repository has to keep running for a release today. The gate
-# reads them from tests.yml rather than from this tuple - this is the
-# expectation the reader checks that derivation against.
+# The three legs the release gate used to wait for, kept as the expectation the
+# parser in release/matrix_legs.py is checked against. Phase G removed the CI
+# matrix (and tests.yml with it), so this tuple is now the record of what the
+# deleted workflow required - the parser contract below is still unit-tested.
 EXPECTED_LEGS = (
     "ubuntu-latest / python 3.9",
     "ubuntu-latest / python 3.12",
@@ -524,19 +529,69 @@ class ReleaseBodyTests(unittest.TestCase):
 
 
 class MatrixLegsTests(unittest.TestCase):
-    """The release gate names every leg instead of trusting a summary."""
+    """The release gate names every leg instead of trusting a summary.
 
-    def test_the_repository_matrix_is_the_expected_three(self):
-        self.assertEqual(tuple(matrix_legs.legs()), EXPECTED_LEGS)
+    Phase G deleted tests.yml and with it the CI matrix this fork ran: a release
+    is built and verified on this machine now, so there are no legs left to wait
+    for. Two halves stay pinned: the parser (the behaviour that made a dropped
+    leg a deliberate change instead of a silent weakening - executed against a
+    copy of the deleted file's matrix block, kept as text, NOT as a workflow) and
+    the repository state (no matrix file, no workflow of ours, has come back).
+    """
+
+    # The `matrix.include` block of the tests.yml deleted in phase G, verbatim
+    # from `git show HEAD:.github/workflows/tests.yml`. It is text only: nothing
+    # puts this back into .github/workflows/.
+    LEGACY_MATRIX = """\
+      matrix:
+        include:
+          # The README advertises Python 3.9+, so the floor is exercised on
+          # Linux; the primary platform (Windows) runs the current release.
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+"""
+
+    def test_the_repository_has_no_ci_matrix_to_wait_for(self):
+        workflows = os.path.join(ROOT, ".github", "workflows")
+        self.assertEqual(
+            ["release.yml"], sorted(os.listdir(workflows)),
+            "a workflow of ours is back: phase G removed the CI matrix on purpose",
+        )
+        self.assertFalse(
+            os.path.isfile(os.path.join(workflows, "tests.yml")),
+            "tests.yml is back; the three-leg matrix is not part of this release path any more",
+        )
+
+    def test_the_legacy_matrix_still_names_every_leg(self):
+        self.assertEqual(tuple(matrix_legs.legs(self.LEGACY_MATRIX)), EXPECTED_LEGS)
 
     def test_dropping_a_leg_narrows_what_the_gate_requires(self):
-        # Deriving the legs from tests.yml is the point: if a leg disappears
-        # there, the gate stops waiting for it - and the unit above is what
-        # makes that a deliberate change rather than a silent weakening.
-        text = read(".github", "workflows", "tests.yml")
-        without = text.replace('          - os: windows-latest\n            python: "3.12"\n', "")
-        self.assertNotEqual(without, text, "tests.yml 里没有找到预期的 windows 腿")
+        without = self.LEGACY_MATRIX.replace(
+            '          - os: windows-latest\n            python: "3.12"\n', "")
+        self.assertNotEqual(without, self.LEGACY_MATRIX,
+                            "the kept matrix block has to contain the windows leg")
         self.assertEqual(tuple(matrix_legs.legs(without)), EXPECTED_LEGS[:2])
+
+    def test_the_kept_matrix_block_is_the_one_the_deleted_workflow_had(self):
+        # The block above is a copy, so it can rot. Where the object is still
+        # reachable (a full clone, before the deletion is committed) this says so.
+        try:
+            shown = subprocess.run(
+                ["git", "show", "HEAD:.github/workflows/tests.yml"],
+                cwd=ROOT, capture_output=True, text=True, timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError):
+            self.skipTest("git is unavailable here")
+        if shown.returncode != 0:
+            self.skipTest("the deleted tests.yml is not reachable from this checkout "
+                          "(shallow clone, or the deletion is committed)")
+        self.assertIn(self.LEGACY_MATRIX, shown.stdout,
+                      "the kept matrix block no longer matches the workflow phase G deleted")
 
     def test_an_unparseable_matrix_yields_nothing(self):
         # Empty means "the gate must refuse", never "no legs to check".

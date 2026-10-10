@@ -23,6 +23,13 @@ Two things the runner is responsible for, because a suite cannot be:
   - saying what went wrong. The last line of a crashed JS suite is a bare
     "Node.js v20.20.2", so a failure line carries the first error instead, and
     `--logs` keeps every suite's full output for the CI artifact.
+
+It also marks the environment it hands to a suite: `WB_RUN_ALL=1` says "you were
+started by this runner". A suite that nests a whole `run_all.py` of its own to
+check the harness pays for the entire set twice, and on the slowest CI leg
+(windows-latest, roughly 4x linux) that repeat is what ran one suite into this
+runner's own per-suite clock. With the marker a suite can smoke the harness and
+leave the full set to the run that is already doing it.
 """
 import argparse
 import os
@@ -234,6 +241,12 @@ def main(argv):
     # be utf-8 too - on the CI Windows runner the locale is cp1252 and a
     # Chinese label would otherwise abort the suite with UnicodeEncodeError.
     env["PYTHONIOENCODING"] = "utf-8"
+    # Tell the suite it was started by this runner. `_test_phase_e_verify.py`
+    # nests a whole `run_all.py` of its own to check the harness; inside a run
+    # that is already checking every suite that repeat is pure duplication, and
+    # on windows-latest it was what pushed the suite over the per-suite clock
+    # above. The marker lets it smoke the harness instead (see its e1).
+    env["WB_RUN_ALL"] = "1"
     # This script has the same problem, for the same reason: it echoes each
     # suite's last line (and its whole tail on failure) on its own stdout. On
     # the CI Windows runner that stdout is a cp1252 pipe, so the first Chinese

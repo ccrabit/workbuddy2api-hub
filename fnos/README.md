@@ -22,7 +22,7 @@
 
 | 用途 | 值 |
 | --- | --- |
-| 产品名 —— `manifest` 的 `display_name`、`ui/config` 的 `title`、Release 标题、fpk 文件名、CI artifact 名 | **WorkBuddy2API-Hub** |
+| 产品名 —— `manifest` 的 `display_name`、`ui/config` 的 `title`、Release 标题、fpk 文件名 | **WorkBuddy2API-Hub** |
 | 标识符 —— `manifest` 的 `appname`、`WorkBuddy2API.sc` 的文件名及其段落名、`TRIM_APPNAME`、包内 `workbuddy2api.Application` | `workbuddy2api`（**不要动**） |
 
 安装目录（`/vol1/@appcenter/workbuddy2api/`）、数据目录（`/vol1/@appdata/workbuddy2api/`）、
@@ -67,6 +67,9 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 - **载荷**：`app.tgz` 里只有服务器源码（`server/`，含上游的 `pricing/pricing.json`）、
   `dashboard.html` 与 `LICENSE`；测试、源码 `docs/`、启动脚本、`Dockerfile`、`accounts/`、
   `usage/` 一律不进包——构建脚本发现 `accounts/` 或 `usage/` 会直接失败。
+- **根 `fnpack.json` 也不进包**：它是给 FnDepot 客户端读的仓库根清单，里面的 `sha256` / `size`
+  只能描述它所在的包（自指），包内带副本必然落后一次发布，还会让 `verify-fpk.sh` 的
+  `every packaged file is byte-identical to the tree` 永久报一条假失败；服务端不读它。
 - **校验**：打包前用 `ast.parse` 检查载荷里每个 `.py`，并逐个确认运行时模块与
   `server/pricing/pricing.json` 都在；打包后校验必需文件、端口三处一致
   （`manifest` ↔ `ui/config` ↔ `.sc`）、显示名/标识符，以及 `manifest` 里声明的 `checksum`
@@ -179,21 +182,30 @@ uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gatew
    `tar czf ~/workbuddy2api-backup.tgz -C /vol1/@appdata workbuddy2api/accounts workbuddy2api/settings.json`
    （账号文件里是凭证，备份文件自己收好）。
 
-## CI
+## 发布（本地，Phase G）
 
-- `.github/workflows/build-fpk.yml`：推送 `fnos-*`（本仓库的发布 tag）或历史 `v*` tag 时构建
-  fpk、跑一遍 `scripts/verify-fpk.sh`，然后把 `.fpk` 和 `.sha256` 挂到同名 Release 上
-  （Release 标题是产品名 `WorkBuddy2API-Hub <tag>`，手动触发时改为上传 artifact
-  `workbuddy2api-hub-fpk`）。构建前它会把 tag 上的版本和 `--print-version` 对一遍，不一致
-  直接失败——「tag 说要发 1.6.19，树算出来是别的」这种包不会再被发出去。
-- `.github/workflows/sync-upstream.yml`：每天尝试三次（03:17 / 09:23 / 15:41 UTC，即北京时间
-  11:17 / 17:23 / 23:41；GitHub 的定时任务常年晚点甚至整个丢失，冗余几次才靠得住）拉上游
-  `ardeyouxipianyi/workbuddy2api-hub` 的 `main`，能快进/自动合并就合并并推送，然后**只有上游最新
-  release 版本比我们已发布的更大**才打 `fnos-<版本>` tag 并构建发布（同一个版本不会发两次）。
-  **上游的 tag 绝不推到本仓库**（理由见「版本号和 tag」）。**合并冲突则中止**：把带冲突标记的
-  合并推成一个 `sync-conflict/<UTC 日期>` 分支（`git checkout` 它就能接着解）、把冲突文件和解
-  决命令写进本次运行的 summary、尽力开/更新一个 issue，并让这次运行失败——不会留下半个合并的
-  仓库，也不会有一次「静悄悄的红」。
+Phase G 起本仓库**没有任何 CI**：自建的 workflow（构建、同步、测试、校验和、Docker）已全部删除，
+GitHub 上不会有自动构建、自动合并或自动测试。发布在本机手工做，完整命令、token 与排错见
+[`docs/phase-g-local-release.md`](../docs/phase-g-local-release.md)。
+
+```bash
+python3 tests/run_all.py --jobs 4                                  # 先在本地跑绿
+PACKAGER=ccrabit PACKAGER_URL=https://github.com/ccrabit/workbuddy2api-hub \
+  VERSION=1.6.19 bash scripts/build-fpk.sh                         # 构建
+bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk   # 期望 71 passed, 0 failed
+python3 scripts/gh-release.py sha256 dist/WorkBuddy2API-Hub_1.6.19_all.fpk \
+  > dist/WorkBuddy2API-Hub_1.6.19_all.fpk.sha256
+git tag -a fnos-1.6.19 -m "WorkBuddy2API-Hub 1.6.19 (upstream v1.6.19)"
+git push origin fnos-1.6.19
+python3 scripts/gh-release.py release-upload fnos-1.6.19 dist/*.fpk dist/*.sha256
+```
+
+- 唯一留下的 workflow 是上游的 `.github/workflows/release.yml`：它只在 `v*` tag 上触发，还要读
+  已被删掉的 `tests.yml`——我们的发布 tag 是 `fnos-*`，所以它永不运行，不用管它。
+- `.fpk` 与 `.sha256` 两个资产挂到同名 Release（`fnos-X.Y.Z`）上；`fnpack.json` 的
+  `sha256` / `size` / `updated_at` 要回填成上传后的数字。回填改的是**仓库根**那份
+  （它不在载荷里，见上文），所以回填不会让已建好的包过期。
+- token 放在 `/root/.gh-token`（`chmod 600`）或环境变量 `WB_GH_TOKEN` 里，**绝不进仓库**。
 
 ### 版本号和 tag
 
@@ -219,7 +231,7 @@ release。我们继续用 `v1.6.19` 这样的 tag，就会连带触发上游的�
 前缀，和上游的 `vX.Y.Z` / `vX.Y.Z.N` 彻底错开。历史 tag（`v1.6.10.1`、`v1.6.17.1` 这些）保留
 不动——删了旧 Release 就没了标签——但它们现在只是一段历史，不再被当成发布。
 
-**没打 tag 的时候**（本地开发、手动 dispatch、`--alpha`）构建出来的是**过程版本**，带
+**没打 tag 的时候**（本地开发、`--alpha`）构建出来的是**过程版本**，带
 `-alpha<k>` 后缀，k = 距最近一次发布过了多少个提交。过程版本不该装上设备：
 
 ```bash
@@ -234,27 +246,23 @@ VERSION=1.6.19 bash scripts/build-fpk.sh      # 显式指定版本（手工发�
 **过程包**起个名字，发布包永远来自 tag 或显式 `VERSION=`（`verify-fpk.sh` 会拒绝四段版本和
 `-alpha` 版本进包）。
 
-**发版**：自动路径是 `sync-upstream.yml` 合并上游后判断「上游最新 release 是否比我们已发布的
-更新」，是就打 `fnos-<上游版本>` tag，再显式 `uses: build-fpk.yml` 构建（不靠 tag push 事件：
-用 `GITHUB_TOKEN` 推的 tag 不会触发别的 workflow）。手工路径就是自己打这个 tag：
-`git tag -a fnos-1.6.19 -m "WorkBuddy2API-Hub 1.6.19 (upstream v1.6.19)" && git push origin fnos-1.6.19`
-——tag 上的数字决定了包版本，`build-fpk.yml` 会核对它。
+**发版**：没有自动路径了（Phase G 删掉了 `sync-upstream.yml` 与 `build-fpk.yml`）。手工发布 =
+构建 → 校验 → 打 `fnos-<上游版本>` tag 推 origin → 用 `scripts/gh-release.py` 把 `.fpk` 与
+`.sha256` 传上同名 Release，见
+[`docs/phase-g-local-release.md`](../docs/phase-g-local-release.md)。tag 上的数字决定包版本，
+`verify-fpk.sh` 会在 tag 落在 HEAD 上时核对「包就是这棵树构建的版本」。
 
 **设备升级**：设备上装的是 `1.6.17.1`（旧的四段版本），新包 `1.6.19` 数字更大，应用中心会提示
 升级；在应用中心卸载旧包（向导里选保留数据）再装新包即可，数据目录
 `/vol1/@appdata/workbuddy2api` 不受影响。规则原文与这次改动的来龙去脉见
 [`docs/phase-f-version-policy.md`](../docs/phase-f-version-policy.md)。
 
-> 两个 workflow 都要写仓库（推分支、推 tag、发 Release、开 issue），所以 fork 里需要
-> Settings → Actions → General → Workflow permissions 选 **Read and write**，
-> Workflow 才能拿到可写的 `GITHUB_TOKEN`。默认的只读会让「发 Release」和「推同步结果」
-> 两步报 `Resource not accessible by integration`。
->
-> 用 `GITHUB_TOKEN` 推的 tag 不会再触发别的 workflow（GitHub 的防递归规则），所以
-> `sync-upstream.yml` 是显式 `uses: build-fpk.yml` 去构建的，而不是靠 tag push 事件。
+> 发布不再依赖 Actions，所以 fork 里**不需要**再配 Settings → Actions → Workflow permissions。
+> 唯一的凭据是本机 token（`/root/.gh-token` 或 `$WB_GH_TOKEN`），它只被 `scripts/gh-release.py`
+> 读取，不进版本库。
 
-> 如果你不打算在 fork 里发 Docker 镜像，可以把继承来的
-> `.github/workflows/docker-publish.yml` 关掉（Actions 页面里 Disable workflow）。
+> 上游继承来的 `.github/workflows/docker-publish.yml` 随 Phase G 一起删了（plan G-D1 的清单里
+> 包含它，只保留 `release.yml`）。需要镜像时用仓库里的 `Dockerfile` / docker-compose 在本地构建。
 
 ## 约定出处
 

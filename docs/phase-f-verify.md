@@ -26,6 +26,7 @@
 | 全量套件 `run_all.py --jobs 4` | **通过** | 122 / 0 / 0 | §2.9、E1 |
 | 平台形状（无 AF_UNIX / shallow clone / 非 root） | **通过** | 8+11 / 0 / 0 | §2.10、E10/E11 |
 | 交付说明与方案书一致性（F6 交叉核对，含设备状态带牙断言） | **通过** | 22 / 0 / 0 | §2.11、E15、R17/R23 |
+| **E1 去重**（被 `run_all.py` 拉起时不重复跑一遍完整 run_all，task-30/R26） | **通过** | 本套件墙钟 49.6s → 26.8s，两轮 122/0/0 | §2.15 |
 | **三环境 FAIL=0**（开发树 / depth-1 浅克隆 / Windows 形状） | **通过** | 352/0/2 · 253/0/15 · 8/0/0 | §2.12 |
 | **敏感性证明**（改坏输入必红） | **通过**（4 条） | 见 §2.13 | §2.13 |
 
@@ -43,6 +44,11 @@
   套件里的显式断言（§2.8），不是含糊话。
 - 3 条 SKIP（开发树）：① uid 65534 探针要能遍历父目录（沙箱里是 `drwx------`）；② HEAD 上没有 `fnos-*` tag
   （本阶段不打 tag）；③ 包内文件相对 HEAD 有未提交改动（`M scripts/build-fpk.sh`，packager 在途的 R19/R21/R22 改动）。
+- **task-30（WP-F11）去重 e1 的嵌套 run_all**：套件被 `run_all.py` 拉起时（`WB_RUN_ALL=1`）不再自己再跑一遍
+  完整 run_all，只冒烟一个已知良好的套件（`_test_lifecycle.py`，2.1s）。冻结克隆里 A/B 实测本套件墙钟
+  **49.6s → 26.8s**，两轮都 `122 passed / 0 failed / 0 skipped`；独立运行时行为一字不变（仍完整嵌套，42.3s /
+  10 条断言）。因为 e1 在外层 run_all 内只留 2 条断言，套件在外层 run_all 内是 `344 / 0 / 2`（独立运行仍是
+  `352 / 0 / 2`）。详见 §2.15、R26。
 - **一句话结论**：Phase F 的六件事在**契约级与行为级**都已成立 —— 三环境 FAIL=0、`run_all --jobs 4` 122/0/0、
   `verify-fpk` 在 tag 检出 71/0、设备侧只读复核通过，可以拿这个包上真机测；剩下的不是代码问题，而是
   **只有用户在真实环境里才能做完**的外部动作（应用中心里安装/复装、真实 GitHub 上跑一次自动并入、push + 打 tag + 发 Release）
@@ -353,10 +359,60 @@ artifact `11673721866` 里唯一根因套件是本套件、套件内唯一根因
   ⇒ 套件里**没有第二处**「文本读源码 vs 线上字节」的脆弱点。
 - **灵敏度**：§2.13 第 4 条 —— 同一份 CRLF 检出上「修前 32/1（差值 10188）→ 修后 33/0/0」，LF 检出（开发树）始终 33/0/0。
 
+### 2.15 被 run_all 拉起时不再重复跑一遍完整 run_all（task-30 / R26）
+
+**先说清楚动机的来龙去脉**：这条改动最初是从 CI 上发现的 —— `windows-latest` 腿在 run `38063082755`
+把本套件判成 `[FAIL] _test_phase_e_verify.py timed out after 300s`（同一 artifact 里套件自己是
+`PASS=172 FAIL=0 SKIP=27`，它内部那条 e1 的嵌套 run_all 就花了 157.6s）。**但那不再是本改动的动机**：
+用户已决定删掉全部自建 workflow（含 `tests.yml`），GitHub 上不再有自动运行，Windows 超时这件事不会再发生。
+改动本身与 CI 无关地成立：**套件是被 `run_all.py` 拉起来的时候，不该再嵌套跑一遍完整 run_all** ——
+外层那次 run 正在跑全部套件（包括本文件），嵌套是纯粹重复；而且它让「谁负责全量自检」这件事有两个答案。
+
+**做法**（只碰 `tests/run_all.py` 与 `tests/_test_phase_e_verify.py`，产品代码与包一个字节未动）：
+
+| 位置 | 改动 |
+|---|---|
+| `tests/run_all.py:26-33`（模块 docstring） | 说明本 runner 会给子进程留 `WB_RUN_ALL=1` 标记及其用途 |
+| `tests/run_all.py:244-249`（`main()` 构造子进程 env） | `env["PYTHONIOENCODING"] = "utf-8"` 之后加 `env["WB_RUN_ALL"] = "1"` + 注释 |
+| `tests/_test_phase_e_verify.py:536-541` | 新常量 `HARNESS_SMOKE_SUITE = "_test_lifecycle.py"`（快、每个 CI 腿都绿） |
+| `tests/_test_phase_e_verify.py:860-886` | `e1_suites()` 里在 `WB_E1_NESTED` 分支**之后**新增 `WB_RUN_ALL == "1"` 分支 |
+
+新分支只做「harness 冒烟」：`python3 tests/run_all.py _test_lifecycle.py --timeout 60`，断言 ① 退出码 0
+② 汇总行是 `1 passed, 0 failed` ③ 打一条 NOTE 说明「完整集合的自检由外层那次 run_all 承担」。
+`WB_E1_NESTED` 分支仍在前（e10/e11 的子跑因此行为不变），**独立运行（没有 `WB_RUN_ALL`）时路径一字未改**：
+仍是完整嵌套 run_all + 原有 4 条断言（计数自洽 / 除本套件外无红 / 本套件被算作 passed / 退出码 0）+ 5 条
+「我们的套件真的跑了」。
+
+四条证明（task-30 要求 3）：
+
+| # | 证明 | 命令 | 结果 |
+|---|---|---|---|
+| ① | 外层 run_all 里本套件墙钟：修前 vs 修后（同一个冻结克隆，唯一差异是这两个文件的版本） | `python3 tests/run_all.py --jobs 4`（克隆 = HEAD `6d7a64d` + 我的两个文件 / 再 `git checkout --` 回 HEAD 版） | 修后 **26.8s**、`122 passed / 0 failed / 0 skipped`、exit 0；修前 **49.6s**、同样 `122 / 0 / 0`。开发树上同样方向：78.9s（task-29 的 `/tmp/wb-f10-runall.log`）→ 41.6s |
+| ② | 新分支确实生效 | `WB_RUN_ALL=1 python3 -u tests/_test_phase_e_verify.py e1_s` | **2.16s**，`PASS=2 FAIL=0`，NOTE `harness 冒烟耗时 = 2.1s` + 尾行 `1 passed, 0 failed, 0 skipped`（浅克隆里同一条 **2.15s**）。注意段落过滤是**子串**匹配：`e1` 会同时选中 e10–e16（16.3s），要单测 e1 得用 `e1_s` |
+| ③ | 独立运行没有被削弱 | `python3 -u tests/_test_phase_e_verify.py e1_s`（不带 `WB_RUN_ALL`） | **42.3s**，`PASS=10 FAIL=0`（4 条核心断言 + 0 skipped + 退出码 + 5 条「我们的套件真的跑了」），NOTE `run_all 计数 = passed=122 failed=0 skipped=0` |
+| ④ | 最慢平台的预算 | 用 CI 实测分解：Windows 上非 e1 工作 ≈142s + 嵌套 run_all 157.6s ≈ 300s（撞线） | 去重后把 157.6s 换成一次冒烟（Linux 2.1s，按 4× 估 ≈8s）⇒ 预计 ≈150s，余量 `300 / 150 ≈ 2.0×`（目标 ≥1.8×）。这是**预算估算**，且 CI 已不再运行，所以不是 CI 断言 |
+
+三环境（task-30 要求 4）：
+
+| 环境 | 命令 | 结果 |
+|---|---|---|
+| 开发树（冻结版 = HEAD + task-30 两个文件，隔离 packager 的在途改动） | `python3 tests/run_all.py --jobs 4` | `122 passed / 0 failed / 0 skipped`，exit 0；本套件行 `PASS=254 FAIL=0 SKIP=11 26.8s`（克隆里没有 `dist/`，故 SKIP 多） |
+| depth-1 浅克隆（**没有 `WB_RUN_ALL`，所以仍完整嵌套** —— 这是它唯一与 CI 形状不同的地方） | `git clone --depth 1 file://<repo>` + 复制套件 → `python3 -u tests/_test_phase_e_verify.py` | `PASS=253 FAIL=0 SKIP=15`，exit 0，**49.2s**；其中 e1 的嵌套 run_all 自己 **32.1s**（NOTE `run_all 尾行`）。同克隆里 `WB_RUN_ALL=1 … e1_s` = 2.15s |
+| Windows 形状（e10 平台预演） | 套件内 e10 | **8 / 0 / 0**（平台预演子进程计数 `PASS=185 FAIL=0 SKIP=26`），e11 **11 / 0 / 0** |
+
+要求 5 的两个契约套件：`tests/_test_run_all_contracts.py` = `OK`（21.2s，它把 `run_all.py` 按字节复制到沙箱里跑，
+所以它验的正是「真 runner 本身」）；`scripts/check_clean_checkout.py`（在跑完套件的克隆里）=
+`checkout is clean: the suites left no repository-local state behind`，exit 0。
+
+**注意（本报告写就时的开发树状态）**：`packager` 正在删 `.github/workflows/*`（task-31），
+所以开发树上直接跑本套件会有 19 条红，全部在 e13/e14/e16 的「workflow 文件」断言上（外加 e10 的两条派生）——
+那是**套件钉在旧 CI 现实上**，正是 task-34（WP-G2）要改成新现实的部分；**与本改动无关**
+（同一个冻结克隆里，改动前后都是 0 FAIL，见上表 ①）。
+
 ## §3 缺陷与登记项
 
 本阶段**没有发现任何未修复的产品缺陷**：当前开发树上本套件 `352 / 0 / 2`、`run_all --jobs 4` 122 passed / 0 failed。
-以下 11 条是登记项（`register()`，不计 PASS/FAIL），按「Lead 交付前必须处理」排序：
+以下 12 条是登记项（`register()`，不计 PASS/FAIL），按「Lead 交付前必须处理」排序：
 
 | 编号 | 事项 | 性质 | 归属 / 建议 |
 |---|---|---|---|
@@ -371,6 +427,7 @@ artifact `11673721866` 里唯一根因套件是本套件、套件内唯一根因
 | **R18** | `docker-publish.yml` / `release-checksums.yml` 在我们树里是 100755（上游 100644） | 噪音（内容一字未改） | 交付前 `chmod 644` 清掉；来源是 Phase E 的 `55dfad2`/`9dff35f` |
 | **R24** | 设备面板仍是默认密码（`panel_password_is_default: true`） | 设备配置，不是代码缺陷 | 交付说明里提一句；网关 socket 免密与它无关 |
 | **R25** | 验收套件用**文本模式**读 `dashboard.html` 再与 HTTP 响应逐字节比 → 只有 Windows 腿红（CRLF 检出） | **已修**（task-29，测试侧口径错、产品代码一字未动） | `dashboard_source()`（`tests/_test_phase_e_verify.py:831-840`）改成 `open(path, "rb").read().decode(...)`；同类点位审计结论与敏感性证明见 §2.14 / §2.13 第 4 条 |
+| **R26** | 验收套件在 `run_all.py` 内**又嵌套跑一遍完整 run_all**（重复劳动；最慢平台上曾把套件顶过每套件墙钟） | **已修**（task-30，按「谁调用谁负责全量」去重；产品代码一字未动） | `run_all.py:249` 给子进程留 `WB_RUN_ALL=1`；`_test_phase_e_verify.py:860-886` 在被 run_all 拉起时改为冒烟 `_test_lifecycle.py`，独立运行时行为不变。CI 里完整集合的自检由 CI 自己那次 run_all 承担（CI 已按要求停用）；证明见 §2.15 |
 
 **R15 的完整证据**（这条是 Lead 主动要求我独立复核的，我复核的结论是「方向对、但前提缺一句」）：
 
@@ -455,14 +512,17 @@ artifact `11673721866` 里唯一根因套件是本套件、套件内唯一根因
 
 | 文件 | 行数 / 字节 | sha256 |
 |---|---|---|
-| `tests/_test_phase_e_verify.py`（task-29 后） | 3746 行 / 199251 字节 | `166ed5102cfff33ff70bb59ad91b6f59be2509199f43763ef4ab6c15bed71d5b` |
+| `tests/_test_phase_e_verify.py`（task-30 后） | 3780 行 / 201580 字节 | `96d12522637881eba7331d15524784d1f81876920547100b63851cb149eac48e` |
+| `tests/run_all.py`（task-30 后） | 339 行 / 13416 字节 | `dceea00f2886800c3aa106f6b8fd7e5d8a7f3ea9d8dcd483a888318c0c064cee` |
 | `dist/WorkBuddy2API-Hub_1.6.19_all.fpk`（本机重建后） | 577330 B | `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98` |
 | `/tmp/wb-published/WorkBuddy2API-Hub_1.6.19_all.fpk`（已发布资产副本） | 577842 B | `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c` |
 
 - 本报告：`docs/phase-f-verify.md`（自有 sha256 不写在正文里——写进来就会因为这一行立刻失效）。
 - 工作树状态（`git status --porcelain`，HEAD = `b8174b2`「chore(release): fix the payload, make the acceptance suite state-aware」）：
-  只有两个被改文件，都是我的写域 —— `M tests/_test_phase_e_verify.py`（task-29 的 R25 修复）、`M docs/phase-f-verify.md`（本报告）。
-  Lead 已把 task-27 的套件与报告提交为 `b8174b2`（含交付说明回填与 packager 的 R19/R21/R22 修复），所以工作树其余部分是干净的。
+  我的写域里被改的是 `M tests/_test_phase_e_verify.py`（task-29 的 R25 + task-30 的 R26）、`M tests/run_all.py`（task-30）、
+  `M docs/phase-f-verify.md`（本报告）。**同一次 `git status` 里还有别人的在途改动**，我既没碰也没评：
+  `D .github/workflows/{build-fpk,docker-publish,release-checksums,sync-upstream,tests}.yml`（packager task-31 删自建 workflow）、
+  未跟踪的 `docs/phase-g-plan.md` 与 `scripts/gh-release.py`（Lead/packager 的 Phase G 草稿）。
 - **发布 tag**：`fnos-1.6.19`（annotated）→ `26c2bcc`，是 HEAD 的祖先（`git describe` = `fnos-1.6.19-25-gb8174b2`，领先 25 个提交）。
 - 包内文件（`server/**`、`ui/**`、`fnos/**`、`scripts/**`）在这个窗口里**没有被任何人改过**——
   e5 的逐字节比对与 e8 的未提交改动门就是这条的看门人。

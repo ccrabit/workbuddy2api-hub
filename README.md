@@ -133,7 +133,7 @@ python tests/run_all.py realm      # 只跑名字里含 realm 的
 
 - 122 个套件：92 个 Python + 30 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
-- CI（`.github/workflows/tests.yml`）跑同一条命令：Ubuntu 上 python 3.9 与 3.12（3.9 是本项目声称的最低版本），Windows 上 python 3.12；推送标签时额外断言 **tag 与源码版本一致**（本仓库的发布 tag 是 `fnos-X.Y.Z`，版本号必须等于 `wb_proxy.py` 里的两处版本串；历史四段 tag `v<源码版本>.<序号>` 仍兼容；`-ci` 演练 tag 豁免）。
+- 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
 ### 7. 飞牛 fnOS 原生应用包（本仓库新增）
 
@@ -145,7 +145,7 @@ bash scripts/verify-fpk.sh       # 在本地沙箱里跑完 安装/启动/导入
 ```
 
 - 包名与显示名是 **WorkBuddy2API-Hub**，而安装标识 `appname` 仍是 `workbuddy2api`：`/vol1/@appcenter/workbuddy2api/`、数据目录 `/vol1/@appdata/workbuddy2api/`、网关前缀 `/app/workbuddy2api` 都跟着 `appname` 走，改它等于另起一套目录、把已有账号留在旧目录里读不到。
-- **版本号与上游一致**：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库自己的发布 tag 用 `fnos-X.Y.Z`（刻意离开 `v*`：上游新增的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发）。`.github/workflows/sync-upstream.yml` 每天三次把上游并进来，只有上游发了更新的版本才打 `fnos-X.Y.Z` tag 并构建。
+- **版本号与上游一致**：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库自己的发布 tag 用 `fnos-X.Y.Z`（刻意离开 `v*`：上游的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发）。**发布全部在本地做**（Phase G）：手动并入上游 → `PACKAGER=... VERSION=X.Y.Z bash scripts/build-fpk.sh` 构建 → `bash scripts/verify-fpk.sh` 校验 → 打 `fnos-X.Y.Z` tag 推 origin → `python3 scripts/gh-release.py release-upload fnos-X.Y.Z dist/*.fpk dist/*.sha256` 上传资产 → 回填 `fnpack.json` 的 sha256/size/updated_at。完整命令、token 与排错见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)。
 - 打包内容、真机安装与升级（含数据目录备份）、免密口径与排错见 [`fnos/README.md`](fnos/README.md)；上架飞牛第三方源（FnDepot）的材料与说明见 [`fnpack.json`](fnpack.json) 与 [`docs/phase-f-fndepot-submission.md`](docs/phase-f-fndepot-submission.md)。
 
 ---
@@ -347,6 +347,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 ### Unreleased
 
+- **发布改为「本地构建、本地上传」，GitHub 上不再有任何自动运行（Phase G）**：删掉本仓库全部自建 workflow（`sync-upstream.yml`、`build-fpk.yml`、`release-checksums.yml`、`docker-publish.yml`、`tests.yml`），只保留上游的 `.github/workflows/release.yml`（它只在 `v*` tag 上触发，我们的发布 tag 是 `fnos-X.Y.Z`，所以永不运行；删它反而会让下次并入上游再冲突）。新增 `scripts/gh-release.py`（纯标准库，走 REST API 打 tag / 传 Release 资产 / 改发布正文 / 算 sha256；token 从 `$WB_GH_TOKEN` 或 `/root/.gh-token` 读，绝不进仓库）与一页可照抄的 runbook [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)。同时清理本地构建缓存（`build/`、所有 `__pycache__/`、`*.pyc`/`*.pyo`、`.pytest_cache/`、`suite-logs/`，工作区 24M → 21M）并在 `.gitignore` 补上 `.pytest_cache/`。版本号规则不变：包版本 = 上游最新 release tag 的三段号，发布 tag = `fnos-X.Y.Z`。
 - **飞牛 fnOS 这一层：并入上游 v1.6.18–v1.6.19 及 v1.6.19 之后的 34 个提交、版本号与上游对齐、发布 tag 改 `fnos-X.Y.Z`**（本仓库改动，上游没有对应 tag）：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库发布 tag 从 `v<版本>.<序号>` 改为 `fnos-X.Y.Z`——上游新增的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发。`sync-upstream.yml` 因此不再把上游 tag 镜像进本仓库，并把 cron 加到三条（`17 3` / `23 9` / `41 15`，GitHub 的 schedule 常年晚约 7 小时），冲突时除失败 + summary 外再推一个 `sync-conflict/<UTC 日期>` 分支（带冲突标记，省得人重做合并）。飞牛层重贴后还修掉两处真缺陷：上游给 `Handler` 新加的 `disable_nagle_algorithm` 在 AF_UNIX 上会抛 `Errno 95`，网关路径单独派生了一个关掉它的 handler（否则每个网关请求都在 `setup()` 死掉）；看板直连 `GET /` 的响应体要求与文件逐字节一致，因此缺省直连不再注入 `window.__WB_BASE__`/`__WB_VIA_GATEWAY__`（挂载态照旧注入，且 ETag 增加了一个覆盖网关上下文的校验分量，否则第二个 NAS 用户会拿到 304 + 别人的页面）。看板另修掉一个同名函数覆盖（上游新的 `fmtTok` 会静默盖掉我们的精确版，全站 token 显示退化成 `8.3K`）。上架飞牛第三方源（FnDepot）的材料见 `fnpack.json`。
 - **国内版自动连续打卡（对话活跃上报点亮连登）**：国内版每日签到只能领积分但无法推进官方成长中心的「连登天数」（官方只认真实会话行为上报）。现将国内版对话活跃上报接入调度器：每日定时（09:00/21:00）为国内版账号上报规范会话事件（复刻客户端 `chat_request_send`，严格携带 `userId` 并保持每号每天 1 次防风控口径），点亮成长中心连续打卡天数与热力墙；上报后只读查询并回显连登天数，同时持久化记录 `lastActivityReport` 避免重复调用；新增测试套件 `tests/_test_streak_report.py`（10 项）。
 

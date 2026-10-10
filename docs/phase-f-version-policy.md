@@ -1,8 +1,14 @@
 # 版本号与发布 tag 约定（Phase F）
 
-本文是本仓库**唯一的版本号规则出处**。`scripts/build-fpk.sh`、`.github/workflows/build-fpk.yml`、
-`.github/workflows/sync-upstream.yml`、`.github/workflows/tests.yml` 与 `fnos/README.md` 都按这里
+本文是本仓库**唯一的版本号规则出处**。`scripts/build-fpk.sh`、`scripts/gh-release.py`、
+`docs/phase-g-local-release.md` 与 `fnos/README.md` 都按这里
 的口径实现；改动其中任何一处，请先改这里。
+
+> **Phase G 之后（2026-10-10）**：本仓库只剩上游的 `.github/workflows/release.yml`（只在 `v*` tag
+> 上触发；我们不发 `v*`，所以它永不运行），发布改为本机手工流程，见
+> [`docs/phase-g-local-release.md`](phase-g-local-release.md)。本文 §5 的「自动」路径、§8 里与
+> workflow 有关的两行、§9 整节都是 Phase F 的历史记录——保留是因为它们解释了「为什么用
+> `fnos-*` 命名空间」；**要照着做，请用 Phase G 的 runbook**。
 
 ## 1. 契约（一句话）
 
@@ -60,10 +66,14 @@ Phase E 的规则是「上游三段 tag + 第四段（本基线上的第几次�
 所以本仓库的发布 tag 一律 `fnos-<版本>`，与上游的 `vX.Y.Z`、`vX.Y.Z.N` 完全错开。这也意味着
 **上游的 tag 绝不推到本仓库**：不镜像、不推送，需要知道上游最新版本时按需 `ls-remote`。
 
-## 5. 发版流程
+## 5. 发版流程（Phase G 起：本机手工发布）
 
-**自动**（`sync-upstream.yml`，每天北京时间 11:17 / 17:23 / 23:41 各试一次，GitHub 定时任务
-常晚点甚至丢失，冗余三次）：
+> **下面这条「自动」路径已随 `sync-upstream.yml` 在 Phase G 删除**，保留为历史记录。
+> 现在照 [`docs/phase-g-local-release.md`](phase-g-local-release.md) 手工做：并上游 → 本地构建 →
+> 本地校验 → 打 `fnos-<版本>` tag → `scripts/gh-release.py` 上传资产 → 回填 `fnpack.json`。
+
+**自动**（Phase F 的历史，`sync-upstream.yml`，每天北京时间 11:17 / 17:23 / 23:41 各试一次，GitHub
+定时任务常晚点甚至丢失，冗余三次）：
 
 1. fetch upstream（`git fetch --tags --prune upstream`，**不推任何 tag 到 origin**）；
 2. `HEAD..upstream/main` 为 0 就结束；否则 `git merge --no-edit upstream/main` 成功则推送到本
@@ -73,17 +83,18 @@ Phase E 的规则是「上游三段 tag + 第四段（本基线上的第几次�
 4. 打 annotated tag `fnos-<版本>` 并推送，然后显式 `uses: ./.github/workflows/build-fpk.yml`
    构建（用 `GITHUB_TOKEN` 推的 tag 不会触发别的 workflow，所以必须显式调用）。
 
-**手工**：
+**手工**（Phase G 之后这是唯一路径）：
 
 ```bash
 git tag -a fnos-1.6.19 -m "WorkBuddy2API-Hub 1.6.19 (upstream v1.6.19)"
-git push origin fnos-1.6.19        # build-fpk.yml 会核对 tag 与 --print-version
+git push origin fnos-1.6.19        # tag 上的版本必须与 --print-version 一致（verify-fpk.sh 会核对）
 ```
 
 或在没有 tag 的情况下显式给版本：`VERSION=1.6.19 bash scripts/build-fpk.sh`。
 
-**彩排**：tag 名带 `-ci` 后缀（例如 `fnos-1.6.19-ci`）时 `tests.yml` 的 tag 断言会跳过 tag 与
-源码版本的比较（源码一致性检查仍然跑）。
+**彩排**（Phase F 历史）：tag 名带 `-ci` 后缀（例如 `fnos-1.6.19-ci`）时 `tests.yml` 的 tag 断言会
+跳过 tag 与源码版本的比较（源码一致性检查仍然跑）。`tests.yml` 已在 Phase G 删除，这个后缀现在只
+影响 `tests/_test_release_pipeline.py` 里的 tag 断言——本地发版不要用 `-ci` 后缀。
 
 ## 6. 历史四段 tag 怎么办
 
@@ -116,16 +127,21 @@ tar czf ~/workbuddy2api-backup.tgz -C /vol1/@appdata workbuddy2api/accounts work
 | --- | --- | --- |
 | 版本契约（行为） | `tests/_test_release_pipeline.py` `VersionContractTests` | tag 即版本、浅克隆、历史四段 tag 不再算发布、`--alpha` 只加后缀、兜底链三级、断网/无 remote |
 | 有牙证明 | 同上 `test_the_contract_fails_on_a_script_without_the_fnOS_namespace` | 把脚本改回旧命名空间后，同一断言必须失败 |
-| 工作流（静态） | 同上 `WorkflowGateTests` | `build-fpk.yml` 认 `fnos-*` 且核对 `--print-version`；`sync-upstream.yml` 三条 cron、**不推上游 tag**、只发更新版本、冲突分支与 summary |
+| 工作流（静态）**已被 Phase G 取代** | 同上 `WorkflowGateTests`（Phase F 历史） | `build-fpk.yml` 认 `fnos-*` 且核对 `--print-version`；`sync-upstream.yml` 三条 cron、**不推上游 tag**、只发更新版本、冲突分支与 summary。这两个 workflow 已在 Phase G 删除，对应静态门由 verifier 在 task-34 调整 |
 | 有牙证明 | 同上 `test_the_static_check_rejects_the_old_mirror_step` | 把旧的镜像步骤拼回去，静态门必须失败 |
-| tag 断言（行为） | 同上 `TagAssertWorkflowTests` | 把 `tests.yml` 里那段 run 抽出来真的跑：`fnos-<源码版本>` 通过，`fnos-9.9.9`/`release-<版本>` 失败，历史 `v*` 仍通过 |
-| 发布工程钉子 | `tests/_test_release_engineering.py` | tag 门禁接受 `fnos-`、触发条件保持上游原样、checksums、Docker、README 套件数 |
+| tag 断言（行为）**已被 Phase G 取代** | 同上 `TagAssertWorkflowTests`（Phase F 历史） | 把 `tests.yml` 里那段 run 抽出来真的跑：`fnos-<源码版本>` 通过，`fnos-9.9.9`/`release-<版本>` 失败，历史 `v*` 仍通过。`tests.yml` 已删除 |
+| 发布工程钉子 | `tests/_test_release_engineering.py` | tag 门禁接受 `fnos-`、checksums、Docker、README 套件数；「触发条件保持上游原样」这一条随 `tests.yml` 删除失效 |
 | 包身份 | `scripts/verify-fpk.sh` | `manifest` 版本必须是**三段数字**（四段或 `-alpha` 一律失败）；HEAD 上有 `fnos-<版本>` tag 时还要求「包就是这棵树构建的版本」，没有 tag 则跳过并打一行 `SKIP` 说明 |
+| 本地发布脚本 | `scripts/gh-release.py`（Phase G 新增） | 打 tag / 传资产 / 改正文 / 算 sha256；用 `$WB_GH_TOKEN` 或 `/root/.gh-token`，token 不进仓库 |
 
 修前/修后证据：`tests/_test_release_pipeline.py` 在 Phase E 的树（`git archive HEAD`）上
 **19 项里 16 项失败**，在改完的树上 19 项全绿。
 
-## 9. `tests.yml` 的触发条件（Lead 已裁决）
+## 9. `tests.yml` 的触发条件（Lead 已裁决；Phase G 已删除该 workflow）
+
+> **本节整体是 Phase F 的历史。** Phase G 删掉了 `tests.yml`（以及本仓库其它自建 workflow），
+> 这道 tag↔源码版本的断言不再自动运行，改由本地发布流程里的 `verify-fpk.sh` 与
+> `tests/_test_release_pipeline.py` 兜住（见 [`docs/phase-g-local-release.md`](phase-g-local-release.md)）。
 
 问题：上游的触发条件是 `on: push: tags: ["v*"]`，而本仓库的发布 tag 是 `fnos-X.Y.Z`。若原样保留，
 推 `fnos-1.6.19` 不会启动这个 workflow，「tag 必须等于 `wb_proxy.py` 里的源码版本」这条断言
