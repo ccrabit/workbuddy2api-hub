@@ -165,7 +165,7 @@
 
 **没做**
 - ~~修好后的同步工作流仍未在真实 GitHub 上跑过~~ → **Phase G 已按你的要求把这个工作流连同其余 4 个自建 workflow 一起删除**（`workflow_dispatch` 也从来跑不了：PAT 没有 Actions 写权限，实测 403）。以后发版是**本地流程**（`scripts/build-fpk.sh` + `scripts/gh-release.py`，runbook `docs/phase-g-local-release.md`），没有 CI 可等。
-- FnDepot **尚未实际收录我们**（中心仓库 `valid_sources.txt` 实测 62 行、不含我们；GitHub 代码搜索 `filename:fnpack.json` 的 41 条里也没有我们）。
+- FnDepot **尚未实际收录我们**。2026-10-11 00:45 实测：本仓库根目录的 `fnpack.json` 已经公开可读（`GET /repos/ccrabit/workbuddy2api-hub/contents/fnpack.json` → **200**，sha `035f2ec8…`），但中心仓库 `valid_sources.txt` 里没有我们，且 GitHub 代码搜索 `filename:fnpack.json`（total_count 41、只返回 40 条）与 `%2Bfork:true`（total 14）**都不含我们** ⇒ 索引未收录/未刷新，且 `ccrabit/workbuddy2api-hub` 是 fork、仓库名不含 `fndepot`，走「仓库搜索」那条召回路径必输。**所以还得建非 fork 的 `ccrabit/FnDepot`**（内容已在 task-33 备好，等用户的 classic token）。今晚那次扫描（16:00 UTC）在我们 push（16:34 UTC）之前就已经跑过了，下一次扫描是 2026-10-11 16:00 UTC。
 - 应用中心「点击打开」的安装后 UI 流程、真机移动端自适配，需要你在浏览器里看一眼。
 - 终验报告 §5 另列 6 条「做不到」的：真实 GitHub 跑同步、真机装包、FnDepot 实际收录、push/tag/Release 动作本身、网关 socket 上 `/v1` 免 key 的真机影响面、真 Windows 腿（以 CI 为准）。
 
