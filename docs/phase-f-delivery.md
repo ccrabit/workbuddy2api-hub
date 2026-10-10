@@ -165,7 +165,7 @@
 
 **没做**
 - ~~修好后的同步工作流仍未在真实 GitHub 上跑过~~ → **Phase G 已按你的要求把这个工作流连同其余 4 个自建 workflow 一起删除**（`workflow_dispatch` 也从来跑不了：PAT 没有 Actions 写权限，实测 403）。以后发版是**本地流程**（`scripts/build-fpk.sh` + `scripts/gh-release.py`，runbook `docs/phase-g-local-release.md`），没有 CI 可等。
-- FnDepot **尚未实际收录我们**。2026-10-11 00:45 实测：本仓库根目录的 `fnpack.json` 已经公开可读（`GET /repos/ccrabit/workbuddy2api-hub/contents/fnpack.json` → **200**，sha `035f2ec8…`），但中心仓库 `valid_sources.txt` 里没有我们，且 GitHub 代码搜索 `filename:fnpack.json`（total_count 41、只返回 40 条）与 `%2Bfork:true`（total 14）**都不含我们** ⇒ 索引未收录/未刷新，且 `ccrabit/workbuddy2api-hub` 是 fork、仓库名不含 `fndepot`，走「仓库搜索」那条召回路径必输。**所以还得建非 fork 的 `ccrabit/FnDepot`**（内容已在 task-33 备好，等用户的 classic token）。今晚那次扫描（16:00 UTC）在我们 push（16:34 UTC）之前就已经跑过了，下一次扫描是 2026-10-11 16:00 UTC。
+- FnDepot：**专门的源仓库已经建好并推上去了**——`ccrabit/FnDepot`（非 fork、公开，2026-10-10T16:54:17Z 创建，commit `a8dcecf`），根目录 `fnpack.json` + `ICON.PNG` + `README.md`；线上那份过中心仓库校验器 `validate_v2_app` → `(True,'ok')`，`download_url`/`sha256`(`e65dcb84…`)/`size`(626248) 与 Release 资产一致。飞牛客户端现在就能把 `https://github.com/ccrabit/FnDepot` 当外部源添加试用。**自动收录还没发生**：中心仓库每天 16:00 UTC 重生成 `valid_sources.txt`，下一次（2026-10-12 00:00 +08 之后）才有机会带上我们，已设提醒复检。附带风险：主仓库（fork）根的 `fnpack.json` 仍在，若它哪天被索引出来与我们同签名撞车导致新仓库被剔除，预案是删掉主仓库根那份（`tests/_test_fndepot_source.py` 有 77 条断言钉着它，删时要同步改测试）。
 - 应用中心「点击打开」的安装后 UI 流程、真机移动端自适配，需要你在浏览器里看一眼。
 - 终验报告 §5 另列 6 条「做不到」的：真实 GitHub 跑同步、真机装包、FnDepot 实际收录、push/tag/Release 动作本身、网关 socket 上 `/v1` 免 key 的真机影响面、真 Windows 腿（以 CI 为准）。
 

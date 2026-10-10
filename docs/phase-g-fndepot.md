@@ -214,3 +214,14 @@ curl -s https://raw.githubusercontent.com/EWEDLCM/FnDepot/main/valid_sources.txt
 - 没有建仓库、没有 push、没有改主仓库根 `fnpack.json`、没有碰 `tests/**` 或任何产品代码、没有 commit。
 - 没有伪造 `preview_urls` 或截图；没有把 `source_info.author` 写成 FnDepot/官方身份（中心 README:207-211 要求维护者与实际主体一致）。
 - 没有改中心仓库的任何内容（`generate_sources.py` 只读引用，未修改）。
+
+## 8. 收尾实况（Lead，2026-10-11 00:55 +08）
+
+用户提供了只有 `repo` scope 的 classic token（`/root/.gh-token-classic`，`GET /user` → 200、`X-OAuth-Scopes: repo`）。第 6 节待办 1 已执行：
+
+- **仓库已建**：`ccrabit/FnDepot`（id `1413442080`，`fork: false`、公开、默认分支 `main`、`has_issues: true`，`created_at 2026-10-10T16:54:17Z`），描述与 homepage 指向主仓库，topics = `fn-nas, fndepot, fnos, nas, workbuddy2api`。
+- **3 个文件已推到根目录**：commit `a8dcecf79175e458e9232c56b67d28be9501179e`（`fnpack.json` 2056 B / `ICON.PNG` 7666 B / `README.md` 2191 B，权限 644）。
+- **独立复核**：`GET /repos/ccrabit/FnDepot/contents/{fnpack.json,ICON.PNG,README.md}` 均 200；`raw.githubusercontent.com/ccrabit/FnDepot/main/fnpack.json` 与 `/tmp/fndepot-src/fnpack.json` **逐字节相同**（sha256 `730bc97e…`）；用中心仓库自己的 `generate_sources.py` 对**线上那份**跑 `validate_v2_app` → `(True, 'ok')`；`download_url` 指向 `https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk`，`sha256 = e65dcb84…`、`size = 626248`，与 Release 资产一致。
+- **立即试用**：飞牛客户端可直接把 `https://github.com/ccrabit/FnDepot`（或 raw 直链）加为外部源，不必等自动收录。
+
+**仍未做**：自动收录（中心仓库 16:00 UTC 扫描 → 2026-10-12 00:00 +08 出结果，提醒已设）；若「行数变化但没命中我们」，按第 5.4 节的预案删掉主仓库根 `fnpack.json`（注意主仓库 `tests/_test_fndepot_source.py` 有 77 条断言钉着那个文件，删它要同步改测试）。
