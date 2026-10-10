@@ -3073,9 +3073,56 @@ def _grant_status(pkg, now):
     return GRANT_STATUS_ACTIVE if pkg.get("in_usage") else GRANT_STATUS_AVAILABLE
 
 
+# 发放记录与本机动作的关联窗口：动作在发放前 2 小时内算「这次动作带来的」，
+# 上游记的发放时间可能比我们那条动作记录早几秒，所以向后也留一点余量。
+GRANT_ACTION_BEFORE = 2 * 3600
+GRANT_ACTION_AFTER = 600
+
+
+def _grant_actions():
+    """uid -> [{at, ts, task, ok}]（按时间升序），只含签到与每日活跃的真实尝试。
+
+    历史文件是磁盘上的东西：读取一律先过 wb_activity.project()，多出来的键
+    （别的写入方、手工编辑、被塞进来的凭证）不会跟着载荷出去；任何读取失败都
+    退化成「没有关联动作」，绝不让一次查询挂掉。
+    """
+    index = {}
+    try:
+        rows = wb_activity.load()
+    except Exception:
+        return index
+    for raw in rows or []:
+        row = wb_activity.project(raw)
+        task = row["task"]
+        if task not in (wb_activity.TASK_CHECKIN, wb_activity.TASK_DAILY_CHAT):
+            continue
+        at = wb_activity._parse_ts(row["ts"])
+        if at is None:
+            continue
+        index.setdefault(row["uid"], []).append(
+            {"at": at, "ts": row["ts"], "task": task, "ok": bool(row["ok"])})
+    for items in index.values():
+        items.sort(key=lambda item: item["at"])
+    return index
+
+
+def _grant_action(index, uid, at):
+    """发放时刻之前最近的一次本机签到 / 每日活跃尝试；窗口外没有就 None。"""
+    if at is None:
+        return None
+    for item in reversed(index.get(uid) or ()):
+        if item["at"] > at + GRANT_ACTION_AFTER:
+            continue
+        if item["at"] < at - GRANT_ACTION_BEFORE:
+            break
+        return {"task": item["task"], "ts": item["ts"], "ok": item["ok"],
+                "delta_seconds": int(round(at - item["at"]))}
+    return None
+
 def credit_grants(now=None):
     """每个积分包一行（新的在前）＋汇总；只读快照，不发上游请求。"""
     now = time.time() if now is None else now
+    actions = _grant_actions()
     rows = []
     fetched = 0.0
     for account in (POOL.accounts if POOL else []):
@@ -3093,6 +3140,7 @@ def credit_grants(now=None):
                 except (TypeError, ValueError):
                     return 0.0
             expire_iso = pkg.get("expire_time") or pkg.get("cycle_end_time") or ""
+            create_at = _parse_stamp_epoch(pkg.get("create_time"))
             rows.append({
                 "uid": account.uid,
                 "nickname": account.nickname or (account.uid or "")[:8],
@@ -3104,13 +3152,14 @@ def credit_grants(now=None):
                 "remain": _num("remain"),
                 "used": _num("used"),
                 "unit": str(pkg.get("unit") or "credit"),
-                "create_at": _parse_stamp_epoch(pkg.get("create_time")),
+                "create_at": create_at,
                 "create_iso": str(pkg.get("create_time") or ""),
                 "expire_at": _parse_stamp_epoch(expire_iso),
                 "expire_iso": str(expire_iso),
                 "no_expiry": bool(pkg.get("no_expiry")),
                 "days_left": pkg.get("days_left"),
                 "status": _grant_status(pkg, now),
+                "action": _grant_action(actions, account.uid, create_at),
             })
     # 新的在前；同一秒按账号、包名稳定排序，免得每次刷新顺序都在跳。
     rows.sort(key=lambda r: (-(r["create_at"] or 0), r["nickname"], r["name"]))
@@ -12633,6 +12682,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._route_tasks_run(payload)
         if path == "/tasks/travel":
             return self._route_tasks_travel(payload)
+        if path == "/tasks/streak-bonus":
+            return self._route_tasks_streak_bonus(payload)
         if path == "/scheduler/trigger":
             return self._route_scheduler_trigger(payload)
         if path == "/scheduler/toggle":
@@ -12802,12 +12853,39 @@ class Handler(BaseHTTPRequestHandler):
             if i < len(targets) - 1:
                 time.sleep(1.5)
         combined_logs.append(f"====== 全部 {len(targets)} 个账号任务执行完毕，累计新增积分: +{total_credit} ======")
+        add_log_entry(f"[任务福利] 批量成长任务执行完成，共 {len(targets)} 个账号，新增积分 +{total_credit}", tag="tasks")
         return self._json(200, {
             "ok": True,
             "credit_added": total_credit,
             "logs": combined_logs,
             "accounts_count": len(targets)
         })
+
+    def _route_tasks_streak_bonus(self, payload):
+        if not POOL:
+            return self._json(200, {"ok": False, "msg": "账号池不可用"})
+        invalidate_tasks_cache()
+        uid = payload.get("uid")
+        if uid and uid != "all":
+            target = POOL.get(uid)
+            if not target or target.realm != "cn":
+                return self._json(200, {"ok": False, "msg": "未找到指定的国内版账号"})
+            targets = [target]
+        else:
+            targets = [a for a in POOL.accounts if a.realm == "cn" and a.enabled]
+        if not targets:
+            return self._json(200, {"ok": False, "msg": "未找到已启用的国内版账号"})
+        from wb_tasks import run_streak_bonus
+        results = []
+        for i, acc in enumerate(targets):
+            uid_str = acc.uid[:8] if acc.uid else "?"
+            nick = acc.nickname or uid_str
+            res = run_streak_bonus(acc)
+            results.append(f"{nick}: {res.get('msg')}")
+            add_log_entry(f"[任务福利] 账号 [{nick}] 连登管家与抽奖: {res.get('msg')}", tag="tasks")
+            if i < len(targets) - 1:
+                time.sleep(1.0)
+        return self._json(200, {"ok": True, "msg": chr(10).join(results)})
 
     def _route_tasks_travel(self, payload):
         if not POOL:
@@ -12840,6 +12918,8 @@ class Handler(BaseHTTPRequestHandler):
             if i < len(targets) - 1:
                 time.sleep(1.0)
         summary_msg = chr(10).join([f"{r['nickname']}: {r['msg']}" for r in results])
+        for r in results:
+            add_log_entry(f"[任务福利] 账号 [{r['nickname']}] 猫猫旅行: {r['msg']}", tag="tasks")
         return self._json(200, {
             "ok": True,
             "results": results,
@@ -12952,6 +13032,9 @@ class Handler(BaseHTTPRequestHandler):
             if account is None:
                 continue
             res = account.checkin(trigger="manual")
+            nick = account.nickname or account.uid[:8]
+            add_log_entry(f"[任务福利] 账号 [{nick}] 每日签到: {res.get('msg') if res.get('ok') else res.get('error')}",
+                          level="INFO" if res.get("ok") else "WARN", tag="tasks")
             results.append({"uid": account.uid, "nickname": account.nickname, **res})
         return self._json(200, {"results": results, "accounts": account_views()})
 
@@ -12968,9 +13051,9 @@ class Handler(BaseHTTPRequestHandler):
             res = account.daily_chat(trigger="manual")
             # 与网页通道打卡那条一样把结果写进运行日志：msg 里带着网页通道是
             # completed 还是失败原因，面板上光看 toast 的「成功」看不出来。
-            log("account %s: 每日活跃打卡 -> %s"
-                % (account.uid[:8], res.get("msg") if res.get("ok") else res.get("error")),
-                level="INFO" if res.get("ok") else "WARN")
+            nick = account.nickname or account.uid[:8]
+            log(f"[任务福利] 账号 [{nick}] 每日活跃打卡: {res.get('msg') if res.get('ok') else res.get('error')}",
+                level="INFO" if res.get("ok") else "WARN", tag="tasks")
             results.append({"uid": account.uid, "nickname": account.nickname, **res})
         return self._json(200, {"results": results, "accounts": account_views()})
 
@@ -12990,9 +13073,9 @@ class Handler(BaseHTTPRequestHandler):
             if account is None:
                 continue
             res = account.daily_chat_web(trigger="manual")
-            log("account %s: 网页通道打卡 -> %s"
-                % (account.uid[:8], res.get("conversation") if res.get("ok") else res.get("error")),
-                level="INFO" if res.get("ok") else "WARN")
+            nick = account.nickname or account.uid[:8]
+            log(f"[任务福利] 账号 [{nick}] 网页通道打卡: {res.get('conversation') if res.get('ok') else res.get('error')}",
+                level="INFO" if res.get("ok") else "WARN", tag="tasks")
             results.append({"uid": account.uid, "nickname": account.nickname, **res})
         return self._json(200, {"results": results, "accounts": account_views()})
 

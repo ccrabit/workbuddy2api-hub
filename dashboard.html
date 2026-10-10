@@ -716,7 +716,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
   };
 
   // 3. Tab 初始化（与下方主脚本的 MAIN_TABS 保持一致）
-  var TABS = ['gateway','analytics','agents','settings','logs'];
+  var TABS = ['gateway','tasks','analytics','agents','settings','logs'];
   var pick = null;
   try {
     var q = new URLSearchParams(location.search).get('tab');
@@ -1302,7 +1302,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     '每日活跃打卡 (国际版)': 'Daily activity check-in (Global)',
     '每日积分限额': 'Daily credit limit',
     '临期积分优先': 'Expiring credits first',
-    '账号最早到期的积分包进入该天数窗口时，分派优先使用这些账号，避免快到期的积分被浪费；窗口内按到期先后使用，同一天到期的账号之间仍轮询。填 0 表示关闭。': 'When an account\'s soonest-expiring credit package falls inside this many days, dispatch prefers those accounts so credits about to lapse are not wasted. Inside the window the earliest expiry is used first; accounts expiring on the same day still take turns. 0 turns it off.',
+    '账号「最早到期的积分包」（还有剩余、且到期会真正作废的那些）距今不超过该天数时，分派优先使用临期积分的账号——分到的流量更多、越接近到期份额越大，但不会全压在一个账号上（到期日相同或相近的账号彼此等权）；这些账号暂时都不可用（冷却、达日限额等）时，其他账号照常顶上。填 0 表示关闭；天数取自各账号最近一次刷新的积分数据。': 'When the soonest-expiring credit package of an account (one that still has credits and would really lapse) is within this many days, dispatch prefers the accounts with expiring credits - they get a larger share, and the closer to expiry the bigger - but never all of it in one account (accounts expiring on or around the same day carry equal weight); when none of them is usable (cooling down, over a daily limit), the other accounts serve as usual. 0 turns it off; the day counts come from the most recent credit refresh of each account.',
     '启用临期优先': 'Enable expiring-credits first',
     '已开启临期积分优先': 'Expiring-credits priority on',
     '已关闭临期积分优先': 'Expiring-credits priority off',
@@ -1323,7 +1323,16 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     '不过期': 'No expiry',
     '暂无积分获取记录': 'No credit grants yet',
     '暂无积分获取记录（上游只返回当前仍可见的积分包，先点「一键刷新积分」拉一次）': 'No credit grants on record (the upstream only returns packages still visible; run "Refresh credits" once)',
+    '来源': 'Source',
+    '每日活跃奖励': 'Daily activity reward',
+    '上游发放原因：': 'Upstream reason: ',
+    '本机动作：': 'Gateway action: ',
+    '每日签到': 'Daily check-in',
+    '每日活跃打卡': 'Daily activity check-in',
+    '成功': 'succeeded',
+    '按包名与面额推断（官方规则：每日活跃 30 / Pro 50 积分）': 'Inferred from the package name and size (official rule: 30 for daily activity, 50 on Pro)',
     '每日签到 (国内版)': 'Daily check-in (China)',
+    'Buddy 加油站签到': 'Buddy gas station check-in',
     '每日签到:': 'Daily check-in:',
     '每账号每日上限（token）': 'Daily cap per account (tokens)',
     '每账号每日上限（积分）': 'Daily cap per account (credits)',
@@ -1488,6 +1497,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     '其他客户端': 'Other Clients',
     '已配置': 'Configured',
     '已检测到': 'Detected',
+    ' / 共 ': ' / ',
     '未检测到': 'Not Detected',
     '网关地址': 'Gateway URL',
     '默认模型': 'Default Model',
@@ -1984,6 +1994,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     "每 5 秒自动刷新 · 数据来自本机反代": "每 5 秒自動重新整理 · 資料來自本機反代",
     "每个账号固定绑定一个出口代理槽。槽位地址变化时绑定账号自动跟随；禁用或删除后回退直连。": "每個帳號固定繫結一個出口代理槽。槽位地址變化時繫結帳號自動跟隨；禁用或刪除後回退直連。",
     "每日签到 (国内版)": "每日簽到 (國內版)",
+    "Buddy 加油站签到": "Buddy 加油站簽到",
     "每日签到:": "每日簽到:",
     "每日签到: ": "每日簽到: ",
     "每账号每日上限（token）": "每帳號每日上限（token）",
@@ -2098,7 +2109,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     "账号已成功启用": "帳號已成功啟用",
     "账号当日消耗的 token 达到该值后暂停接单，请求自动切到其他账号；本地时间 0 点后自动恢复。填 0 表示不限（不限额）；与「保留积分」各自独立，任一命中都会暂停接单。": "帳號當日消耗的 token 達到該值後暫停接單，請求自動切到其他帳號；本地時間 0 點後自動恢復。填 0 表示不限（不限額）；與「保留積分」各自獨立，任一命中都會暫停接單。",
     "账号当日消费的积分达到该值后，只允许请求免费模型（目录中标记为 x0.00 的模型），需要花费积分的模型自动切到其他账号；本地时间 0 点后自动恢复。填 0 表示关闭（默认）。": "帳號當日消費的積分達到該值後，只允許請求免費模型（目錄中標記為 x0.00 的模型），需要花費積分的模型自動切到其他帳號；本地時間 0 點後自動恢復。填 0 表示關閉（預設）。",
-    "账号最早到期的积分包进入该天数窗口时，分派优先使用这些账号，避免快到期的积分被浪费；窗口内按到期先后使用，同一天到期的账号之间仍轮询。填 0 表示关闭。": "帳號最早到期的積分包進入該天數視窗時，分派優先使用這些帳號，避免快到期的積分被浪費；視窗內按到期先後使用，同一天到期的帳號之間仍輪詢。填 0 表示關閉。",
+    "账号「最早到期的积分包」（还有剩余、且到期会真正作废的那些）距今不超过该天数时，分派优先使用临期积分的账号——分到的流量更多、越接近到期份额越大，但不会全压在一个账号上（到期日相同或相近的账号彼此等权）；这些账号暂时都不可用（冷却、达日限额等）时，其他账号照常顶上。填 0 表示关闭；天数取自各账号最近一次刷新的积分数据。": "帳號「最早到期的積分包」（還有剩餘、且到期會真正作廢的那些）距今不超過該天數時，分派優先使用臨期積分的帳號——分到的流量更多、越接近到期份額越大，但不會全壓在一個帳號上（到期日相同或相近的帳號彼此等權）；這些帳號暫時都不可用（冷卻、達日限額等）時，其他帳號照常頂上。填 0 表示關閉；天數取自各帳號最近一次重新整理的積分資料。",
     "账号池不可用": "帳號池不可用",
     "账号池未初始化": "帳號池未初始化",
     "账号，之后相关请求都会走该账号": "帳號，之後相關請求都會走該帳號",
@@ -2659,6 +2670,9 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
       <button class="main-nav-btn active" id="btnNavGateway" onclick="switchMainTab('gateway')">
         网关与账号
       </button>
+      <button class="main-nav-btn" id="btnNavTasks" onclick="switchMainTab('tasks')">
+        任务与福利
+      </button>
       <button class="main-nav-btn" id="btnNavAnalytics" onclick="switchMainTab('analytics')">
         数据看板
       </button>
@@ -2846,7 +2860,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     <button class="sec" onclick="fetchCredits(this)">一键刷新积分</button>
     <button class="sec" onclick="refreshAccounts(this)" title="逐个刷新所有账号的上游访问凭证（相当于对每个账号点一次「刷新凭证」）">一键刷新凭证</button>
     <span class="toolbar-sep" aria-hidden="true"></span>
-    <button class="sec" id="btnCheckin" onclick="doCheckin(this)" style="display:none">每日签到 (国内版)</button>
+    <button class="sec" id="btnCheckin" onclick="doCheckin(this)" style="display:none">Buddy 加油站签到</button>
     <button class="sec" id="btnDailyChat" onclick="doDailyChat(this)" style="display:none">每日活跃打卡 (国际版)</button>
     <!-- 网页通道打卡按钮不再上屏（2026-10-10 起）：网页通道那一步已经由设置里的
          「国际版每日活跃打卡」自动带在「每日活跃打卡」里，手动补跑走
@@ -2923,48 +2937,6 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
       </table>
     </div>
   </section>
-
-  <!-- 国内版专属成长任务与日常福利 -->
-  <section id="sectionGrowthTasks" style="display:none">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
-      <div>
-        <h2 style="margin:0">国内版成长任务与日常福利</h2>
-        <div style="font-size:12px;color:var(--dim)">全自动批量接取、事件上报点亮并领取官方成长积分 (+1450分)，以及猫猫日常与打卡</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select id="growthAcctSelect" onchange="switchGrowthAccount(this.value)" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--fg);font-family:inherit">
-          <option value="all">全部国内账号 (批量)</option>
-        </select>
-        <button class="primary" id="btnRunTasks" onclick="runGrowthTasks(this)">一键做任务领积分</button>
-        <button id="btnCatTravel" onclick="triggerCatTravel(this)">猫猫旅行</button>
-      </div>
-    </div>
-
-    <div class="cards" style="margin-bottom:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
-      <div class="card"><div class="val" id="stkDays">-</div><div class="lbl">连续打卡天数</div></div>
-      <div class="card accent"><div class="val" id="nrgBalance">-</div><div class="lbl">成长能量余额</div></div>
-      <div class="card accent2"><div class="val" id="catState">-</div><div class="lbl" id="catDesc">猫猫日常状态</div></div>
-    </div>
-
-    <div style="overflow-x:auto">
-      <table id="growthTable" class="data-cards">
-        <thead>
-          <tr>
-            <th>任务名称 / 代码</th>
-            <th>任务说明</th>
-            <th>进度</th>
-            <th>奖励</th>
-            <th>状态</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <div id="taskLogBox" style="display:none;margin-top:14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:12px;font-family:ui-monospace,monospace;line-height:1.6;max-height:220px;overflow-y:auto"></div>
-  </section>
-
-  
   <!-- 使用说明：API 地址与应急入口（上游看板没有这一节，Phase E 补回） -->
   <details class="wb-help" id="wbHelp">
     <summary>使用说明 · API 地址与应急入口</summary>
@@ -2984,7 +2956,101 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
     </div>
   </details>
 
+
   </div><!-- /pageGateway -->
+  
+  <div id="pageTasks" class="main-page">
+  <!-- 国际版每日活跃福利 -->
+  <section id="sectionIntlTasks" style="margin-bottom:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="margin:0">国际版每日活跃福利</h2>
+        <div style="font-size:12px;color:var(--dim)">国际版每日轻量会话与网页通道打卡，触发官方发放每日活跃 Bonus Pack (+30/+50 积分)</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="primary" id="btnPageDailyChat" onclick="doDailyChat(this)">每日活跃打卡 (国际版)</button>
+      </div>
+    </div>
+    <div class="cards" style="margin-bottom:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+      <div class="card accent2">
+        <div class="k">今日活跃打卡状态</div>
+        <div class="v" id="intlTodayActiveState" style="font-size:20px">-</div>
+      </div>
+      <div class="card warn">
+        <div class="k">累计活跃奖励积分</div>
+        <div class="v" id="intlTotalGranted" style="color:var(--warn)">-</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 国内版专属成长任务与日常福利 -->
+  <section id="sectionGrowthTasks">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="margin:0">国内版成长任务与日常福利</h2>
+        <div style="font-size:12px;color:var(--dim)">全自动批量接取、事件上报点亮并领取官方成长积分 (+1450分)，以及猫猫日常与打卡</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="growthAcctSelect" onchange="switchGrowthAccount(this.value)" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--fg);font-family:inherit">
+          <option value="all">全部国内账号 (批量)</option>
+        </select>
+        <button class="primary" id="btnPageCheckin" onclick="triggerBuddyCheckin(this)">Buddy 加油站签到</button>
+        <button class="primary" id="btnRunTasks" onclick="runGrowthTasks(this)">一键做任务领积分</button>
+        <button id="btnCatTravel" onclick="triggerCatTravel(this)">猫猫旅行</button>
+        <button id="btnRunStreakBonus" onclick="triggerStreakBonus(this)">连登管家与抽奖</button>
+      </div>
+    </div>
+
+    <div class="cards" style="margin-bottom:16px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+      <div class="card accent2">
+        <div class="k">Buddy 加油站签到</div>
+        <div class="v" id="cnTodayCheckinState" style="font-size:19px">-</div>
+      </div>
+      <div class="card">
+        <div class="k">连续打卡天数</div>
+        <div class="v" id="stkDays" style="color:var(--accent2)">-</div>
+      </div>
+      <div class="card">
+        <div class="k">补签卡余额</div>
+        <div class="v" id="makeupCards">-</div>
+      </div>
+      <div class="card warn">
+        <div class="k">成长抽奖次数</div>
+        <div class="v" id="lotteryChances" style="color:var(--warn)">-</div>
+      </div>
+      <div class="card accent2">
+        <div class="k">猫猫旅行状态</div>
+        <div class="v" id="catState" style="font-size:19px">-</div>
+      </div>
+      <div class="card">
+        <div class="k">成长能量余额</div>
+        <div class="v" id="nrgBalance">-</div>
+      </div>
+      <div class="card accent">
+        <div class="k">已获取福利总积分</div>
+        <div class="v" id="cnTotalGranted" style="color:var(--accent)">-</div>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table id="growthTable" class="data-cards">
+        <thead>
+          <tr>
+            <th>任务名称 / 代码</th>
+            <th>任务说明</th>
+            <th>进度</th>
+            <th>奖励</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="taskLogBox" style="display:none;margin-top:14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:12px;font-family:ui-monospace,monospace;line-height:1.6;max-height:220px;overflow-y:auto"></div>
+  </section>
+  </div><!-- /pageTasks -->
+
   <div id="pageAnalytics" class="main-page">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
       <div>
@@ -3122,7 +3188,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
       </div>
       <div style="overflow-x:auto;max-height:260px">
         <table class="data-cards" id="creditGrantsTable">
-          <thead><tr><th>时间</th><th>账号</th><th>区域</th><th>名称</th><th>积分</th><th>剩余</th><th>到期</th><th>状态</th></tr></thead>
+          <thead><tr><th>时间</th><th>账号</th><th>区域</th><th>名称</th><th>来源</th><th>积分</th><th>剩余</th><th>到期</th><th>状态</th></tr></thead>
           <tbody id="creditGrantsTbody"></tbody>
         </table>
       </div>
@@ -3374,7 +3440,7 @@ main{padding-left:max(24px,env(safe-area-inset-left));padding-right:max(24px,env
               <td class="limit-name">
                 <div style="font-weight:600;color:var(--fg)">临期积分优先 <em id="setExpiringWindowState"></em></div>
                 <div style="font-size:12px;color:var(--dim);margin-top:2px">
-                  账号最早到期的积分包进入该天数窗口时，分派优先使用这些账号，避免快到期的积分被浪费；窗口内按到期先后使用，同一天到期的账号之间仍轮询。填 0 表示关闭。
+                  账号「最早到期的积分包」（还有剩余、且到期会真正作废的那些）距今不超过该天数时，分派优先使用临期积分的账号——分到的流量更多、越接近到期份额越大，但不会全压在一个账号上（到期日相同或相近的账号彼此等权）；这些账号暂时都不可用（冷却、达日限额等）时，其他账号照常顶上。填 0 表示关闭；天数取自各账号最近一次刷新的积分数据。
                 </div>
                 <label class="switch" style="margin-top:8px">
                   <input id="setExpiringWindowToggle" type="checkbox" onchange="toggleExpiringWindow(this)">
@@ -4224,13 +4290,51 @@ async function switchGrowthAccount(uid){
   await loadGrowthTasks();
 }
 
+async function loadIntlTasks(){
+  try{
+    const [r, g] = await Promise.all([
+      getJSON('/accounts'),
+      getJSON('/accounts/credits/grants').catch(() => ({}))
+    ]);
+    const accts = (r.accounts || []).filter(a => a.realm === 'intl' && a.enabled);
+    const countEl = document.getElementById("intlAcctCount");
+    if(countEl) countEl.textContent = accts.length + ' 个';
+    const bonusEl = document.getElementById("intlBonusCredits");
+    if(bonusEl) bonusEl.textContent = '30 / 50 积分';
+
+    const intlTotalEl = document.getElementById("intlTotalGranted");
+    if(intlTotalEl){
+      const gRows = (g.rows || []).filter(x => x.realm === 'intl' && (x.name === 'Bonus Pack' || (x.source_inferred && x.source_inferred.includes('活跃'))));
+      const totalAmt = gRows.reduce((acc, x) => acc + (Number(x.size || x.amount) || 0), 0);
+      intlTotalEl.textContent = '+' + fmt(totalAmt) + ' 积分';
+    }
+
+    const stateEl = document.getElementById("intlTodayActiveState");
+    if(stateEl){
+      if(!accts.length){
+        stateEl.textContent = '未添加国际账号';
+      } else {
+        const today = new Date().toISOString().slice(0, 10);
+        const allDone = accts.every(a => a.lastDailyChat && a.lastDailyChat.startsWith(today));
+        const someDone = accts.some(a => a.lastDailyChat && a.lastDailyChat.startsWith(today));
+        if(allDone){
+          stateEl.innerHTML = '<span style="color:#26bb82">今日全部已打卡</span>';
+        } else if(someDone){
+          stateEl.innerHTML = '<span style="color:var(--accent)">部分账号已打卡</span>';
+        } else {
+          stateEl.innerHTML = '<span style="color:var(--warn)">今日尚未打卡</span>';
+        }
+      }
+    }
+  }catch(e){
+    console.error('loadIntlTasks error:', e);
+  }
+}
+
 async function loadGrowthTasks(){
+  loadIntlTasks();
   const sec = document.getElementById("sectionGrowthTasks");
   if(!sec) return;
-  if(window.VIEW_REALM !== 'cn'){
-    sec.style.display = 'none';
-    return;
-  }
   sec.style.display = 'block';
   try{
     const q = (CURRENT_GROWTH_UID && CURRENT_GROWTH_UID !== 'all') ? ('?uid=' + encodeURIComponent(CURRENT_GROWTH_UID)) : '';
@@ -4250,25 +4354,72 @@ async function loadGrowthTasks(){
       sel.innerHTML = opts;
     }
 
+    const chkStateEl = document.getElementById("cnTodayCheckinState");
+    if(chkStateEl){
+      const today = new Date().toISOString().slice(0, 10);
+      let targetAccts = accts.filter(a => a.realm === 'cn');
+      if(CURRENT_GROWTH_UID && CURRENT_GROWTH_UID !== 'all'){
+        targetAccts = targetAccts.filter(a => a.uid === CURRENT_GROWTH_UID);
+      }
+      if(!targetAccts.length){
+        chkStateEl.textContent = '无国内账号';
+      } else {
+        const allDone = targetAccts.every(a => a.lastCheckin && a.lastCheckin.startsWith(today));
+        const someDone = targetAccts.some(a => a.lastCheckin && a.lastCheckin.startsWith(today));
+        if(allDone){
+          chkStateEl.innerHTML = '<span style="color:#26bb82">今日已签到</span>';
+        } else if(someDone){
+          chkStateEl.innerHTML = '<span style="color:var(--accent)">部分已签到</span>';
+        } else {
+          chkStateEl.innerHTML = '<span style="color:var(--warn)">今日未签到</span>';
+        }
+      }
+    }
+
     const elStk = document.getElementById("stkDays");
     if(elStk) elStk.textContent = streak + ' 天';
     const elNrg = document.getElementById("nrgBalance");
     if(elNrg) elNrg.textContent = energy;
+    const elCards = document.getElementById("makeupCards");
+    if(elCards) elCards.textContent = (sum.makeup_cards != null ? sum.makeup_cards : '-') + ' 张';
+    const elLottery = document.getElementById("lotteryChances");
+    if(elLottery) elLottery.textContent = (sum.lottery_chances != null ? sum.lottery_chances : '-') + ' 次';
+
+    const cnTotalEl = document.getElementById("cnTotalGranted");
+    if(cnTotalEl){
+      try{
+        const g = await getJSON('/accounts/credits/grants');
+        let gRows = (g.rows || []).filter(x => x.realm === 'cn');
+        if(CURRENT_GROWTH_UID && CURRENT_GROWTH_UID !== 'all'){
+          gRows = gRows.filter(x => x.uid === CURRENT_GROWTH_UID);
+        }
+        // 排除掉不带任务/活动属性的纯体验包，统计签到、成长、活动等福利
+        const perksRows = gRows.filter(x => {
+          const r = String(x.grant_reason || '');
+          const n = String(x.name || '');
+          return r.includes('签到') || r.includes('成长') || r.includes('活动') || r.includes('裂变') || n.includes('裂变');
+        });
+        const totalAmt = perksRows.reduce((acc, x) => acc + (Number(x.size || x.amount) || 0), 0);
+        cnTotalEl.textContent = '+' + fmt(totalAmt) + ' 积分';
+      }catch(e){
+        cnTotalEl.textContent = '-';
+      }
+    }
 
     const elCat = document.getElementById("catState");
     const elCatDesc = document.getElementById("catDesc");
     if(elCat){
       if(tr.state === 'arrived') {
-        elCat.innerHTML = '<span style="color:#26bb82">旅行归来！待领奖</span>';
-        if(elCatDesc) elCatDesc.textContent = '获得奖励 +' + (tr.reward_credit || 0) + ' 积分';
+        elCat.innerHTML = '<span style="color:#26bb82">待领奖</span>';
+        if(elCatDesc) elCatDesc.textContent = '猫猫旅行 (奖励 +' + (tr.reward_credit || 0) + ' 积分)';
       } else if(tr.state === 'traveling') {
-        elCat.innerHTML = '<span style="color:var(--accent)">旅行中...</span>';
-        if(elCatDesc) elCatDesc.textContent = '预计稍后归来';
+        elCat.innerHTML = '<span style="color:var(--accent)">旅行中</span>';
+        if(elCatDesc) elCatDesc.textContent = '猫猫旅行 (预计稍后归来)';
       } else if(tr.daily_limit_reached) {
-        elCat.textContent = '今日次数已用尽';
+        elCat.innerHTML = '<span style="color:var(--dim)">今日已完成</span>';
         if(elCatDesc) elCatDesc.textContent = '次日 00:00 刷新';
       } else {
-        elCat.textContent = '在家待命中';
+        elCat.innerHTML = '<span style="color:var(--accent2)">在家待命</span>';
         if(elCatDesc) elCatDesc.textContent = '随时可出发旅行';
       }
     }
@@ -4354,6 +4505,44 @@ async function triggerCatTravel(btn){
     toast("猫猫旅行失败: " + e.message, "bad");
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = '猫猫旅行'; }
+  }
+}
+
+async function triggerBuddyCheckin(btn){
+  btn.disabled = true; const ot = btn.textContent; btn.textContent = "签到中...";
+  try {
+    const payload = {};
+    if(CURRENT_GROWTH_UID && CURRENT_GROWTH_UID !== 'all'){
+      payload.uid = CURRENT_GROWTH_UID;
+    }
+    const r = await postJSON("/accounts/checkin", payload);
+    const res = r.results || [];
+    if(!res.length) toast("未发现国内版账号", "warn");
+    else {
+      const summary = res.map(x => (x.nickname||x.uid.slice(0,6)) + ": " + (x.ok ? "签到成功 (+100积分)" : (x.error||x.msg))).join("；");
+      toast("Buddy 加油站签到: " + summary, res.some(x => x.ok) ? "ok" : "warn");
+    }
+    await loadAccounts(); await loadGrowthTasks();
+  }catch(e){ toast("签到失败: " + e.message, "bad"); }
+  finally { btn.disabled = false; btn.textContent = ot; }
+}
+
+async function triggerStreakBonus(btn){
+  if(btn){ btn.disabled = true; btn.textContent = '执行中...'; }
+  try{
+    const payload = {};
+    if(CURRENT_GROWTH_UID && CURRENT_GROWTH_UID !== 'all'){
+      payload.uid = CURRENT_GROWTH_UID;
+    }
+    const r = await postJSON("/tasks/streak-bonus", payload);
+    const msg = r.msg || (r.ok ? "连登管家与抽奖执行完成" : "操作未完成");
+    toast(msg, r.ok ? "ok" : "warn");
+    await loadAccounts();
+    await loadGrowthTasks();
+  }catch(e){
+    toast("连登管家执行失败: " + e.message, "bad");
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '连登管家与抽奖'; }
   }
 }
 
@@ -6521,7 +6710,7 @@ function generatePageList(current, total){
 
 // Tab ids in nav order. One list so the restore path and the nav cannot
 // drift apart.
-const MAIN_TABS = ['gateway', 'analytics', 'agents', 'settings', 'logs'];
+const MAIN_TABS = ['gateway', 'tasks', 'analytics', 'agents', 'settings', 'logs'];
 const MAIN_TAB_STORE = 'wb-proxy-main-tab';
 let currentMainTab = 'gateway';
 let analyticsRange = 'today';
@@ -8353,17 +8542,20 @@ function switchMainTab(tab){
   } catch(e){}
   try { localStorage.setItem(MAIN_TAB_STORE, tab); } catch(e){}
   const btnGateway = document.getElementById('btnNavGateway');
+  const btnTasks = document.getElementById('btnNavTasks');
   const btnAnalytics = document.getElementById('btnNavAnalytics');
   const btnLogs = document.getElementById('btnNavLogs');
   const btnSettings = document.getElementById('btnNavSettings');
   const btnAgents = document.getElementById('btnNavAgents');
   const pageGateway = document.getElementById('pageGateway');
+  const pageTasks = document.getElementById('pageTasks');
   const pageAnalytics = document.getElementById('pageAnalytics');
   const pageLogs = document.getElementById('pageLogs');
   const pageSettings = document.getElementById('pageSettings');
   const pageAgents = document.getElementById('pageAgents');
   const tabs = [
     ['gateway', btnGateway, pageGateway],
+    ['tasks', btnTasks, pageTasks],
     ['analytics', btnAnalytics, pageAnalytics],
     ['logs', btnLogs, pageLogs],
     ['settings', btnSettings, pageSettings],
@@ -8377,6 +8569,7 @@ function switchMainTab(tab){
     // 每个页面各自按自己的区块重建侧栏；非当前页的区块变化在切过来时补上
     if(on) initPageNav(page);
   });
+  if(tab === 'tasks'){ loadGrowthTasks(); }
   if(tab === 'analytics'){ loadAnalytics(); loadAnalyticsMatrix(); }
   if(tab === 'settings'){ loadSettings(); loadProxySlots(); }
   if(tab === 'agents'){ loadAgents(); }
@@ -8422,8 +8615,15 @@ async function loadAgents(showToast){
     renderAgentManualUrls();
     const n = agentClients().filter(c => c.installed || (c.status && c.status !== 'missing')).length;
     if(state){
-      state.textContent = '(已检测到 ' + n + ' 个)';
-      state.style.color = n ? 'var(--accent2)' : 'var(--dim)';
+      // 计数必须按卡片自己的判定来数（agentStatusBadge 认 installed / detected），
+      // 否则会出现「5 张卡片、标题 4 个」的错位（issue #250）：卡片列表是全部
+      // 支持的客户端，检测到的只是其中一部分，两个数字都写出来。
+      const clients = agentClients();
+      const found = clients.filter(c => c.installed || c.detected).length;
+      state.textContent = clients.length > found
+        ? '(已检测到 ' + found + ' / 共 ' + clients.length + ' 个)'
+        : '(已检测到 ' + found + ' 个)';
+      state.style.color = found ? 'var(--accent2)' : 'var(--dim)';
     }
     if(showToast) toast('客户端检测完成', 'ok');
   } catch(e) {
@@ -9668,17 +9868,33 @@ function renderCreditGrants(data){
     const tone = (r.status === 'expired' || r.status === 'used_up') ? 'bad'
       : (r.status === 'active' ? 'ok' : '');
     const expiry = r.no_expiry ? '不过期' : String(r.expire_iso || '').slice(5, 16) || '—';
+    // 来源：上游给了发放原因就用它的原文（如「Buddy 加油站签到」「成长计划奖励」），
+    // 没有就按包名与面额推断（国际版的 Bonus Pack 30/50 就是每日活跃奖励）。本机
+    // 签到 / 每日活跃的记录按时间对得上时一并挂进悬停提示，指出这次发放对应哪次动作。
+    const reason = String(r.grant_reason || '').trim();
+    const inferred = !reason && r.realm === 'intl' && /bonus/i.test(String(r.name || ''))
+      && (Number(r.size) === 30 || Number(r.size) === 50);
+    const source = reason || (inferred ? '每日活跃奖励' : '');
+    const tips = [];
+    if(reason) tips.push('上游发放原因：' + reason);
+    if(inferred) tips.push('按包名与面额推断（官方规则：每日活跃 30 / Pro 50 积分）');
+    if(r.action && r.action.task){
+      const task = r.action.task === 'checkin' ? '每日签到' : '每日活跃打卡';
+      tips.push('本机动作：' + task + ' ' + String(r.action.ts || '').slice(5, 16).replace('T', ' ')
+                + ' ' + (r.action.ok ? '成功' : '失败'));
+    }
     return '<tr>'
       + '<td>' + esc(String(r.create_iso || '').slice(5, 16) || '—') + '</td>'
       + '<td title="' + esc(r.uid || '') + '">' + esc(r.nickname || creditAccountLabel(r.uid)) + '</td>'
       + '<td style="text-align:center">' + esc(r.realm === 'cn' ? '国内版' : '国际版') + '</td>'
       + '<td' + (r.grant_reason ? ' title="' + esc(r.grant_reason) + '"' : '') + '>' + esc(r.name || '') + '</td>'
+      + '<td' + (tips.length ? ' title="' + esc(tips.join('；')) + '"' : '') + '>' + esc(source || '—') + '</td>'
       + '<td style="text-align:right">' + fmt(r.size || 0) + '</td>'
       + '<td style="text-align:right">' + fmt(r.remain || 0) + '</td>'
       + '<td style="text-align:center;font-size:11px;color:var(--dim)">' + esc(expiry) + '</td>'
       + '<td style="text-align:center"><span class="badge ' + tone + '">' + esc(status) + '</span></td>'
       + '</tr>';
-  }).join('') || '<tr><td colspan="8" style="color:var(--dim)">暂无积分获取记录</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="color:var(--dim)">暂无积分获取记录</td></tr>';
 }
 
 /* 第一列的口径随范围切换，标签必须跟着走，否则「本周」的数字会被当成「今日」读。 */
