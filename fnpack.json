@@ -30,13 +30,13 @@
       "service_port": "8788",
       "releases": {
         "1.6.19": {
-          "changelog": "同步上游 v1.6.19 及其后 22 个提交（面板三页拆分、Buddy 加油站签到等）；飞牛侧保留统一网关免密入口、主题与移动端适配；本版起改为本地构建发布，包内不再内嵌 fnpack.json。",
-          "updated_at": "2026-10-11T00:19:39+08:00",
+          "changelog": "同步上游 v1.6.19 及其后 79 个提交（面板三页拆分、账号页可独立成菜单与签到活跃看板、表头排序、剩余用量优先调度与新估算批次等）；飞牛侧保留统一网关免密入口、主题与移动端适配；本版起改为本地构建发布，包内不再内嵌 fnpack.json。",
+          "updated_at": "2026-10-11T00:40:00+08:00",
           "packages": {
             "all": {
               "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk",
-              "sha256": "ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7",
-              "size": 591004
+              "sha256": "e65dcb844df7ede523e990c33e3e661e27d6c73e0a9770592d76e006d610505d",
+              "size": 626248
             }
           }
         }

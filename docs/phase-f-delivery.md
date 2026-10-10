@@ -7,7 +7,7 @@
 
 ## 1. 包与已发布资产
 
-> **Phase G 状态（2026-10-10 深夜 → 10-11 凌晨，你选了「以后本地发布 + 上架 FnDepot」之后）**：GitHub 上**所有自建 workflow 已删除**（只剩上游自带、只在 `v*` 触发的 `release.yml`），发布改为本地流程；`fnos-1.6.19` 的 Release 资产已**本地重建并覆盖**（同一版本号，含第二次上游合并 + R19/R25/R26），tag 重指到最终提交。详细 runbook 见 `docs/phase-g-local-release.md`，方案见 `docs/phase-g-plan.md`。
+> **Phase G 状态（2026-10-10 深夜 → 10-11 凌晨，你选了「以后本地发布 + 上架 FnDepot」之后）**：GitHub 上**所有自建 workflow 已删除**（只剩上游自带、只在 `v*` 触发的 `release.yml`），发布改为本地流程；`fnos-1.6.19` 的 Release 资产已**本地重建并覆盖两次**（同一版本号：第一次含第二次上游合并 + R19/R25/R26，第二次含第三次上游合并），tag 每次重指到当轮最终提交（现指向合并提交 `a88589e`）。详细 runbook 见 `docs/phase-g-local-release.md`，方案见 `docs/phase-g-plan.md`。
 >
 > **因此：§1 的指纹以本轮为准，§2.2 的第 1 条（同步工作流）在 Phase G 已被删除而作废（保留为历史记录）。**
 
@@ -16,17 +16,17 @@
 | 项 | 值 |
 |---|---|
 | 文件 | `dist/WorkBuddy2API-Hub_1.6.19_all.fpk` |
-| 大小 | 591004 B |
-| sha256 | `ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7` |
-| manifest checksum | `a3ebd7e23b35f1927f2242934f6a1757`（= 包内 `app.tgz` 的 md5） |
+| 大小 | 626248 B |
+| sha256 | `e65dcb844df7ede523e990c33e3e661e27d6c73e0a9770592d76e006d610505d` |
+| manifest checksum | `ff0742cf816e35077f5ce51f54de27f5`（= 包内 `app.tgz` 的 md5） |
 | 载荷 | **39 个文件** = `server/` 34 个（25 个 `*.py` + `LICENSE`/`dashboard.html`/`pricing/pricing.json`/`fndepot/ICON.PNG`/`release/portable.txt` + `wrt/openwrt/workbuddy2api/` 4 个）+ `ui/` 3 个 + `config/` 2 个，`.pyc` 与 `__pycache__` **0 命中**；根 `fnpack.json` **不入包**（自指清单，见 `docs/phase-g-local-release.md` §6/§8） |
 | 版本 / appname | `1.6.19` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
 | 显示名 | `WorkBuddy2API-Hub` |
-| **已发布 Release 资产（2026-10-11 覆盖重建）** | tag `fnos-1.6.19` 的 Release（id `408987082`）现在挂的**就是上面这一个字节**：**591004 B**、sha256 `ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7`、app.tgz md5 `a3ebd7e23b35f1927f2242934f6a1757`（本地构建 → 本地上传，不再经 CI，所以「本地包 == 资产」逐字节成立） |
+| **已发布 Release 资产（2026-10-11 第二次覆盖重建，含第三次上游合并）** | tag `fnos-1.6.19`（tag object 已重指到 `a88589e`）的 Release（id `408987082`）现在挂的**就是上面这一个字节**：**626248 B**、sha256 `e65dcb844df7ede523e990c33e3e661e27d6c73e0a9770592d76e006d610505d`、app.tgz md5 `ff0742cf816e35077f5ce51f54de27f5`（本地构建 → 本地上传，不再经 CI，所以「本地包 == 资产」逐字节成立；上传后又从 Release URL 下载回来复算，**与本机 `dist/` 逐字节相同**）。 |
 
 **历史指纹（均已被上面的覆盖，留档）**：Phase F 的本机构建 `577330 B` / `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98`；Phase F 由 CI 构建并首发的资产 `577842 B` / `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`（app.tgz md5 `806ce4e9ac0cda75485d34ed04657230`）。两者与设备的载荷逐文件相同。
 
-**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别是**第二次上游合并改动的 6 个文件**（`dashboard.html`、`wb_proxy.py`、`wb_accounts.py`、`wb_scheduler.py`、`wb_tasks.py`、`fnpack.json`）+ 本包不再内嵌 `fnpack.json`；同版本号覆盖安装会被应用中心接受（若被拒，按上面的卸载口径处理）。
+**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别**实测只有 7 项**：内容不同的 6 个 = `server/dashboard.html`（最大，两轮上游面板改造）、`server/wb_proxy.py`、`server/wb_accounts.py`、`server/wb_scheduler.py`、`server/wb_tasks.py`、`server/wb_settings.py`；另有 `server/fnpack.json` 只在旧包里（本包不再内嵌，见 `docs/phase-g-local-release.md` §6/§8）。其余 33 个载荷文件逐字节相同。同版本号覆盖安装会被应用中心接受（若被拒，按上面的卸载口径处理）。
 
 **升级后请重点看**：
 1. 应用中心点「打开」→ 是否**免密**直接进面板（这是本轮要修的毛病：以前飞牛会话老化后又会弹密码）。
@@ -41,6 +41,7 @@
 - 并入 `upstream/main` = `e6902e2`：v1.6.11 → **v1.6.19** 全部版本更新记录，外加 v1.6.19 之后的 34 个提交。
 - 合并提交：`db9e58b`「Merge upstream/main (v1.6.19 + 34 commits) into the fnOS fork」，父提交 316eb8f（= 我们上次发布的 `v1.6.17.1`）。这一版**就是已发布的内容**（tag `fnos-1.6.19` → `26c2bcc`）。
 - **发布后上游又走了 22 个提交**（`upstream/main` = `5b5b5c1`，比 `e6902e2` 多 22 个；**上游最新 release tag 仍是 `v1.6.19`**，所以没有新版本号、不触发自动 tag）。已并入**本地**提交 `39a16f6`「Merge upstream/main (5b5b5c1) into the fnOS fork」（父 `3d54173` + `5b5b5c1`，**尚未 push**）：三页拆分（账号/任务与福利/数据看板）+ Buddy 加油站签到按钮与状态卡片 + 账号工具栏文案统一，冲突仍只在 `README.md` / `dashboard.html` 两处，解析口径与上面一致（`dashboard.html` 保留上游三页结构、把我们的「使用说明」整块搬回账号页内；README 套件数按合并后的树扫盘重算为 **122 个（92 py + 30 js）**）。
+- **第三次并入上游（Phase G，2026-10-11）**：`upstream/main` 已推进到 `6cd1bc0`（在 `5b5b5c1` 之后又 **25 个提交**：#255–#268 一批——账号页可选独立成菜单 + 签到与活跃记录看板、所有数据表支持点表头排序、顶部页签可收起、更新检查设置卡、剩余用量优先调度（默认关）与超限页内轮转暖号回退、剩余用量估算第二/三批、若干 UI 修复与测试）。合并后仍然**只有 `README.md` 与 `dashboard.html` 两处冲突**（`wb_proxy.py`/`wb_accounts.py`/`wb_settings.py` 自动合并，我们的网关/免密/导出代码逐条保住：`_gateway_trusted`、`GATEWAY_HEADER_USER`、`inject_dashboard_context`、`GatewayUnixHTTPServer`、`_apply_base_path`、`--unix-socket`、`disable_nagle_algorithm` 派生 handler、`import wb_export`）。`dashboard.html` 这次是**结构性**冲突：上游把面板改成「每页一个 `main-page`」并在网关页里留了一个 `#accountsSectionsAnchor` 锚点（`insertBeforeAnchor` 在账号页不独立时把账号区块搬回来），我们那版还是把账号区块内联在网关页里 ⇒ 取上游结构、把我们的飞牛层（`#wbHelp` 使用说明、cockpit 导出按钮、精确 token 单位、免密门控）重新贴到新结构里。
 - 冲突只有三处（`README.md` / `dashboard.html` / `wb_proxy.py`），口径是**上游优先**，飞牛层最小重贴：
   - `wb_proxy.py`：取上游全部新能力（agents/activity/upstream-pool/更新检查等），重贴网关 socket（`--unix-socket`/`--base-path`）、免密判定、`/accounts/export`、飞牛上下文注入。
   - `dashboard.html`：以上游新版为底，重贴 cockpit 导出按钮、精确 token 单位、使用说明那几段；**修掉一个真缺陷**（见 §3.4）。
@@ -88,11 +89,10 @@
 
 | 门 | 结果 |
 |---|---|
-| `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk`（Phase G，本包） | **70 passed / 0 failed**（HEAD 无 tag，所以比有 tag 时少跑 1 条 tag 断言；R19 的 `.pyc` 与 R22 的自指 `fnpack.json` 都已在 Phase G 修掉，不再有「发布后稳态漂移」那条 69/1） |
-| 同上，把 tag 打回 HEAD 之后 | **71 passed / 0 failed**（新增的那条 `the tag on HEAD names this version` 真跑） |
-| `bash scripts/verify-fpk.sh <已发布资产>`（Phase F 首发那份） | **71 passed / 0 failed**（把 Release 资产下载回来跑，验证过） |
-| `python3 tests/run_all.py --jobs 4` | 见 §4.1 / §4.3 |
-| 包结构 | 40 个载荷文件（`server/` 35 + `ui/` 3 + `config/` 2）、25 个 server `*.py` 全部可解析、`__pycache__`/`*.pyc` 零命中、port 8788、`wb_export.py` 在包内 |
+| `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk`（Phase G，本包，含第三次合并） | **71 passed / 0 failed**（tag `fnos-1.6.19` 现在就在 HEAD 上，所以那条 `the tag on HEAD names this version` 真跑；构建时 HEAD 还没有 tag，那时是 70/0。R19 的 `.pyc` 与 R22 的自指 `fnpack.json` 都已在 Phase G 修掉，不再有「发布后稳态漂移」那条 69/1） |
+| `bash scripts/verify-fpk.sh <已发布资产>`（从 Release URL 下载回来那份） | **71 passed / 0 failed**（本轮与上一轮都实测过；文件名必须保持 `WorkBuddy2API-Hub_1.6.19_all.fpk`，改名会让两条文件名断言变红） |
+| `python3 tests/run_all.py --jobs 4` | 见 §4.1 / §4.3 / §4.5 |
+| 包结构 | 39 个载荷文件（`server/` 34 + `ui/` 3 + `config/` 2）、25 个 server `*.py` 全部可解析、`__pycache__`/`*.pyc` 零命中、port 8788、`wb_export.py` 在包内 |
 | 独立终验（F5/F9） | 见 §4.2 / §4.3 |
 
 ### 4.1 全量套件（发布时）
@@ -128,6 +128,14 @@
 - `du -sh .` 由 24M 降到 21M（`build/`、`__pycache__/`、`.pytest_cache/`、`suite-logs/` 全部清掉；`dist/` 1.6M 保留）。
 - 独立性：F10 的报告 `docs/phase-g-verify.md`，登记项 R27–R30。
 
+### 4.5 第三次上游合并之后（Phase G 收尾，2026-10-11 凌晨）
+- 合并提交 `a88589e`（两个父 = `ffebb4b` 与 `upstream/main` `6cd1bc0`），落盘后重建包并**覆盖**同一 tag 的 Release 资产（tag object 重指到 `a88589e`）。
+- `python3 tests/run_all.py --jobs 4` → **121 passed / 7 failed / 0 skipped**（51.3s）。读懂这 7 条很重要——**没有一条是本仓库引入的**：
+  - 6 条在**纯 upstream/main（`/tmp/up-pristine`，未合并任何本仓库改动）上逐条复现同样的红**：`_test_activity_history.js`（`ReferenceError: loadActivityToday is not defined`）、`_test_page_nav.js`、`_test_settings_load.js`（`TypeError: Cannot read properties of undefined (reading 'checked')`）、`_test_settings_update_ui.js`、`_test_model_cooldowns.js`（断言失败）、`_test_run_all_encoding.py`（它拿 `_test_settings_load.js` 当「已知必绿」的夹具，于是被上面那条带红——3 条断言全红，纯上游树上一模一样）。即**上游这一版自己就带着 6 个红套件**（它们的 CI 触发条件也已被我们删掉，不再有 CI 帮我们确认这件事）。
+  - 1 条是我们自己的静态验收套件 `tests/_test_phase_e_verify.py`：它按设计把「已发布资产 == 树」「HEAD 上的 tag」「设备 / 包一致性」钉成断言，每次合并+重发布后都需要按新契约更新一轮（F5/F9/F10 都是这么做的；已派 task-34 给 verifier）。
+- 本轮 Lead 侧的独立复核（不依赖 ui-panel 自述）：全仓 `<<<<<<<`/`>>>>>>>` 零命中；`#wbHelp` 确实在 `#pageGateway`（2787 < 2921 < 2940）内；cockpit 的 `#btnExportCockpit`/`#cockpitRealm` 各 1 份且都在 `#pageAccounts`（2942–3048）工具栏里；`colspan="7"` 0 命中、`colspan="6"` 3 命中；`fmtTok`/`fmtTokRemaining`/`fmtPerM`/`creditPerM`/`wbUrl`/`__WB_BASE__`/`__WB_VIA_GATEWAY__`/`panelGate`/`gatewayGateOff` 全在；三段内联脚本 `node --check` 全过；`wb_proxy.py` 的飞牛标记全在（`_gateway_trusted` 6 处、`GATEWAY_HEADER_USER` 3、`inject_dashboard_context` 2、`GatewayUnixHTTPServer` 4、`_apply_base_path` 2、`--unix-socket` 2、`disable_nagle_algorithm` 3、`import wb_export` 6）；`python3 -m compileall wb_*.py` rc=0 且 10 个模块逐个 import ok。
+- 套件总数 **128 = 94 个 Python + 34 个 JS**（`README.md` 的套件数行按树实算）。
+
 ## 5. 真机状态（只读核查，我方未改设备）
 - `/var/apps/workbuddy2api/manifest`：`version = 1.6.19`、`display_name = WorkBuddy2API-Hub`、`distributor = ccrabit`、`checksum = be761a0f2715cd903edcf8e88d4198f9`。
 - **这个 checksum 就是「你自装的那份本地包」**（重建前的 601800 B 版，留证 `/tmp/wb-r19-old-dist-1.6.19.fpk`）——也就是我在发布前 `present` 给你的那份。时间线一致：`server/**` mtime 20:18、服务进程 20:19 起。⇒ **设备升级是你做的，我方只做只读核查**。
@@ -148,9 +156,10 @@
 | R25 | 套件用**文本模式**读 `dashboard.html` 再逐字节比对响应，Windows 检出的 CRLF 被通用换行吃掉 ⇒ CI 上 `473324 != 463136` | **已修**（改二进制读后解码；CRLF 检出上修前 32/1 → 修后 33/0，已用 `git -c core.autocrlf=true clone` 双向坐实） |
 | R26 | 同上 R24 的动机更正（CI 停用后「Windows 超时」不再是动机，但去重本身成立） | 已随 F10 报告登记 |
 | R27 | `dist/` 里那份是「新树的候选包」，不等于任何一次已发布资产 | **已修**（Phase G 把候选包本身变成发布件：本地构建 → 本地上传，同一字节） |
-| R28 | 交付说明 §1 的本机构建指纹被新一轮重建取代 | **已修**（本表已回填最终指纹 591004 / `ac11f7f6…` / `a3ebd7e2…`） |
+| R28 | 交付说明 §1 的本机构建指纹被新一轮重建取代 | **已修**（本表已回填最终指纹 626248 / `e65dcb84…` / `ff0742cf…`） |
 | R29 | 设备锚点原来取 `dist/` 里那一版（已不是发布件） | **已修**（设备锚点改取发布件副本 `/tmp/wb-published`；Phase G 后改取实时下载的资产） |
 | R30 | Phase G 的删除尚未进 HEAD，e16 的状态感知 | **已修**（e16 已按状态判断；Phase G 提交后为终态） |
+| R31 | 第三次合并后 `run_all` 有 7 条红，其中 **6 条是上游自带**（`_test_activity_history.js`、`_test_page_nav.js`、`_test_settings_load.js`、`_test_settings_update_ui.js`、`_test_model_cooldowns.js`、`_test_run_all_encoding.py`），第 7 条是本仓库的静态验收套件 | **不是本仓库的回归**（6 条在纯 `upstream/main` 上逐条复现同样的红，见 §4.5；CI 已删，所以上游也不会有人替我们确认这件事）。第 7 条按惯例交 verifier 更新（task-34）。**不去改上游那 6 个套件**：改了下次并入必冲突，也违背「上游优先」口径 |
 
 ## 7. 还没做 / 需要你决定
 
@@ -169,9 +178,9 @@
 **Phase G 发布收尾（2026-10-11，本地流程）**
 1. ✅ 提交 Phase G 全部改动（删 5 个 workflow、`scripts/gh-release.py`、runbook、`fnpack.json` 不入包、验收套件对齐）。
 2. ✅ `git tag -f -a fnos-1.6.19` 重指到该提交，push `main` 与 tag（tag 决定 `--print-version`，也决定设备看到的应用版本）。
-3. ✅ `python3 scripts/gh-release.py release-upload` 覆盖上传本机构建的 `591004 B` 包 + `.sha256`（clobber）——**资产就是本机 `dist/` 这一个字节**，不再有「CI 包 vs 本机包」两套。
+3. ✅ `python3 scripts/gh-release.py release-upload` 覆盖上传本机构建的 `626248 B` 包 + `.sha256`（clobber）——**资产就是本机 `dist/` 这一个字节**，不再有「CI 包 vs 本机包」两套。
 4. ✅ Release 正文换成 Phase G 说明（`docs/phase-g-release-body.example.md` 打底，附最终指纹）。
-5. ✅ 按**资产**指纹回填根 `fnpack.json` 的 `sha256 = ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7` / `size = 591004` / `updated_at`，单独提交推送。
+5. ✅ 按**资产**指纹回填根 `fnpack.json` 的 `sha256 = e65dcb844df7ede523e990c33e3e661e27d6c73e0a9770592d76e006d610505d` / `size = 626248` / `updated_at`，单独提交推送。
 6. ⏳ FnDepot 中心仓库每天 16:00 UTC 重生成 `valid_sources.txt` —— 等它收录（配合新建的 `ccrabit/FnDepot` 源仓库）。
 
 **需要你决定 / 动手**
