@@ -36,8 +36,12 @@
 2. 本地发布 runbook 可照抄执行：文档里的每条命令都能跑通（Lead 亲自按它跑一遍 G3）。
 3. `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk` = 0 failed；Release 资产 sha256 == 本地包 sha256 == `fnpack.json` 里的值。
 4. `python3 tests/run_all.py --jobs 4` = 0 failed、0 skipped；不因删除 workflow 而出现「跳过式绿」。
+   **收尾实况（2026-10-11 凌晨，第三次并入上游 `6cd1bc0` 之后）**：这条在 Phase G 第一轮达成（122/0/0），但上游 `upstream/main` 自己带着 **6 个红套件**（`_test_activity_history.js`、`_test_page_nav.js`、`_test_settings_load.js`、`_test_settings_update_ui.js`、`_test_model_cooldowns.js`、`_test_run_all_encoding.py`——在纯上游树上逐条复现同样的红），所以并入后 `run_all` = 121 passed / 7 failed（第 7 条是本仓库的静态验收套件，按惯例每次合并+重发布后重钉）。验收口径随之改为：**「红的套件恰好是那 6 个上游自带的名字」**，多一个即红；详见 `docs/phase-f-delivery.md` §4.5 与 R31。
 5. GitHub `ccrabit/FnDepot` 存在（非 fork、公开、根目录有 `fnpack.json`），中心仓库校验器 `parse_and_fingerprint()` / `validate_v2_app()` 都为 True；`valid_sources.txt` 收录情况在次日 16:00 UTC 扫描后核对并记录（收录与否都要如实报告）。
 6. 工作区缓存清零：`git status --porcelain` 干净（`dist/` 与 `build/` 属 gitignore 的产物不算），`__pycache__`/`*.pyc`/`build/`/`suite-logs` 已清或已忽略。
+
+## 4.1 第三次并入上游（2026-10-11，收尾）
+`upstream/main` 在 Phase G 执行期间又推进到 `6cd1bc0`（`5b5b5c1` 之后 25 个提交，最新 release tag 仍是 `v1.6.19`）。Lead 直接并进主树（合并提交 `a88589e`，两处冲突 = `README.md` + `dashboard.html`），然后**重跑既定发布流程**：重建 → verify-fpk 71/0 → tag `fnos-1.6.19` 重指到 `a88589e` → 推 main 与 tag → **覆盖同一 tag 的 Release 资产**（626248 B / `e65dcb84…`）→ 改 Release 正文 → 回填 `fnpack.json` → 推文档提交 `4e57a75`。设备未动。
 
 ## 5. 明确不做
 
