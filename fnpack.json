@@ -26,12 +26,12 @@
       "releases": {
         "1.6.19": {
           "changelog": "同步上游 v1.6.19：并入上游最新看板；保留飞牛统一网关免密入口、看板主题与移动端适配。",
-          "updated_at": "2026-10-10T16:56:21+08:00",
+          "updated_at": "2026-10-10T22:03:36+08:00",
           "packages": {
             "all": {
               "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk",
-              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-              "size": 0
+              "sha256": "3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c",
+              "size": 577842
             }
           }
         }
