@@ -11,9 +11,11 @@ import urllib.parse
 import urllib.request
 import uuid
 from wb_fingerprint import derive_id, generate_request_id
+import wb_activity
 import wb_atrest
 import wb_identity
 import wb_settings
+import wb_upstream_pool
 import wb_webagent
 
 # ---------------------------------------------------------------------------
@@ -119,7 +121,20 @@ def opener_for_proxy(proxy):
 
 
 def urlopen(req, timeout=30, proxy=""):
-    """urlopen honouring an optional per-account proxy."""
+    """urlopen honouring an optional per-account proxy, over a keep-alive pool.
+
+    urllib 的 AbstractHTTPHandler.do_open 会写死 Connection: close，每个请求都得
+    重新 TCP+TLS 握手（真机实测 118.0ms，是请求路径上最大的一笔开销）。默认改走
+    wb_upstream_pool：按（目标, 代理串）分池复用连接。不能逐字节对齐 urllib 语义
+    的请求（非 http(s) 目标、非 HTTP 代理、需要跟随的 3xx 重定向）由 PoolBypass
+    回退到下面这条原来的路，行为与改动前一致；WB_UPSTREAM_KEEPALIVE=0 时整条
+    路径都与改动前相同。
+    """
+    if wb_upstream_pool.enabled():
+        try:
+            return wb_upstream_pool.urlopen(req, timeout=timeout, proxy=proxy)
+        except wb_upstream_pool.PoolBypass:
+            pass
     opener = opener_for_proxy(proxy)
     if opener is None:
         return urllib.request.urlopen(req, timeout=timeout)
@@ -378,8 +393,16 @@ def next_local_4am(now=None):
 # credential that keeps failing hard trips a breaker; unknown failures degrade
 # it for a while. The counters live on Account, these helpers only turn a
 # count into seconds (panel project's pool semantics).
-SOFT_RATE_BASE = 600.0          # first account-level 429: 10 minutes
+SOFT_RATE_BASE = 600.0          # first verified account-level 429: 10 minutes
 SOFT_RATE_MAX = 7200.0          # ... doubling up to 2 hours
+# An *unscoped* 429 - the body names no reset clock, so nothing in it says
+# whether the limit is on the credential or on one model - buys a window on that
+# one model instead, shorter and capped at the credential ladder's first tier.
+# The bare "usage exceeds frequency limit" body is the most common 429 the
+# upstream sends (229 of the 263 in the incident environment), so it must not be
+# able to park a credential for two hours.
+SOFT_RATE_UNVERIFIED_BASE = 60.0
+SOFT_RATE_UNVERIFIED_MAX = 600.0
 BREAKER_THRESHOLD = 3           # consecutive hard failures before the breaker
 BREAKER_COOLDOWN = 1800.0       # first breaker window: 30 minutes
 BREAKER_COOLDOWN_MAX = 21600.0  # ... doubling up to 6 hours
@@ -397,6 +420,16 @@ def _exponential_backoff(count, base, cap, offset):
 def soft_backoff(streak):
     """Cooldown seconds for `streak` consecutive account-level soft limits."""
     return _exponential_backoff(streak, SOFT_RATE_BASE, SOFT_RATE_MAX, 1)
+
+
+def unverified_soft_backoff(streak):
+    """Cooldown for `streak` consecutive *unscoped* soft limits, on one model.
+
+    Repetition still escalates, but from 60s and only up to the credential
+    ladder's first tier (600s) - see SOFT_RATE_UNVERIFIED_MAX.
+    """
+    return _exponential_backoff(streak, SOFT_RATE_UNVERIFIED_BASE,
+                                SOFT_RATE_UNVERIFIED_MAX, 1)
 
 
 def breaker_backoff(fails):
@@ -433,11 +466,11 @@ class Account(object):
         if not self.domain:
             self.domain = get_realm_config(self.realm)["domain"]
         self.platform = str(data.get("platform") or "CLI")
-        # 出站身分讀回憑證檔裡保存的值：面板手動切換與 429 自動切換都會經由
-        # save() 寫進憑證檔（to_dict() 序列化的是當下身分），所以重啟後接著用
-        # 上次實際生效的那條通道，而不是每次都回到預設。
-        # 憑證檔沒有這個欄位、或值不合法時 normalize_product() 會回退到
-        # WorkBuddy 獨立桌面端 (workbuddy)，升級前就已存在的帳號行為不變。
+        # 出站身分读回凭证档里保存的值：面板手动切换与 429 自动切换都会经由
+        # save() 写进凭证档（to_dict() 序列化的是当下身分），所以重启后接着用
+        # 上次实际生效的那条通道，而不是每次都回到预设。
+        # 凭证档没有这个栏位、或值不合法时 normalize_product() 会回退到
+        # WorkBuddy 独立桌面端 (workbuddy)，升级前就已存在的帐号行为不变。
         self.product = wb_identity.normalize_product(data.get("product"))
         self.enterprise_id = str(data.get("enterpriseId") or "")
         self.access_token = token
@@ -483,6 +516,9 @@ class Account(object):
         # All runtime-only, like the other throttle windows: a restart clears
         # them and the account gets a clean slate.
         self.soft_streak = 0
+        # Unscoped soft 429s keep their own counter: the two ladders must not
+        # feed each other (see note_unscoped_rate).
+        self.unscoped_streak = 0
         self.fails = 0
         self.degrade_count = 0
         self.breaker_until = 0.0
@@ -617,6 +653,7 @@ class Account(object):
             "cooldownFor": round(max(0.0, deadline - now)) or None,
             "modelCooldowns": models,
             "softStreak": int(self.soft_streak),
+            "unscopedStreak": int(self.unscoped_streak),
             "breakerFor": round(max(0.0, self.breaker_until - now)) or None,
             "degradeFor": round(max(0.0, self.degrade_until - now)) or None,
             "addedAt": self.added_at,
@@ -856,6 +893,43 @@ class Account(object):
                 out.add(mid)
         return out
 
+    def unavailable_reason(self, model=None):
+        """这个账号此刻为什么接不了单；可用时返回空字符串。
+
+        `ready()` 是个布尔判断：池子被抽干的时候它只能说「不行」，说不清有几个
+        账号、各自卡在哪一条。生产上出现「明明有 9 个账号却报没有可用账号」时，
+        缺的就是这句话——判定顺序与 ready() 保持一致，所以报出来的原因就是它
+        拒绝的原因（唯一不覆盖的是临期凭证那条：它会真的发起刷新，诊断路径上
+        不该顺带打上游）。
+        """
+        if not self.enabled:
+            return "已停用"
+        if not self.access_token:
+            return "无凭证"
+        now = time.time()
+        # 四种惩罚的到期时间各走各的，谁把时间推得最远就报谁：只报「冷却」
+        # 会让人往 429 的方向查，而实际可能是上游连续断连触发的熔断（30 分钟
+        # 起，与账号本身无关），或者余额保护这类完全不同的原因。
+        penalties = [("熔断", self.breaker_until), ("降权", self.degrade_until),
+                     ("余额保护", self.balance_until), ("软限流冷却", self.cooldown_until)]
+        if model:
+            penalties.append(("模型 %s 冷却" % model, self.model_cooldowns.get(model, 0.0)))
+        label, until = max(penalties, key=lambda item: item[1])
+        if until > now:
+            return "%s 剩余 %s" % (label, _human_delta(until - now) or "?")
+        if self.reserve_blocked():
+            return "余额低于保留线"
+        if self.daily_limit_blocked():
+            return "今日 Token 额度用尽"
+        if self.credit_limit_blocked(model):
+            return "今日积分额度用尽"
+        if self.model_token_limit_blocked(model):
+            return "该模型今日额度用尽"
+        exp = self.expires_at or jwt_exp(self.access_token)
+        if exp and exp - now <= 120:
+            return "凭证已过期"
+        return ""
+
     def ready(self, model=None):
         if not self.enabled or not self.access_token:
             return False
@@ -892,10 +966,10 @@ class Account(object):
         return self.refresh()
 
     def headers(self, purpose="chat"):
-        """組出這一輪的出站標頭。
+        """组出这一轮的出站标头。
 
-        chat 用途走 wb_identity（CLI 頭 / WorkBuddy 頭，可切換）；
-        billing 用途維持原本的輕量標頭，計費端點不吃那套身分。
+        chat 用途走 wb_identity（CLI 头 / WorkBuddy 头，可切换）；
+        billing 用途维持原本的轻量标头，计费端点不吃那套身分。
         """
         cfg = get_realm_config(self.realm)
 
@@ -978,9 +1052,9 @@ class Account(object):
         return nickname
 
     def set_product(self, value):
-        """切換出站身分（cli <-> workbuddy）。回傳 True 表示真的換了。
+        """切换出站身分（cli <-> workbuddy）。回传 True 表示真的换了。
 
-        身分會寫回憑證檔，重啟後仍然有效。save() 需要目錄參數。
+        身分会写回凭证档，重启后仍然有效。save() 需要目录参数。
         """
         new = wb_identity.normalize_product(value)
         if new == self.product:
@@ -993,7 +1067,7 @@ class Account(object):
         return True
 
     def chat_base_url(self):
-        """這個帳號目前身分該打的端點。"""
+        """这个帐号目前身分该打的端点。"""
         return wb_identity.endpoint_for(self.realm, self.product)[0]
 
     def refresh(self):
@@ -1075,7 +1149,7 @@ class Account(object):
             "User-Agent": WEB_USER_AGENT,
         }
 
-    def daily_chat_web(self, prompt=None):
+    def daily_chat_web(self, prompt=None, trigger="unknown"):
         """网页通道的每日活跃会话（issue #75 / #59 / #90）。
 
         只建会话是不够的：agent 要等客户端接上沙箱并请求这一轮才会跑，否则会话
@@ -1085,9 +1159,18 @@ class Account(object):
 
         返回 {"ok": True, "conversation": id, "status": "completed", "chunks": n,
         "elapsed_ms": n}，失败时 {"ok": False, "error": ...}（尽量带上会话 id）。
+
+        trigger 只用于活动历史的来源标注；trigger=None 表示这一步算在外层尝试
+        里、不单独记一行 —— daily_chat() 内部就是这么调的。
         """
         if self.realm != "intl":
             return {"ok": False, "error": "web daily chat is only for international accounts"}
+        res = self._daily_chat_web_upstream(prompt)
+        wb_activity.record_attempt(self, wb_activity.TASK_DAILY_CHAT, trigger, res)
+        return res
+
+    def _daily_chat_web_upstream(self, prompt=None):
+        """网页通道的实际流程；返回形状见 daily_chat_web。"""
         body = {
             "prompt": prompt or DAILY_CHAT_WEB_PROMPT,
             "model": DAILY_CHAT_MODEL,
@@ -1158,15 +1241,24 @@ class Account(object):
         data = payload.get("data") if isinstance(payload, dict) else None
         return str((data or {}).get("status") or "")
 
-    def daily_chat(self, web=None):
+    def daily_chat(self, web=None, trigger="unknown"):
         """国际版每日活跃对话（官方每日活跃 30/50 积分）。
 
         两步：桌面端身分的轻量对话（一直以来的做法），以及网页通道的会话
         （issue #75/#59/#90：算数的是「跑完的 agent 会话」）。web=None 时按
         settings.json 里的 daily_chat_web 决定，True/False 可显式指定。
+
+        trigger 只用于活动历史的来源标注；整次尝试记一行，网页通道那一步的结果
+        并进同一行的说明里，不再多记一行。
         """
         if self.realm != "intl":
             return {"ok": False, "error": "daily chat is only for international accounts"}
+        res = self._daily_chat_upstream(web)
+        wb_activity.record_attempt(self, wb_activity.TASK_DAILY_CHAT, trigger, res)
+        return res
+
+    def _daily_chat_upstream(self, web=None):
+        """每日活跃对话的实际流程；返回形状见 daily_chat。"""
         import wb_proxy
         url = self.chat_base_url() + wb_proxy.CHAT_PATH
         headers = self.headers("chat")
@@ -1194,7 +1286,7 @@ class Account(object):
             if web is None:
                 web = bool(self.path) and wb_settings.daily_chat_web(os.path.dirname(self.path))
             if web:
-                res = self.daily_chat_web()
+                res = self.daily_chat_web(trigger=None)
                 result["web"] = res
                 if res.get("ok"):
                     result["msg"] = ("每日活跃对话成功完成（网页通道 %s：%d 段输出，%d ms）"
@@ -1213,9 +1305,20 @@ class Account(object):
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def checkin(self):
+    def checkin(self, trigger="unknown"):
+        """国内版每日签到。
+
+        trigger 只用于活动历史的来源标注（scheduler / manual / account_add /
+        account_import）；记录写失败不会改变签到结果。
+        """
         if self.realm != "cn":
             return {"ok": False, "error": "checkin is only available for CN realm accounts"}
+        res = self._checkin_upstream()
+        wb_activity.record_attempt(self, wb_activity.TASK_CHECKIN, trigger, res)
+        return res
+
+    def _checkin_upstream(self):
+        """签到的实际请求；返回形状见 checkin。"""
         cfg = get_realm_config("cn")
         url = cfg["billing_upstream"] + CHECKIN_PATH
         headers = self.headers(purpose="billing")
@@ -1722,6 +1825,20 @@ class Account(object):
             self.cooldown_until = max(self.cooldown_until, time.time() + wait)
         return wait
 
+    def note_unscoped_rate(self, model):
+        """An unscoped soft 429: grow its own streak, return this model's window.
+
+        Counting is deliberately separate from soft_streak. Sharing one counter
+        let the ladders feed each other: four unscoped 429s pushed the first
+        genuinely credential-scoped one straight to the 7200s ceiling instead of
+        starting at 600s, and a credential streak made the next unscoped window
+        start high as well. Each scope now has its own count, and a served
+        request clears both through note_success().
+        """
+        with self._throttle_lock:
+            self.unscoped_streak += 1
+            return unverified_soft_backoff(self.unscoped_streak)
+
     def note_failure(self, message):
         """5xx / transport failure: feed the breaker counter."""
         with self._throttle_lock:
@@ -1753,6 +1870,7 @@ class Account(object):
             if model:
                 self.model_cooldowns.pop(model, None)
             self.soft_streak = 0
+            self.unscoped_streak = 0
             self.fails = 0
             self.degrade_count = 0
             self.breaker_until = 0.0
@@ -2557,7 +2675,7 @@ class AccountPool(object):
         })
         self.add(account)
         if realm == "cn":
-            try: account.checkin()
+            try: account.checkin(trigger="account_add")
             except Exception: pass
         with self._lock: self.logins.pop(state, None)
         return {"status": "ok", "account": account.public()}
@@ -2606,7 +2724,7 @@ class AccountPool(object):
         })
         self.add(account)
         if detected_realm == "cn":
-            try: account.checkin()
+            try: account.checkin(trigger="account_import")
             except Exception: pass
         return account
 

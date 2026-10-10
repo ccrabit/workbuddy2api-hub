@@ -95,12 +95,28 @@ MANIFEST_PLATFORM="$(awk -F'=' '/^platform/ {gsub(/[[:space:]]/, "", $2); print 
 
 step "package identity"
 assert "the file name carries the product name" bash -c '[[ "$0" == WorkBuddy2API-Hub_* ]]' "$FPK_BASE"
-assert "the manifest version is four components" \
-    bash -c '[[ "$0" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]' "$MANIFEST_VERSION"
+# The packaged version is upstream's own three components: a release of this
+# fork is tagged fnos-1.6.19 and the package says 1.6.19. Phase E gave this fork
+# a fourth "release ordinal" component; nothing carries one now, and the shape
+# below is what keeps one - or a process version like 1.6.19-alpha3 - from
+# reaching a device.
+assert "the manifest version is upstream's three components" \
+    bash -c '[[ "$0" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]' "$MANIFEST_VERSION"
 assert "the file name and the manifest agree on it" \
     test "$FPK_BASE" = "${PRODUCT}_${MANIFEST_VERSION}_${MANIFEST_PLATFORM}.fpk"
 run 0 "the tree still derives a version" bash "${REPO_ROOT}/scripts/build-fpk.sh" --print-version
-assert "the package is what this tree builds" test "${LAST_OUTPUT}" = "${MANIFEST_VERSION}"
+# On a release tag the tree derives exactly the version the tag names, and then
+# the package under test has to be that version. Without one - a local run, or a
+# tree where nobody has tagged this state yet - the tree derives a process
+# version (1.6.19-alpha3) which is deliberately not equal to a package, so there
+# is nothing to compare; the shape check above still applies.
+DERIVED_VERSION="${LAST_OUTPUT}"
+if [[ "$DERIVED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    assert "the package is what this tree builds" test "$DERIVED_VERSION" = "${MANIFEST_VERSION}"
+else
+    printf '  \033[0;33mSKIP\033[0m no fnos-<version> tag on HEAD (the tree derives %s);\n' "$DERIVED_VERSION"
+    printf '       the package under test is %s, which no release tag here claims\n' "$MANIFEST_VERSION"
+fi
 assert "the manifest shows the product name" \
     grep -q '^display_name[[:space:]]*=[[:space:]]*WorkBuddy2API-Hub$' "${APP}/manifest"
 assert "the desktop entry shows it too" grep -q '"title": "WorkBuddy2API-Hub"' "${APP}/target/ui/config"

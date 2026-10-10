@@ -1,8 +1,11 @@
-"""Release engineering pins (M6 F1-F3).
+"""Release engineering pins (M6 F1-F3, phase F: the fnos- tag namespace).
 
 The workflows, Dockerfile and compose file are text artifacts nothing else in
 the suite executes; these assertions keep the release discipline from silently
-disappearing (checksums asset, tag == source version, healthcheck, PUID/PGID).
+disappearing (checksums asset, tag namespace vs source version, healthcheck,
+PUID/PGID). The version itself is upstream's own number - see
+docs/phase-f-version-policy.md - so a release of this fork is tagged
+fnos-<source version>.
 
 Run with: python _test_release_engineering.py
 """
@@ -31,10 +34,22 @@ class VersionStringTests(unittest.TestCase):
 class WorkflowTests(unittest.TestCase):
     def test_tests_workflow_asserts_tag_against_source(self):
         text = read(".github", "workflows", "tests.yml")
-        self.assertIn('tags: ["v*"]', text)
+        # Releases of this fork are tagged fnos-<source version> (fnos-1.6.19 for
+        # source 1.6.19); the historical v<source version>[.<ordinal>] tags stay
+        # readable so an old release can be re-checked. The gate body has to
+        # accept the first and the second, and reject anything else.
         self.assertIn("version-assert", text)
-        self.assertIn("refs/tags/v", text)
         self.assertIn("GITHUB_REF_NAME", text)
+        self.assertIn("fnos-", text)
+        self.assertIn("refs/tags/", text)
+        self.assertIn("::error::", text)
+        # 触发列表：phase F 裁决 (a)——本仓库的发布 tag 是 fnos-<源码版本>，所以它必须
+        # 在 `on.push.tags` 里，否则这道「tag 与源码版本一致」的门对我们真正要发的
+        # tag 根本不跑（只由 build-fpk.sh --print-version + build-fpk.yml 的门兜住）。
+        # 上游的 v* 保留，历史 release 仍可复检；代价是这一行以后可能与上游冲突，
+        # 冲突时保留两边的名字即可。
+        self.assertIn('"fnos-*"', text)
+        self.assertIn('"v*"', text)
         self.assertIn("server_version", text)
         # The workflow's extraction must see the same two strings the source
         # test pins, otherwise a passing CI would mean nothing.

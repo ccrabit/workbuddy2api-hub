@@ -18,33 +18,39 @@
 # assembled (and its payload checked) here, and only unpacked by appcenter on
 # the device.
 #
-# Version: the newest upstream release tag this tree contains, plus a fourth
-# component that counts releases, not commits (1.6.10 -> 1.6.10.1, then
-# 1.6.10.2 ...). The fourth component exists because fnOS only offers an
-# upgrade when the number grows, while upstream tags a release days after the
-# commits that make it - so a build from plain master has to be able to say
-# "newer than 1.6.10" without inventing an upstream tag of its own.
+# Version: upstream's own number, three components, and nothing else (1.6.19).
+# A release of this fork is tagged fnos-X.Y.Z on the commit that carries it, and
+# that tag is the answer: the version is X.Y.Z, taken as-is, no matter which
+# other tags the checkout can or cannot see. The package version and the upstream
+# release it was built from are therefore the same string, and "bigger than what
+# the device runs" means exactly what it says - including that commits merged
+# after upstream's release do not move the version until upstream releases again.
 #
-# A release tag sitting exactly on HEAD outranks all of that: "v1.6.17.1" on
-# HEAD IS version 1.6.17.1, whatever else the checkout can or cannot see. The
-# derivation below is a guess about intent; a tag is the intent. It also has to
-# be environment-independent: a fresh clone of this fork sees only the fork's
-# tags, so deriving v1.6.17.1 from them once produced 1.6.10.3 in CI while the
-# maintainer's tree (which had fetched upstream's v1.6.17) said 1.6.17.1.
-# sync-upstream.yml mirrors upstream's three-component tags to this fork so the
-# guess stays right for untagged builds too.
+# The tag deliberately does not look like upstream's. Upstream tags "v*" and
+# ships .github/workflows/release.yml, which runs on `push: tags: ["v*"]` and
+# opens a draft release; a "v*" tag of ours would set that off in this fork, and
+# it would also collide with upstream's tags, since both namespaces end up in
+# refs/tags and a fetch of upstream would move whichever one was seen last.
+# "fnos-" is a namespace of our own, and the only namespace that names a release
+# of ours. Historical v<version> and v<version>.<ordinal> tags stay valid tags
+# (nothing is deleted), they just stop being how we publish.
 #
-# The next release is one more than the newest release tag of the same base
-# (see release_tags below), so publishing v1.6.10.1 makes the next build
-# 1.6.10.2 - there is no counter to keep in sync by hand.
-#
-# Work that is not a release yet is built with --alpha and carries an
-# -alpha<k> suffix, k counting the commits made since the last release
-# (1.6.10.2-alpha1, -alpha2, ...). Those packages are for trying things on the
-# device; they are never tagged, and the released version drops the suffix.
+# A tree with no such tag on HEAD (local work, a workflow_dispatch build) has no
+# release to describe, so it is a process build: the version carries an
+# -alpha<k> suffix, k counting the commits made since our last release, and it
+# cannot be mistaken for a release number. The base under that suffix is, in
+# order: the newest fnos-* tag, then the newest upstream release this checkout
+# can see - local tags first, then the upstream remote itself - then the version
+# placeholder in fnos/manifest. Upstream's tags are asked for directly rather
+# than mirrored into this fork, so a fresh clone and the maintainer's tree agree.
 #
 #   --print-version       print the version this tree would be built as, and exit
-#   --alpha               build the process version (1.6.10.2-alpha1) instead
+#   --alpha               build a process version (1.6.19-alpha3) instead: the
+#                         suffix counts commits, and such a build is not a release
+#
+# Without a fnos-X.Y.Z tag on HEAD both forms print a process version, so a build
+# from a branch can never pretend to be a release; pass VERSION=x.y.z to stamp
+# one anyway (the workflows do that when the tag is already known).
 #
 set -euo pipefail
 
@@ -109,88 +115,95 @@ owner_of_github_url() {
 
 # ---------------------------------------------------------------- version ----
 
-# A release tag of this fork sitting exactly on HEAD ("v1.6.17.1"). When there
-# is one it is the answer: the tag is the release intent, and unlike
-# upstream_tag() it does not care which remote tags this checkout happens to
-# see. Four components, so the -alpha<k> process builds and upstream's own
-# tags are both ignored.
+# A release tag of this fork sitting exactly on HEAD ("fnos-1.6.19"). When there
+# is one it is the answer: the tag is the release intent, and unlike the
+# fallbacks below it does not care which remote tags this checkout happens to
+# see. Three components - upstream's own - so the package version is the upstream
+# version, and the -alpha<k> process builds (which always carry a suffix) can
+# never be mistaken for a release.
 head_release_tag() {
     git -C "$REPO_ROOT" tag --points-at HEAD 2>/dev/null \
-        | grep -E '^v[0-9]+(\.[0-9]+){3}$' \
+        | grep -E '^fnos-[0-9]+(\.[0-9]+){2}$' \
         | sort -V \
         | tail -1
 }
 
-# The newest upstream release tag this tree contains. Upstream tags a release
-# with three components ("v1.6.10"); this fork's releases add a fourth
-# ("v1.6.10.3"), and `git describe --abbrev=0` would happily hand one of those
-# back as the base, so the list is filtered to exactly three components.
-upstream_tag() {
-    git -C "$REPO_ROOT" tag --merged HEAD --list 'v*' 2>/dev/null \
+# The newest release this fork has ever tagged ("fnos-1.6.19" -> "1.6.19"): what
+# we last published, which is what the sync workflow compares upstream against
+# before cutting the next release. Anywhere in the history, not just on HEAD.
+last_release_version() {
+    git -C "$REPO_ROOT" tag --list 'fnos-*' 2>/dev/null \
+        | grep -E '^fnos-[0-9]+(\.[0-9]+){2}$' \
+        | sed 's/^fnos-//' \
+        | sort -V \
+        | tail -1
+}
+
+# The newest upstream release this tree can reach, three components ("1.6.19").
+# Local tags first; when the checkout has none - a fresh clone of this fork, or a
+# fork that never fetched upstream's tags - the upstream remote is asked. Nothing
+# is mirrored into this fork's tag namespace on purpose: see the header.
+upstream_version() {
+    local tag
+    tag="$(git -C "$REPO_ROOT" tag --merged HEAD --list 'v*' 2>/dev/null \
         | grep -E '^v[0-9]+(\.[0-9]+){2}$' \
         | sort -V \
-        | tail -1
+        | tail -1)"
+    if [ -z "$tag" ]; then
+        tag="$(git -C "$REPO_ROOT" ls-remote --tags --refs upstream 2>/dev/null \
+            | awk '{print $2}' \
+            | sed 's#^refs/tags/##' \
+            | grep -E '^v[0-9]+(\.[0-9]+){2}$' \
+            | sort -V \
+            | tail -1)"
+    fi
+    [ -n "$tag" ] && printf '%s' "${tag#v}"
+    return 0
 }
 
-# Every release this fork has tagged off that base ("v1.6.10.3"), oldest
-# first. The -alpha<k> process builds are not releases and are not listed, and
-# neither is a release tag that points at HEAD: a workflow tags the state it
-# just merged and then builds that tag, so `v1.6.10.1` sitting on HEAD has to
-# stamp 1.6.10.1 - not the release after it.
-release_tags() {
-    local base="$1" tag head
-    head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || head=""
-    while read -r tag; do
-        [ -n "$tag" ] || continue
-        if [ "$(git -C "$REPO_ROOT" rev-parse "${tag}^{commit}" 2>/dev/null)" != "$head" ]; then
-            printf '%s\n' "$tag"
-        fi
-    done < <(git -C "$REPO_ROOT" tag --list "v${base}.[0-9]*" 2>/dev/null \
-             | grep -E "^v${base}\.[0-9]+$" \
-             | sort -V || true)
+# The version placeholder in the manifest: what a tree with no tags and no
+# upstream remote - an export, a shallow copy - still has to build from.
+manifest_version() {
+    awk -F'=' '/^version/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${FNOS_DIR}/manifest"
 }
 
-# The fourth component the next release gets: one more than the newest release
-# tag of this base, or 1 when nothing has been released off this base yet.
-next_release_ordinal() {
-    local base="$1" tag newest=0
-    for tag in $(release_tags "$base"); do
-        [ "${tag##*.}" -gt "$newest" ] && newest="${tag##*.}"
-    done
-    printf '%s' "$((newest + 1))"
-}
-
-# release (the default): 1.6.10.2 - what a tag and a release get. A release tag
-#                         on HEAD is taken as-is (v1.6.17.1 -> 1.6.17.1).
-# alpha:                  1.6.10.2-alpha3 - a process build for the device,
-#                         numbered by the commits made since the last release.
-#                         A release tag on HEAD does not change this: an alpha
-#                         build stays a guess by construction, and the released
-#                         tag is not something to build "again, plus alpha".
+# release (the default): 1.6.19 - what a release tag, and the package built from
+#                         it, carry. A fnos-X.Y.Z tag on HEAD is taken as-is.
+# alpha:                  1.6.19-alpha3 - a process build for the device, numbered
+#                         by the commits made since our last release. A release
+#                         tag on HEAD does not change this: an alpha build stays a
+#                         process build by construction.
+#
+# A tree with no release tag on HEAD is a process build in *both* modes - there
+# is no release to name, and a bare "1.6.19" would look like one. Only an
+# explicit VERSION= turns such a tree into an installable package.
 derive_version() {
-    local mode="${1:-release}" tag base ordinal last ahead head_tag
+    local mode="${1:-release}" head_tag base ahead ref
     head_tag="$(head_release_tag)" || head_tag=""
     if [ -n "$head_tag" ] && [ "$mode" != "alpha" ]; then
-        printf '%s' "${head_tag#v}"
+        printf '%s' "${head_tag#fnos-}"
         return 0
     fi
-    tag="$(upstream_tag)" || tag=""
-    if [ -n "$tag" ]; then
-        base="${tag#v}"
-        ordinal="$(next_release_ordinal "$base")"
-        if [ "$mode" = "alpha" ]; then
-            last="$(release_tags "$base" | tail -1)"
-            [ -n "$last" ] || last="$tag"
-            ahead="$(git -C "$REPO_ROOT" rev-list --count "${last}..HEAD" 2>/dev/null)" || ahead=0
-            case "$ahead" in ''|*[!0-9]*) ahead=0 ;; esac
-            printf '%s.%s-alpha%s' "$base" "$ordinal" "$ahead"
-        else
-            printf '%s.%s' "$base" "$ordinal"
-        fi
-        return 0
+
+    if [ -n "$head_tag" ]; then
+        base="${head_tag#fnos-}"
+    else
+        base="$(last_release_version)" || base=""
+        [ -n "$base" ] || base="$(upstream_version)" || base=""
+        [ -n "$base" ] || base="$(manifest_version)" || base=""
     fi
-    # No tags at all (a shallow or exported tree): fall back to the manifest.
-    awk -F'=' '/^version/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${FNOS_DIR}/manifest"
+    [ -n "$base" ] || return 1
+
+    # Count the commits made since the last release of this base, so two process
+    # builds of the same base can still be told apart.
+    ref="$(git -C "$REPO_ROOT" tag --list "fnos-${base}" 2>/dev/null | sort -V | tail -1)"
+    [ -n "$ref" ] || ref="$(git -C "$REPO_ROOT" tag --list "v${base}" 2>/dev/null | head -1)"
+    ahead=0
+    if [ -n "$ref" ]; then
+        ahead="$(git -C "$REPO_ROOT" rev-list --count "${ref}..HEAD" 2>/dev/null)" || ahead=0
+    fi
+    case "$ahead" in ''|*[!0-9]*) ahead=0 ;; esac
+    printf '%s-alpha%s' "$base" "$ahead"
 }
 
 # ---------------------------------------------------------------- payload ----
@@ -433,8 +446,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# Asked for the version only? Answer that and touch nothing else - the sync
-# workflow tags a release with exactly this number.
+# Asked for the version only? Answer that and touch nothing else - the build
+# workflow compares this against the tag it was asked to publish before it lets
+# the package through.
 if [ -n "$PRINT_VERSION" ]; then
     derive_version "$MODE"; echo; exit 0
 fi

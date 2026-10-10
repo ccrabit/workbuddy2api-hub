@@ -147,7 +147,7 @@ class Scheduler:
             if acc.realm == "cn":
                 if acc.can_checkin():
                     self.log(f"检测到国内版账号 [{uid8}] 今日尚未签到，执行自动签到...")
-                    res = acc.checkin()
+                    res = acc.checkin(trigger="scheduler")
                     if res.get("ok"):
                         checkin_count += 1
                         self.log(f"✓ 账号 [{uid8}] 自动签到成功: {res.get('msg')}")
@@ -174,10 +174,13 @@ class Scheduler:
             if acc.realm == "intl":
                 if acc.can_daily_chat():
                     self.log(f"检测到国际版账号 [{uid8}] 今日尚未活跃，执行每日活跃打卡对话...")
-                    res = acc.daily_chat()
+                    res = acc.daily_chat(trigger="scheduler")
                     if res.get("ok"):
                         daily_chat_count += 1
-                        self.log(f"✓ 账号 [{uid8}] 每日活跃对话成功")
+                        # 桌面端那条几乎不会失败，真正决定积分的网页通道就在 msg
+                        # 里（completed：N 段输出 / 失败原因），日志不带上它的话，
+                        # 面板只显示「成功」，第二天才发现积分没到（issue #236）。
+                        self.log(f"✓ 账号 [{uid8}] 每日活跃对话成功: {res.get('msg')}")
                     else:
                         self.log(f"! 账号 [{uid8}] 每日活跃对话失败: {res.get('error') or res.get('msg')}")
                     time.sleep(1.5)

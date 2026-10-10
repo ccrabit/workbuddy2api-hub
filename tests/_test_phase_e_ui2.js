@@ -39,14 +39,17 @@ const bareHtml = html
   .replace(/<!--[\s\S]*?-->/g, '')
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .replace(/^[ \t]*\/\/.*$/gm, '');
-// The accounts toolbar, as markup: from the upstream export button to the
-// import button that follows it.
+// The accounts toolbar, as markup: from the first toolbar button through the
+// cockpit group that closes it. The upstream v1.6.19 toolbar is
+// 扫描桌面客户端 / 导入 / 导出 / <span class="toolbar-sep"> / 一键刷新积分,
+// and the cockpit pair sits right after 导出, so the slice runs from the scan
+// button to the separator that follows the cockpit button.
 const toolbar = (() => {
-  const from = bareHtml.indexOf('onclick="exportAccounts(this)"');
-  const to = bareHtml.indexOf('onclick="openImport()"');
-  // Up to and including the import button's opening tag, so the button that
-  // closes the group is part of what is checked.
-  return from >= 0 && to > from ? bareHtml.slice(from, to + 24) : '';
+  const from = bareHtml.indexOf('id="btnScanDesktop"');
+  const to = bareHtml.indexOf('toolbar-sep', from);
+  // Up to and including the separator's opening tag, so the group boundary is
+  // part of what is checked.
+  return from >= 0 && to > from ? bareHtml.slice(from, to + 20) : '';
 })();
 const cssRule = (sel) => {
   const i = style.indexOf(sel);

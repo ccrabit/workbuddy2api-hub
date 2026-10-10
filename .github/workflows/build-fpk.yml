@@ -1,15 +1,17 @@
 name: Build the fnOS package
 
 # Three ways in:
-#   * a v* tag pushed to this fork by hand - a release of this fork, named
-#     v<upstream release>.<commits since it> (see sync-upstream.yml). A release
-#     tag on HEAD is the version as-is, whatever tags this checkout can see.
+#   * a fnos-X.Y.Z tag pushed to this fork by hand - a release of this fork. The
+#     tag IS the version, whatever tags this checkout can see (the derivation in
+#     scripts/build-fpk.sh never has to guess). A historical v<version>[.<ordinal>]
+#     tag still builds, so an old release can be rebuilt.
 #   * the "Run workflow" button, to build a package from a branch: that only
-#     produces a build artifact, never a release,
+#     produces a build artifact, never a release, and its version is a process
+#     version (-alpha<k>),
 #   * a `uses:` call from sync-upstream.yml, which already knows the tag.
 on:
   push:
-    tags: ["v*"]
+    tags: ["fnos-*", "v*"]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -29,8 +31,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
-          # The version is <latest tag>[.<commits since it>], so the tags and
-          # the history between them have to be here.
+          # The build script may have to look for a release tag (and, when the
+          # checkout has none, ask the upstream remote what the newest upstream
+          # release is), so the tags and the history they sit on have to be here.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -42,15 +45,22 @@ jobs:
           PACKAGER: ${{ github.repository_owner }}
           PACKAGER_URL: ${{ github.server_url }}/${{ github.repository }}
           # A pushed tag IS the release: hand its version down instead of letting
-          # the script derive it, because derivation reads the tags this checkout
-          # can see and a fresh checkout of this fork may not see upstream's -
-          # which is how the tag v1.6.17.1 once built 1.6.10.3. Empty on a branch
-          # build, where the derived version is the only answer there is.
-          TAG_REF: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          # the script derive it. The two have to agree, and this step refuses to
+          # publish when they do not - that check is what once caught the tag
+          # v1.6.17.1 building 1.6.10.3. Empty on a branch build, where the
+          # derived (process) version is the only answer there is.
+          TAG_REF: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
           set -e
           if [ -n "${TAG_REF}" ]; then
-            expected="${TAG_REF#v}"
+            case "${TAG_REF}" in
+              fnos-*) expected="${TAG_REF#fnos-}" ;;
+              v*)     expected="${TAG_REF#v}" ;;
+              *)
+                echo "::error::this workflow cannot name a release after the tag ${TAG_REF}: releases of this fork are tagged fnos-X.Y.Z"
+                exit 1
+                ;;
+            esac
             derived="$(bash scripts/build-fpk.sh --print-version)"
             if [ "${derived}" != "${expected}" ]; then
               echo "::error::tag ${TAG_REF} asks for version ${expected}, but this tree derives ${derived} - refusing to publish a package the tag does not name"
@@ -65,7 +75,7 @@ jobs:
         run: bash scripts/verify-fpk.sh
 
       - name: Attach the package to a release
-        if: inputs.ref != '' || startsWith(github.ref, 'refs/tags/v')
+        if: inputs.ref != '' || startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.ref || github.ref_name }}

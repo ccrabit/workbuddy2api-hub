@@ -1,0 +1,41 @@
+{
+  "schema_version": "2",
+  "source_info": {
+    "name": "WorkBuddy2API-Hub 源",
+    "author": "ccrabit",
+    "homepage": "https://github.com/ccrabit/workbuddy2api-hub",
+    "description": "WorkBuddy2API-Hub 的 FnDepot 外部源（第三方自建，与 FnDepot 项目及官方无关）。"
+  },
+  "apps": {
+    "workbuddy2api": {
+      "display_name": "WorkBuddy2API-Hub",
+      "desc": "WorkBuddy 账号池网关：把多个 WorkBuddy/CodeBuddy 账号聚合成 OpenAI 兼容 API，在飞牛应用中心里通过统一网关免密打开，并带账号导入导出、用量与积分的 Web 看板。",
+      "platform": ["all"],
+      "categories": ["AI赋能", "系统工具"],
+      "icon_url": "./fndepot/ICON.PNG",
+      "readme_url": "./fndepot/README.md",
+      "bug_report_url": "https://github.com/ccrabit/workbuddy2api-hub/issues",
+      "maintainer": "ardeyouxipianyi",
+      "maintainer_url": "https://github.com/ardeyouxipianyi/workbuddy2api-hub",
+      "distributor": "ccrabit",
+      "distributor_url": "https://github.com/ccrabit",
+      "run_as": "package",
+      "install_type": "",
+      "is_docker": false,
+      "service_port": "8788",
+      "releases": {
+        "1.6.19": {
+          "changelog": "同步上游 v1.6.19：并入上游最新看板；保留飞牛统一网关免密入口、看板主题与移动端适配。",
+          "updated_at": "2026-10-10T16:56:21+08:00",
+          "packages": {
+            "all": {
+              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

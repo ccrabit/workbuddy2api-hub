@@ -9,7 +9,9 @@ on:
     branches: [main]
     # v* tags run the full matrix plus the tag == source version assertion
     # below, so a release cannot ship a tag that disagrees with the code.
-    tags: ["v*"]
+    # fnos-* is this fork's own release tag (see scripts/build-fpk.sh): without
+    # it here the assertion below would never run for the tag we actually ship.
+    tags: ["v*", "fnos-*"]
   pull_request:
 
 # A second push to the same branch makes the first run pointless: cancel it
@@ -76,16 +78,19 @@ jobs:
           path: suite-logs
           if-no-files-found: ignore
 
-  # Release discipline: a v* tag must match the version baked into
-  # wb_proxy.py, and the two source version strings must agree with each
-  # other. A tag carrying a -ci suffix is a rehearsal and skips only the tag
-  # comparison (the source-consistency check still runs).
-  # This fork tags v<source version> or v<source version>.<release ordinal>:
-  # fnOS only offers an upgrade for a bigger number, and the fourth component
-  # counts how many of our releases sit on that upstream version.
+  # Release discipline: a tag must match the version baked into wb_proxy.py,
+  # and the two source version strings must agree with each other. A tag
+  # carrying a -ci suffix is a rehearsal and skips only the tag comparison (the
+  # source-consistency check still runs).
+  # This fork releases with fnos-<source version> (fnos-1.6.19 for source
+  # 1.6.19): the version is upstream's own, and the "fnos-" prefix keeps these
+  # tags out of upstream's "v*" namespace, which its own release workflow acts
+  # on. Historical v<source version> and v<source version>.<ordinal> tags are
+  # still accepted here so an old tag can be re-checked; nothing new is tagged
+  # that way (see docs/phase-f-version-policy.md).
   version-assert:
     name: tag matches source version
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,19 +104,30 @@ jobs:
             echo "::error::source version strings disagree ($OVERVIEW vs $SERVER)"
             exit 1
           fi
-          TAG="${GITHUB_REF_NAME#v}"
-          if [[ "$GITHUB_REF_NAME" == *-ci ]]; then
-            echo "rehearsal tag (-ci): skipping tag==version assertion (source=$OVERVIEW)"
-          elif [ "$TAG" = "$OVERVIEW" ]; then
-            echo "version assert OK: $TAG"
-          # This fork tags v<upstream version>.<release ordinal>: fnOS only
-          # offers an upgrade for a bigger number, and the fourth component
-          # says how many of our releases sit on that upstream version.
-          # scripts/build-fpk.sh derives the package version the same way, so a
-          # tag still cannot drift from the package built out of it.
-          elif [[ "$TAG" =~ ^"$OVERVIEW"\.[0-9]+$ ]]; then
-            echo "version assert OK: $TAG (source=$OVERVIEW + release ordinal)"
-          else
-            echo "::error::tag $GITHUB_REF_NAME is neither the source version $OVERVIEW nor <source>.<release ordinal>"
-            exit 1
-          fi
+          ref="$GITHUB_REF_NAME"
+          case "$ref" in
+            *-ci)
+              echo "rehearsal tag (-ci): skipping tag==version assertion (source=$OVERVIEW)"
+              ;;
+            fnos-*)
+              if [ "${ref#fnos-}" = "$OVERVIEW" ]; then
+                echo "version assert OK: $ref (release of source $OVERVIEW)"
+              else
+                echo "::error::tag $ref does not name the source version: expected fnos-$OVERVIEW"
+                exit 1
+              fi
+              ;;
+            v*)
+              historical="${ref#v}"
+              if [ "$historical" = "$OVERVIEW" ] || [[ "$historical" =~ ^"$OVERVIEW"\.[0-9]+$ ]]; then
+                echo "version assert OK: $ref (historical tag for source $OVERVIEW)"
+              else
+                echo "::error::tag $ref is neither the source version $OVERVIEW nor the historical <source>.<release ordinal>"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::tag $ref is not a release of this fork: releases are tagged fnos-$OVERVIEW"
+              exit 1
+              ;;
+          esac

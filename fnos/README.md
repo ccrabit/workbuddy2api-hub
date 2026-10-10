@@ -57,9 +57,10 @@ bash scripts/build-fpk.sh          # 产出 dist/WorkBuddy2API-Hub_<版本>_<pla
 bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 ```
 
-- **版本号**：`<最新的上游三段 tag>.<本基线上的第几次发布>`，例如 `1.6.17.1`；用
-  `bash scripts/build-fpk.sh --print-version` 只看不算。规则、四段/三段 tag 的区别与
-  `--alpha` 过程包见下面「版本号和 tag」。
+- **版本号**：就是**上游自己的三段版本号**，例如 `1.6.19`；发布 tag 是 `fnos-1.6.19`，
+  包名、`manifest`、Release 标题（`WorkBuddy2API-Hub 1.6.19`）都用这个数字，**没有再补第四段**。
+  `bash scripts/build-fpk.sh --print-version` 只算不构建。没打 `fnos-*` tag 时构建出来的是过程包
+  （`1.6.19-alpha3` 这种带后缀、装不上也不该装的东西），规则见下面「版本号和 tag」。
 - **distributor**：默认取 `origin` 的 owner 与 URL，也就是你的 fork；`origin` 还指向上游时
   脚本会直接报错（否则应用商店里会把包记成上游作者），可以显式传
   `PACKAGER=<你的用户名> PACKAGER_URL=<你的 fork>`。
@@ -75,8 +76,9 @@ bash scripts/verify-fpk.sh         # 在本机把整条生命周期跑一遍
 安装 → 启动 → 用面板登录并导入一份 cockpit tools 格式的账号文件 → 升级（确认账号还在）
 → 停止 → 卸载（两种选择都试一遍），共 71 项断言（含网关入口：socket 权限、带与不带
 `X-Trim-Username` 两种免密识别、前缀剥离、停止后 socket 文件被清掉；以及包身份：产品名、
-`appname`、版本在文件名/`manifest`/`ui/config` 三处一致，运行时模块与 `pricing/` 齐全，
-`accounts/`、`usage/`、`tests/`、`docs/` 四个目录都没进包，包内每个文件逐字节等于仓库里那份）。它跑的是真进程、真 HTTP，**但装不了真机**：
+`appname`、版本在文件名/`manifest`/`ui/config` 三处一致、**版本必须是上游的三段数字（不能是
+四段、也不能是 `-alpha` 过程版本）**，运行时模块与 `pricing/` 齐全，
+`accounts/`、`usage/`、`tests/`、`docs/` 四个目录都没进包，包内每个文件逐字节等于仓库里那份）。其中「包就是这棵树构建的版本」这一条只在 HEAD 上有 `fnos-<版本>` tag 时断言——本地没打 tag 时树给的是过程版本，无从比较，它会打一行 `SKIP` 说明而不是假装通过。它跑的是真进程、真 HTTP，**但装不了真机**：
 应用中心本身（`trim-cli`）只存在于飞牛系统里，所以最后一公里还是要在一台真 NAS 上试。
 
 ### 两种 `TRIM_APPDEST` 形状
@@ -179,46 +181,69 @@ uid 951 + 伪造同一个头                     -> {"via_gateway": true, "gatew
 
 ## CI
 
-- `.github/workflows/build-fpk.yml`：推送 `v*` tag 时构建 fpk、跑一遍 `scripts/verify-fpk.sh`，
-  然后把 `.fpk` 和 `.sha256` 挂到同名 Release 上（Release 标题是产品名 `WorkBuddy2API-Hub <tag>`，
-  手动触发时改为上传 artifact `workbuddy2api-hub-fpk`）。
-- `.github/workflows/sync-upstream.yml`：每天 03:17 UTC（北京时间 11:17）拉上游
-  `ardeyouxipianyi/workbuddy2api-hub` 的 `main`，能快进/自动合并就合并并推送，然后给这个新状态
-  打一个 tag 并构建发布；**合并冲突则中止、开一个 issue 留痕并让这次运行失败**，
-  不会留下半个合并的仓库。
+- `.github/workflows/build-fpk.yml`：推送 `fnos-*`（本仓库的发布 tag）或历史 `v*` tag 时构建
+  fpk、跑一遍 `scripts/verify-fpk.sh`，然后把 `.fpk` 和 `.sha256` 挂到同名 Release 上
+  （Release 标题是产品名 `WorkBuddy2API-Hub <tag>`，手动触发时改为上传 artifact
+  `workbuddy2api-hub-fpk`）。构建前它会把 tag 上的版本和 `--print-version` 对一遍，不一致
+  直接失败——「tag 说要发 1.6.19，树算出来是别的」这种包不会再被发出去。
+- `.github/workflows/sync-upstream.yml`：每天尝试三次（03:17 / 09:23 / 15:41 UTC，即北京时间
+  11:17 / 17:23 / 23:41；GitHub 的定时任务常年晚点甚至整个丢失，冗余几次才靠得住）拉上游
+  `ardeyouxipianyi/workbuddy2api-hub` 的 `main`，能快进/自动合并就合并并推送，然后**只有上游最新
+  release 版本比我们已发布的更大**才打 `fnos-<版本>` tag 并构建发布（同一个版本不会发两次）。
+  **上游的 tag 绝不推到本仓库**（理由见「版本号和 tag」）。**合并冲突则中止**：把带冲突标记的
+  合并推成一个 `sync-conflict/<UTC 日期>` 分支（`git checkout` 它就能接着解）、把冲突文件和解
+  决命令写进本次运行的 summary、尽力开/更新一个 issue，并让这次运行失败——不会留下半个合并的
+  仓库，也不会有一次「静悄悄的红」。
 
 ### 版本号和 tag
 
-上游是「先提交、过几天才打 release tag」，而飞牛只在数字变大时才提示升级，所以版本号 =
-**树里最新的上游三段 tag + 第四段（这个基线上的第几次发布）**：
+**版本号就是上游自己的版本号**：上游 release 是 `v1.6.19`，我们的包就是 `1.6.19`，我们的 tag
+是 `fnos-1.6.19`。没有第四段，也没有自己的发布计数器。
 
 ```
-上游 tag:              v1.6.17
-这个基线的第一次发布:   1.6.17.1     <- tag / manifest / Release 名 / fpk 文件名 都是它
-第二次发布:             1.6.17.2
-上游发布 v1.6.18 之后:  1.6.18.1     （比任何 1.6.17.x 都大，飞牛会提示升级）
+上游 tag:    v1.6.19
+我们的 tag:  fnos-1.6.19     <- manifest / Release 名 / fpk 文件名 都是 1.6.19
 ```
 
-第四段数的是**发布**，不是提交：`scripts/build-fpk.sh` 里的 `derive_version` 取「本基线已经
-存在的四段 tag 中最大的那个 + 1」。这样不需要手工维护计数器，一批改动对应一个版本，界面里
-也不会堆出一串零碎版本。
+为什么不自己编版本号（Phase F 之前是 `1.6.17.1` 这种「上游三段 + 本基线上的第几次发布」）：
 
-**过程版本**（还没打算发布、只想丢到设备上试的包）用 `--alpha` 构建，带 `-alpha<k>` 后缀，
-k = 距上一次发布过了多少个提交：
+- 版本号是对用户和应用商店的承诺，`1.6.19` 能直接和上游 release 对上；`1.6.19.7` 这种数字没人
+  读得出含义，飞牛比较版本号的规则也没有正式文档。我们为这套自编号码付过代价：tag `v1.6.17.1`
+  在 CI 里构建出了 **1.6.10.3**，比设备上装的还小，根本升不上去。
+- 旧方案依赖「这次 checkout 能看到哪个上游 tag」，而 CI 全新 clone 只看得到本仓库自己的 tag。
+  现在版本只取决于 HEAD 上有没有 `fnos-*` tag，与能看到哪些远端 tag 无关。
+
+**为什么不再用 `v*`**：上游新增了自己的发布工作流，它在 push 到 `v*` tag 时会创建 draft
+release。我们继续用 `v1.6.19` 这样的 tag，就会连带触发上游的发布流程；而且两边同名的 tag 在
+`git fetch upstream` 之后会互相覆盖（不覆盖也会打架）。所以本仓库的发布 tag 一律加 `fnos-`
+前缀，和上游的 `vX.Y.Z` / `vX.Y.Z.N` 彻底错开。历史 tag（`v1.6.10.1`、`v1.6.17.1` 这些）保留
+不动——删了旧 Release 就没了标签——但它们现在只是一段历史，不再被当成发布。
+
+**没打 tag 的时候**（本地开发、手动 dispatch、`--alpha`）构建出来的是**过程版本**，带
+`-alpha<k>` 后缀，k = 距最近一次发布过了多少个提交。过程版本不该装上设备：
 
 ```bash
-bash scripts/build-fpk.sh                    # 1.6.17.1          发布用
-bash scripts/build-fpk.sh --alpha            # 1.6.17.1-alpha3   设备上试用的中间包
-bash scripts/build-fpk.sh --print-version    # 只看版本，不构建（可加 --alpha）
+bash scripts/build-fpk.sh                     # HEAD 上有 fnos-1.6.19 时 -> 1.6.19
+bash scripts/build-fpk.sh --alpha             # 1.6.19-alpha3   设备上试用的中间包
+bash scripts/build-fpk.sh --print-version     # 只看版本，不构建（可加 --alpha）
+VERSION=1.6.19 bash scripts/build-fpk.sh      # 显式指定版本（手工发版用）
 ```
 
-alpha 包不打 tag、不发 Release，只用于测试；真正发布时去掉后缀，manifest 里的版本永远是纯
-数字（飞牛比较版本号的规则没有正式文档，alpha 只出现在我们自己试用的包里，发布包不受影响）。
-`vX.Y.Z` 形状的三段 tag 只认上游的：本仓库自己发的四段 tag 在算基线时被刻意忽略。
+既没有 tag 也没给 `VERSION=` 时，兜底顺序是：最近一个 `fnos-*` tag 的版本 → 上游 remote 上最新
+的 `vX.Y.Z`（`git ls-remote --tags upstream`）→ `fnos/manifest` 里的占位版本。这条链只用来给
+**过程包**起个名字，发布包永远来自 tag 或显式 `VERSION=`（`verify-fpk.sh` 会拒绝四段版本和
+`-alpha` 版本进包）。
 
-上游发布 v1.6.18 之后基线上移，第四段重新从 1 开始 —— 版本依然比任何 `1.6.17.x` 大。上游每天
-同步一次：只要同步带来了新提交，就会推一个新的 tag 并构建发布（新 fpk + 新 Release），在应用
-中心卸载旧包（向导里选保留数据）再装新包即可。
+**发版**：自动路径是 `sync-upstream.yml` 合并上游后判断「上游最新 release 是否比我们已发布的
+更新」，是就打 `fnos-<上游版本>` tag，再显式 `uses: build-fpk.yml` 构建（不靠 tag push 事件：
+用 `GITHUB_TOKEN` 推的 tag 不会触发别的 workflow）。手工路径就是自己打这个 tag：
+`git tag -a fnos-1.6.19 -m "WorkBuddy2API-Hub 1.6.19 (upstream v1.6.19)" && git push origin fnos-1.6.19`
+——tag 上的数字决定了包版本，`build-fpk.yml` 会核对它。
+
+**设备升级**：设备上装的是 `1.6.17.1`（旧的四段版本），新包 `1.6.19` 数字更大，应用中心会提示
+升级；在应用中心卸载旧包（向导里选保留数据）再装新包即可，数据目录
+`/vol1/@appdata/workbuddy2api` 不受影响。规则原文与这次改动的来龙去脉见
+[`docs/phase-f-version-policy.md`](../docs/phase-f-version-policy.md)。
 
 > 两个 workflow 都要写仓库（推分支、推 tag、发 Release、开 issue），所以 fork 里需要
 > Settings → Actions → General → Workflow permissions 选 **Read and write**，

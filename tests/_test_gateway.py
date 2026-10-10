@@ -361,8 +361,21 @@ class GatewaySocketTests(unittest.TestCase):
     def test_direct_visits_get_no_prefix(self):
         status, _, body = tcp_request(self.gw.port, "GET", "/")
         self.assertEqual(200, status)
-        self.assertIn('window.__WB_BASE__="";', body)
-        self.assertIn("window.__WB_VIA_GATEWAY__=false", body)
+        # Phase F 合并口径（lead 裁决 A，2026-10-10）：缺省直连**不注入**上下文脚本。
+        # 上游 tests/_test_dashboard_cache_headers.py 要求 GET / 的响应体逐字节等于
+        # 「dashboard.html + 语言替换」，而我们原来的两条 assertIn 把「注入 ""」写成了
+        # 硬期望。dashboard.html 自己按 `raw == null ? '' : String(raw)` 读全局量，
+        # 所以「不注入」与「注入 ""」在页面上等价，这里改成负向断言。
+        # 挂载态/网关态仍然注入（见上面 test_mounted_* 的四条 assertIn）。
+        # 断言钉的是**注入形态**（`<script>window.__WB_BASE__=…`，见 wb_proxy.py 的
+        # inject_dashboard_context），不是裸名字——页面自己的代码里本来就要读这两个
+        # 全局量（`const raw = window.__WB_BASE__`、`window.__WB_VIA_GATEWAY__ === true`），
+        # 裸名字的 assertNotIn 分不清「没注入」和「页面在代码里读它」，在上游版页面上
+        # 会假绿（本层 _test_gateway_ui.js 反而要求页面必须读这两个全局量）。
+        self.assertNotIn("<script>window.__WB_BASE__=", body,
+                         "a default direct visit injects no context script")
+        self.assertNotIn("<script>window.__WB_VIA_GATEWAY__=", body,
+                         "a default direct visit injects no context script")
         self.assertNotIn("<base href=", body, "a direct visit is not under the prefix")
 
 
