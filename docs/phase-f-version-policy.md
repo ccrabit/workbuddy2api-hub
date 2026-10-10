@@ -140,3 +140,42 @@ tar czf ~/workbuddy2api-backup.tgz -C /vol1/@appdata workbuddy2api/accounts work
 也改成同时断言两个名字（原来钉的是 `tags: ["v*"]`）。理由：这道门的意义就是「一个发布不能带
 与代码不符的 tag」，而本仓库真正会推的发布 tag 正是 `fnos-*`；只留 `v*` 等于让这道门对我们自己
 的发布永不生效。代价（下次合并上游时那一行可能冲突）是已知且可解的：冲突就取两边的并集。
+
+## 10. 已知残余（本阶段不动，登记 R21 / R22）
+
+### R21 载荷暂存靠排除式，已经和 `.gitignore` 漂移
+
+- **现象**：`scripts/build-fpk.sh` 的 payload 是「仓根全量 tar + 排除清单」。清单里的模式都带
+  `./` 前缀（例如 `--exclude='./__pycache__'`），而 GNU tar 里**带 `/` 的模式锚定整条路径**，
+  所以只排仓根那一层，嵌套的同名目录照样进包。R19 就是这么来的：本机
+  `release/__pycache__/*.pyc` 混进了 1.6.19 包（载荷 43 个文件，CI 资产 40 个）。
+  R19 已修：新增 `--exclude='__pycache__'` 与 `--exclude='*.pyc'`（这两条不带 `/`，按任意深度
+  匹配），并加了能红能绿的回归门 `tests/_test_release_pipeline.py::PayloadHygieneTests`。
+  但**同类**路径仍在清单外：`logs/`、`suite-logs/`、`python/`、`.sdk-cache/`、`wrt/ipk/`、
+  `wrt/apk/`、`wrt/openwrt/workbuddy2api/files/usr/lib/`、`.pytest_cache/`、`*.zip`、`*.pyo`。
+  它们在 `.gitignore` 里，本地跑过相应脚本就会出现在工作树里，于是「本地构建 ≠ CI 构建」。
+- **影响**：同一提交的两种构建可能不一致（包内多出本地垃圾、`app.tgz` 的 md5 随之不同），
+  「包就是这棵树构建的」这类断言会失真。当前**没有实际污染**：已发布的 1.6.19 资产
+  （`577842 B` / sha256 `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`）
+  的 40 个载荷文件与 `fnos-1.6.19` 那棵树逐字节一致。
+- **根治方向**：payload 暂存改成以 `git ls-files`（只收 tracked 文件）为源，而不是「全量 +
+  排除清单」。这样「包 = 提交的树」由机制保证，清单只剩「哪些 tracked 文件不进包」。
+- **为何本阶段不动**：这是一次机制级改动（会连带改暂存、拷贝与权限那段），在交包前夕做风险
+  大于收益；先把 R19 的最小修 + 回归门落地就够了。
+
+### R22 `app.tgz` 的 md5 随目录 mtime 变，字节级不可复现
+
+- **现象**：同一棵树重复构建，载荷里逐个文件的 md5 全同，但 `app.tgz` 的 md5 不同 —— 本机
+  重建 1.6.19 得到 `27d6795c7ba2a4db89f1e82fabef6ef0`，CI 资产是
+  `806ce4e9ac0cda75485d34ed04657230`；`manifest` 的 `checksum`（= `app.tgz` 的 md5）与 `.fpk`
+  自身的 sha256 因此都不同（本机重建后 `dist/WorkBuddy2API-Hub_1.6.19_all.fpk` 是 `577330 B` /
+  sha256 `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98`，CI 资产是 `577842 B`）。
+  根因：tar 把成员目录的 mtime 记成**构建时刻**（载荷里有 10 个成员是目录），gzip 头也带 mtime。
+- **影响**：内容相同、字节不同；`fnpack.json` 的 `sha256` / `size` 只能钉「已发布的那一份」，
+  没法用本机重建来复算。所以我们用**载荷逐文件 md5** 作等价判据（已发布资产 vs 本机重建，
+  40 个文件全同）。
+- **根治方向**：`tar --mtime=@<提交时间> --sort=name --owner=0 --group=0 --numeric-owner`
+  （`--sort=name` 需 GNU tar ≥ 1.28）+ `gzip -n`；BSD tar / macOS 没这些开关，得先探测。
+- **为何本阶段不动**：FnDepot 校验的是**下载资产的 sha256**（已回填 CI 资产那个值，与包外字节
+  一致），我们的验证口径是载荷内容；改打包命令会改变 `manifest` 的 `checksum` 语义与 CI 产物
+  指纹，是独立话题。

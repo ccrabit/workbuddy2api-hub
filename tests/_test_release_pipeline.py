@@ -32,11 +32,13 @@ skips the behavioural half (the Windows runners stay useful) and PyYAML missing
 skips the workflow-execution half; the static gates always run.
 """
 
+import io
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import unittest
 
@@ -74,6 +76,35 @@ def read_text(path):
 def write_text(path, text):
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text)
+
+
+def build_requirements(cwd):
+    """The tools the packaging script uses that this box does not have.
+
+    tar has to be GNU tar (the exclusions under test are GNU tar's) and find has
+    to be GNU find (the staging step packs with -printf). Stock Windows has
+    neither, so the payload gate below skips there instead of failing on
+    something it cannot exercise - and it says so. The probes run in the
+    checkout under test, like the build does.
+    """
+    missing = []
+    for tool, marker in (("tar", "GNU tar"), ("find", "GNU findutils")):
+        path = shutil.which(tool)
+        if not path:
+            missing.append(tool)
+            continue
+        try:
+            output = subprocess.run(
+                [path, "--version"], cwd=cwd, capture_output=True, text=True, timeout=60,
+            ).stdout or ""
+        except (OSError, subprocess.SubprocessError):
+            missing.append(tool)
+            continue
+        if marker not in output:
+            missing.append("%s that is %s" % (tool, marker))
+    if not shutil.which("md5sum"):
+        missing.append("md5sum")
+    return missing
 
 
 class FixtureTests(unittest.TestCase):
@@ -413,6 +444,88 @@ class TagAssertWorkflowTests(unittest.TestCase):
         result = self.gate("release-%s" % self.overview)
         self.assertNotEqual(0, result.returncode, "only v* (historical) and fnos-* tags are releases")
         self.assertIn("::error::", result.stdout + result.stderr)
+
+
+class PayloadHygieneTests(FixtureTests):
+    """What a local run leaves behind may not travel inside the package.
+
+    R19: the staging tar excluded './__pycache__', and a pattern with a slash in
+    it is anchored to the repository root, so a nested release/__pycache__ that
+    a local run had created went into the package. The same commit built on a
+    developer's box and on CI then produced two different payloads (43 files
+    against 40) and two different app.tgz checksums, which is what makes "the
+    package is what this tree builds" unverifiable. The pattern that drops
+    bytecode at any depth is the one without the slash.
+    """
+
+    RELEASE = "1.6.19"
+
+    def setUp(self):
+        super().setUp()
+        missing = build_requirements(self.root)
+        if missing:
+            self.skipTest("needs the tools the packaging script uses; missing %s" % ", ".join(missing))
+
+    def build(self, tree):
+        """Build into `tree`; the checkout under test never gets a dist/."""
+        env = dict(os.environ)
+        env.update(
+            VERSION=self.RELEASE,
+            PACKAGER="ccrabit",
+            PACKAGER_URL="https://github.com/ccrabit/workbuddy2api-hub",
+        )
+        result = subprocess.run(
+            [self.bash, SCRIPT], cwd=tree, capture_output=True, text=True, timeout=900, env=env,
+        )
+        self.assertEqual(
+            0, result.returncode,
+            "build-fpk.sh failed in %s:\n%s" % (tree, result.stdout + result.stderr),
+        )
+        fpk = os.path.join(tree, "dist", "WorkBuddy2API-Hub_%s_all.fpk" % self.RELEASE)
+        self.assertTrue(os.path.isfile(fpk), "the build left no package at %s" % fpk)
+        return fpk
+
+    def payload_members(self, fpk):
+        """Every member of the inner app.tgz, as the device would unpack it."""
+        with tarfile.open(fpk, "r:gz") as package:
+            member = package.extractfile("app.tgz")
+            self.assertIsNotNone(member, "the package carries no app.tgz")
+            data = member.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as payload:
+            return payload.getnames()
+
+    def scatter_bytecode(self, tree):
+        """The junk a local run leaves: a cache directory and a loose .pyc."""
+        cache = os.path.join(tree, "release", "__pycache__")
+        os.makedirs(cache, exist_ok=True)
+        write_text(os.path.join(cache, "release_tools.cpython-311.pyc"), "not really bytecode\n")
+        write_text(os.path.join(tree, "release", "loose.pyc"), "not really bytecode either\n")
+        return ["release/__pycache__/release_tools.cpython-311.pyc", "release/loose.pyc"]
+
+    def test_the_payload_never_carries_compiled_bytecode(self):
+        scattered = self.scatter_bytecode(self.work)
+        members = self.payload_members(self.build(self.work))
+        leaked = [name for name in members
+                  if "__pycache__" in name.split("/") or name.endswith(".pyc")]
+        self.assertEqual(
+            [], leaked,
+            "compiled bytecode travelled inside the package; the staging step has to drop %s"
+            % ", ".join(scattered),
+        )
+
+    def test_a_stray_pyc_does_not_change_the_payload(self):
+        """One commit, one package - whether or not a local run compiled."""
+        clean = sorted(self.payload_members(self.build(self.work)))
+        self.scatter_bytecode(self.work)
+        dirty = sorted(self.payload_members(self.build(self.work)))
+        self.assertEqual(
+            [], [name for name in dirty if name not in clean],
+            "a file only a local run created reached the package",
+        )
+        self.assertEqual(
+            [], [name for name in clean if name not in dirty],
+            "a local run removed files from the package",
+        )
 
 
 if __name__ == "__main__":

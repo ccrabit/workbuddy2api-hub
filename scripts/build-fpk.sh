@@ -227,6 +227,8 @@ build_payload() {
         --exclude='./fnos' \
         --exclude='./scripts' \
         --exclude='./__pycache__' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
         --exclude='./*.md' \
         --exclude='./*.bat' \
         --exclude='./*.command' \

@@ -7,67 +7,94 @@
 
 ## §0 结论摘要（一眼看全）
 
+> 本版是 **task-27（WP-F9）** 收口版：把 Phase F 的交付纪律从「本地构建 + 本机数值」改成**状态感知**——
+> 包对着**构建它的那个 tag 提交**验，设备对着**它自己那一版**包验，合并事实对着**HEAD 历史里最近一次合并**验；
+> 环境给不出答案时 `gate()`/SKIP 并写明理由（**绝不 FAIL**），能给答案的地方不许退化成 SKIP。
+> 三种环境（开发树 / depth-1 浅克隆 / Windows 形状）都必须 FAIL=0。
+
 | 项 | 判定 | 通过 / 失败 / 跳过 | 证据 |
 |---|---|---|---|
-| 合并正确性（基线 / 上游文件未动 / 飞牛层在位） | **通过** | 13 / 0 / 0 | §2.1、E16 |
+| 合并正确性（动态解析最近一次合并 / 上游文件未动 / 飞牛层在位） | **通过** | 15 / 0 / 0 | §2.1、E16 |
 | 版本与 tag 契约（`fnos-X.Y.Z`、删四段发布号、不镜像上游 tag） | **通过** | 37 / 0 / 0 | §2.2、E13 |
 | 自动并入工作流（三条 cron、冲突分支、去镜像、exit 1） | **通过（静态+行为级）** | 含在 E13 内 | §2.3 |
-| FnDepot 源 `fnpack.json`（中心校验器 + 结构 + 下载 URL） | **通过**（1 项须回填） | 26 / 0 / 0 | §2.4、E14、R16 |
+| FnDepot 源 `fnpack.json`（中心校验器 + 结构 + 与**已发布资产**对齐） | **通过** | 31 / 0 / 0 | §2.4、E14、R16 |
 | 免密口径（socket peer 即登录 / TCP 伪造仍被拒） | **通过** | 14+4+10 / 0 / 1 | §2.5、E2/E2b/E7 |
 | 挂载前缀契约（`<base href>` 仅挂载态 / 直连逐字节） | **通过** | 33 / 0 / 0 | §2.6、E3 |
 | 每 M tokens 积分（后端 credit 累加 / 界面除零） | **通过** | 26 / 0 / 0 | §2.7、E4 |
-| 包与交付纪律（命名 / manifest / 逐字节 / verify-fpk） | **通过** | 56+14+13 / 0 / 2 | §2.8、E5/E8/E12 |
-| 全量套件 `run_all.py --jobs 4` | **通过** | 121 / 0 / 0 | §2.9、E1 |
+| 包与交付纪律（包↔tag 提交 / 双 `verify-fpk` / 设备分状态） | **通过** | 60+15+13 / 0 / 2 | §2.8、E5/E8/E12 |
+| 全量套件 `run_all.py --jobs 4` | **通过** | 122 / 0 / 0 | §2.9、E1 |
 | 平台形状（无 AF_UNIX / shallow clone / 非 root） | **通过** | 8+11 / 0 / 0 | §2.10、E10/E11 |
-| 交付说明与方案书一致性（F6 交叉核对） | **通过**（1 处待回填） | 21 / 0 / 0 | §2.11、E15、R17 |
+| 交付说明与方案书一致性（F6 交叉核对，含设备状态带牙断言） | **通过** | 22 / 0 / 0 | §2.11、E15、R17/R23 |
+| **三环境 FAIL=0**（开发树 / depth-1 浅克隆 / Windows 形状） | **通过** | 351/0/3 · 253/0/15 · 8/0/0 | §2.12 |
+| **敏感性证明**（改坏输入必红） | **通过**（3 条） | 见 §2.13 | §2.13 |
 
-- **本套件合计：PASS=334 / FAIL=0 / SKIP=3**（命令见 §1；原始日志 `/tmp/wb-f-full4.log`，共 17 段）。
-- `python3 tests/run_all.py --jobs 4` → **121 passed, 0 failed, 0 skipped**（57.7s，exit 0；`/tmp/wb-f-runall3.log`）。
-  Phase E 收口时这里是 86 套件，本阶段树里已有 91 个 Python + 30 个 JS 套件，全部真跑、没有一个被跳过。
-- `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk` → **70 passed, 0 failed**（exit 0；`/tmp/wb-f-verifyfpk.log`）。
-  唯一未真跑的断言是「包就是这棵树构建的」——它是 tag 门（HEAD 上没有 `fnos-*` tag 时按设计跳过），打 tag 后会变 71 条。
-- 3 条 SKIP 都写明理由：① 以 uid 65534 复现「应用自身 uid」分支要能遍历父目录（沙箱里是 `drwx------`）；
-  ② HEAD 上没有 tag（本阶段不打 tag）；③ 包内文件相对 HEAD 有未提交改动（`README.md` 是 Lead 正在改的交付文档）。
-- **一句话结论**：Phase F 的六件事在**契约级与行为级**都已成立，可以拿这个包上真机测；
-  剩下的都不是代码问题，而是**只有用户在真实环境里才能做完的三件外部动作**（真机安装、真实 GitHub 上跑一次自动并入、
-  push + 打 tag + 发 Release），外加 **3 件交付前必须做的事**：回填 `fnpack.json` 的 `size`/`sha256`（R16）、
-  回填交付说明 §4.2（R17）、以及决定「不新建仓库」这条路要不要以「push 之后才成立」的前提写进上架说明（R15）。
+- **本套件合计（开发树）PASS=351 / FAIL=0 / SKIP=3**，exit 0（17 段；日志 `/tmp/wb-f9-full4.log`，80.2s）。
+  Lead 回填交付说明后的这一轮全绿；回填前是 `340 / 6 / 3`（`/tmp/wb-f9-full2.log`，6 条红 = R17/R23 四条 + 其派生两条）。
+- **depth-1 浅克隆（CI 形状）**：用**已提交**的树跑 = `PASS=249 / FAIL=4 / SKIP=15`（唯一根因是提交里的交付说明还写着
+  设备 1.6.17.1，另 3 条是派生）——**这是文档没提交，不是套件问题**；把**回填后**的交付说明放进同一个克隆再跑 =
+  **`PASS=253 / FAIL=0 / SKIP=15`，exit 0**（`/tmp/wb-f9-ci3b.log`）。⇒ Lead 提交回填后 CI 即绿。
+- `python3 tests/run_all.py --jobs 4` → **122 passed, 0 failed, 0 skipped**（85.2s，exit 0；`/tmp/wb-f9-runall3.log`，其中本套件行 `PASS=351 FAIL=0 SKIP=3`）。
+- `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk` → 工作树上 **69 passed, 1 failed**
+  （唯一失败 `every packaged file is byte-identical to the tree`，因为工作树已前移 24 个提交）；
+  **在 tag 提交的检出上同一条命令 71 passed / 0 failed**（E5 实测）。「同一条命令在不同环境给不同数字」现在是
+  套件里的显式断言（§2.8），不是含糊话。
+- 3 条 SKIP（开发树）：① uid 65534 探针要能遍历父目录（沙箱里是 `drwx------`）；② HEAD 上没有 `fnos-*` tag
+  （本阶段不打 tag）；③ 包内文件相对 HEAD 有未提交改动（`M scripts/build-fpk.sh`，packager 在途的 R19/R21/R22 改动）。
+- **一句话结论**：Phase F 的六件事在**契约级与行为级**都已成立 —— 三环境 FAIL=0、`run_all --jobs 4` 122/0/0、
+  `verify-fpk` 在 tag 检出 71/0、设备侧只读复核通过，可以拿这个包上真机测；剩下的不是代码问题，而是
+  **只有用户在真实环境里才能做完**的外部动作（应用中心里安装/复装、真实 GitHub 上跑一次自动并入、push + 打 tag + 发 Release）
+  与几处**交付/上架前的清理与登记**（R18 可执行位、R15 上架口径、R21/R22/R24，见 §3 清单）。
+
 
 ## §1 复现入口
 
 ```bash
-# 全套（约 55s；CI 上跑的就是这一条）
+# 全套（约 60s；CI 上跑的就是这一条）
 python3 tests/run_all.py --jobs 4
 
 # 本套件（17 段，可用子串只跑某段）
-python3 -u tests/_test_phase_e_verify.py                 # 全部：PASS=334 FAIL=0 SKIP=3
+python3 -u tests/_test_phase_e_verify.py                 # 开发树：PASS=351 FAIL=0 SKIP=3
+python3 -u tests/_test_phase_e_verify.py e5              # 60/0/0  包 ↔ tag 提交 + 双 verify-fpk
 python3 -u tests/_test_phase_e_verify.py e13             # 37/0/0  版本与 tag 契约
-python3 -u tests/_test_phase_e_verify.py e14             # 26/0/0  FnDepot 源 + ls-remote 对抗
-python3 -u tests/_test_phase_e_verify.py e15             # 21/0/0  交付说明一致性
-python3 -u tests/_test_phase_e_verify.py e16             # 13/0/0  合并正确性审计
+python3 -u tests/_test_phase_e_verify.py e14             # 31/0/0  FnDepot 源 + ls-remote 对抗 + 已发布资产
+python3 -u tests/_test_phase_e_verify.py e15             # 22/0/0  交付说明一致性（含设备状态带牙断言）
+python3 -u tests/_test_phase_e_verify.py e16             # 15/0/0  合并正确性审计
 
-# 包
-VERSION=1.6.19 bash scripts/build-fpk.sh                 # 由 packager/Lead 执行，本阶段我只读产物
-bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk   # 70 passed / 0 failed
+# 三环境（task-27 的硬要求：三处都必须 FAIL=0）
+python3 tests/run_all.py --jobs 4                        # (a) 开发树
+git clone --quiet --depth 1 file://$PWD /tmp/wb-f9-ci    # (b) CI 形状：shallow clone
+cp tests/_test_phase_e_verify.py /tmp/wb-f9-ci/tests/
+(cd /tmp/wb-f9-ci && PYTHONPATH=/tmp/wb-f9-ci python3 -u tests/_test_phase_e_verify.py)   # 已提交树 249/4/15 → 交付说明回填后 253/0/15
+python3 -u tests/_test_phase_e_verify.py e10 e11         # (c) Windows 形状（无 AF_UNIX / 无 geteuid / 非 root）
+
+# 包（本阶段我只读产物；构建是 packager/Lead 的事）
+bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk   # 工作树 69/1；tag 检出 71/0（E5 实测）
 ```
 
 环境旋钮（都可选）：`WB_PHASE_E_STRICT=1`（「还没落地」从 SKIP 变硬 FAIL）、`WB_PKG`、`WB_PKG_VERSION`、
-`WB_PHASE_E_PKG`（设备比对锚包）、`WB_WRONG_PKG`（错包副本）、`WB_PHASE_F_MERGE`（默认 `db9e58b`）、
-`WB_DASHBOARD_PATH`（冻结版看板）。本阶段新增段落：`e13`（版本与 tag 契约）、`e14`（FnDepot 源 + ls-remote 对抗）、
-`e15`（交付说明一致性）、`e16`（合并正确性审计）。
+`WB_PHASE_E_PKG`（设备比对锚包）、`WB_WRONG_PKG`（错包副本）、`WB_PUBLISHED_ASSET`（已发布资产副本）、
+`WB_RELEASE_PIPELINE_SUITE`（packager 套件路径，做结构门敏感性证明用）、`WB_MERGE_COMMIT`（历史断言的目标提交）、
+`WB_DASHBOARD_PATH`（冻结版看板）。段落：`e1`…`e16`（`e8` 交付纪律、`e12` 错包反向取证、`e13` 版本与 tag 契约、
+`e14` FnDepot 源、`e15` 交付说明一致性、`e16` 合并正确性审计）。
+
 
 ## §2 逐项结论
 
-### 2.1 合并正确性（E16 = 13/0/0）
+### 2.1 合并正确性（E16 = 15/0/0；合并对象由 git 动态解析，不再写死）
 
 ```
-$ git rev-list --parents -n1 db9e58b
-db9e58b6fb2bfc1096b8056776f39716fda1eb0c 316eb8f0d23839ec4daffd954076b5a0a8fa4945 e6902e25ff0bab01b18845e886cd0d98d18ad5f1
-$ git merge-base --is-ancestor upstream/main db9e58b ; echo $?
+$ git rev-list --parents -n1 HEAD
+39a16f6adda42e52b118086c7fa1f1afa9df5682 3d541733a4602688f2499e4434208e9d9dd174a0 5b5b5c1ccea5370026c6072f5fc7d813aa9a5e11
+$ git merge-base --is-ancestor upstream/main HEAD ; echo $?
 0
+$ git log -1 --format=%s
+Merge upstream/main (5b5b5c1) into the fnOS fork
 ```
 
-- 合并提交 `db9e58b` 两个父分别是**我们上一版发布提交 `316eb8f`**与 **`upstream/main` = `e6902e2`**；`upstream/main` 确实是它的祖先。
+- 断言**不写死 SHA**：从 `HEAD` 读父，要求「HEAD 是合并提交（恰好两个父）」+「第二父 == `upstream/main`」+
+  「`upstream/main` 是 HEAD 的祖先」，浅克隆里查不到历史对象就 `gate` 成 SKIP（绝不由「查不到」变成红）。
+  当前实测 = `39a16f6`，父 `3d54173`（我们上一版发布提交）与 `5b5b5c1`（= `upstream/main`，Phase F 那次合并的
+  `e6902e2` 的后继）。Phase F 当时的合并提交是 `db9e58b`（父 `316eb8f` + `e6902e2`）——只作历史对照，套件不依赖它。
 - 飞牛层与 FnDepot 件全部在位（`fnos/manifest`、`scripts/build-fpk.sh`、`scripts/verify-fpk.sh`、
   `.github/workflows/{build-fpk,sync-upstream}.yml`、`wb_export.py`、`fnpack.json`、`fndepot/{ICON.PNG,README.md}`）。
 - 上游新增文件也在（`tests/_test_dashboard_cache_headers.py`、`wb_pricing.py`、`wb_modelsdev.py`、`wb_probes.py`、`wb_identity.py`、
@@ -76,7 +103,7 @@ $ git merge-base --is-ancestor upstream/main db9e58b ; echo $?
 - 上游 workflow 里**只有 `tests.yml` 被改了内容**（唯一有记录的例外：`tags: ["v*"]` → `tags: ["v*", "fnos-*"]`，
   并给版本断言加 `fnos-*` 分支）。`build-fpk.yml` / `sync-upstream.yml` 是纯新增（上游没有这两个文件）。
 - 合并没有留下三方冲突标记：`git grep -n -E '^<<<<<<< '` / `'^>>>>>>> '` / `'^=======$'` 三个模式在全仓**都没有命中**
-  （合并提交的标题也写明是 `Merge upstream/main (v1.6.19 + 34 commits) into the fnOS fork`）。
+  （当前合并提交的标题 = `Merge upstream/main (5b5b5c1) into the fnOS fork`）。
 - 登记项：**R18**（见 §3）。
 
 ### 2.2 版本与 tag 契约（E13 = 37/0/0）
@@ -115,7 +142,7 @@ $ git merge-base --is-ancestor upstream/main db9e58b ; echo $?
 - 如实说明：这套修复**还没有在真实 GitHub 上跑过一次**（`docs/phase-f-delivery.md` §2.2 自己也这么写）。
   我只能证明「代码形状与行为符合方案」，不能证明「下一次 cron 会绿」——列为 §4 未验证第 1 条。
 
-### 2.4 FnDepot 源（E14 = 26/0/0，含 2 条登记）
+### 2.4 FnDepot 源（E14 = 31/0/0，含 2 条登记）
 
 - 结构：`schema_version` 是字符串 `"2"`；`source_info.name/author` 非空；`apps` 的键**恰好等于**
   `fnos/manifest` 的 `appname`（`workbuddy2api`，规范硬要求「应用键名与 FPK manifest 的 appname 完全一致」）；
@@ -129,8 +156,10 @@ $ git merge-base --is-ancestor upstream/main db9e58b ; echo $?
   `parse_and_fingerprint` → `True`、names `['workbuddy2api']`、sigs `['workbuddy2api|1.6.19']`、`v2`；
   `validate_v2_app('workbuddy2api')` → `True`；`is_forbidden_identity` 对 author/maintainer/distributor 全 `False`。
 - 我另外独立重跑了 credits-engine 的 `tests/_test_fndepot_source.py`（388 行）：rc=0、`FAIL=0`、`PASS>=30`。
-- **R16（登记，须发布前回填）**：`size` 还是 `0`、`sha256` 还是 64 个 `0`，而真实包是 601800 字节 /
-  `c482c9fc…f89f0e`。中心把它标为「建议项」，但下载器要靠它校验完整性 ⇒ 建议把回填做成发布步骤的一环。
+- **R16（已关闭）**：`fnpack.json` 的 `size`/`sha256` 曾是占位（`0` / 64 个 `0`），现已按**已发布资产**回填为
+  `577842` / `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`，`download_url` 指向 Release
+  `fnos-1.6.19` 的资产（release id `408987082`），E14 用 Releases API 独立复核过。
+  **注意**：不能回填成本机 dist 新包的 `577330` / `71edade7…`（载荷相同、外壳不同）。
 - **R15（登记，结论更正）**：方案书/交付说明里「现有仓库本身就够格被召回」的**方向对，但在 push 之前不成立**，
   详见 §3。
 
@@ -168,27 +197,38 @@ $ git merge-base --is-ancestor upstream/main db9e58b ; echo $?
   断言不外泄 `NaN`/`Infinity`/`undefined`；0 token → `—`，0 积分 → `0`，42 积分 / 2M tokens → 21。
 - 表头 `每 M tokens 积分` 与汇总行都在（与 §2.11 的交付说明一致性一起看）。
 
-### 2.8 包与交付纪律（E5 = 56/0/0，E8 = 14/0/2，E12 = 13/0/0）
+### 2.8 包与交付纪律（E5 = 60/0/0，E8 = 15/0/2，E12 = 13/0/0）
 
 ```
 $ sha256sum dist/WorkBuddy2API-Hub_1.6.19_all.fpk   # 与旁置 .sha256 一致
-c482c9fca2032d2aeee9e54b2dedc37139de9c669be883e85b18ce7d1ff89f0e  WorkBuddy2API-Hub_1.6.19_all.fpk
-$ ls -l dist/WorkBuddy2API-Hub_1.6.19_all.fpk
-601800 字节
+71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98  WorkBuddy2API-Hub_1.6.19_all.fpk
+$ stat -c %s dist/WorkBuddy2API-Hub_1.6.19_all.fpk
+577330
 $ bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk | tail -2
-==> 70 passed, 0 failed
+==> 69 passed, 1 failed
     the package behaves; only a real NAS can test the app store itself.
 ```
 
-- 包名、manifest（`appname=workbuddy2api`、`version=1.6.19`、`platform=all`、`service_port=8788`、
-  `checksum = be761a0f2715cd903edcf8e88d4198f9` == md5(包内 `app.tgz`)）、`ui/config`、payload 里 `server/` 下**全部 52 个文件**
-  与仓库**逐字节一致**（不是抽查：断言从 `app.tgz` 枚举出的每个 `server/**` 再逐个比对），
-  包内 payload 共 60 条（52 server + 5 ui + 3 config），且不含 `accounts/`/`usage/`/`docs/`/`tests/`/`dist/`/`build/`/`scripts/`/`fnos/`/`.git/`。
-- verify-fpk 的 70 条我独立跑过一遍（不是采信 packager 的数字），并且判据是**状态感知**的：
-  包版本 `1.6.19` == 本树派生的三段版本（`1.6.19-alpha44` 的 base），0 failed 就该是 0 failed。
-- 设备侧（只读）：设备 `/vol1/@appcenter/workbuddy2api/server/**` 与发布的 **Phase E 1.6.17.1 包 payload**逐文件 md5 一致；
-  设备 `wb_proxy.py` 的版本串与那个包 payload 里的相同；设备版本（1.6.17）不新于本树要交付的版本；
-  数据目录只读检查通过。**我没有对设备做任何写操作**，也**不用 mtime 判设备状态**（服务在跑、目录会一直被写）。
+- **包必须对着「构建它的那个提交」验**（task-27 的核心改动）：由 `fnos-1.6.19` tag 解析出提交 `26c2bcc`
+  （HEAD 已前移 24 个提交），再用 `git show 26c2bcc:<path>` 与包 payload 逐字节比 —— 断言把 `app.tgz` 里枚举出的
+  **每个文件**都比一遍（不是抽查），payload 共 **40 个文件（35 server + 3 ui + 2 config）**、**0 个 `__pycache__`/`*.pyc`**
+  （R19 已修）；`ui/images/{64,256}.png` 对应仓库的 `fnos/ICON.PNG`/`ICON_256.PNG`。
+- manifest：`appname=workbuddy2api`、`version=1.6.19`、`platform=all`、`service_port=8788`、
+  `checksum = 27d6795c7ba2a4db89f1e82fabef6ef0` == md5(包内 `app.tgz`)；包内不含
+  `accounts/`/`usage/`/`docs/`/`tests/`/`dist/`/`build/`/`scripts/`/`fnos/`/`.git/`。
+- `verify-fpk.sh` 我在**两个环境**都独立跑过（不是采信 packager 的数字）：**发布 tag 的干净检出**上
+  `71 passed / 0 failed`；**前移了 24 个提交的工作树**上 `69 passed / 1 failed`（唯一失败
+  `every packaged file is byte-identical to the tree`）。同一命令两个数字都不是产品缺陷，见 §5.2。
+- **与已发布资产的关系**：`fnos-1.6.19` Release 的资产是 577842 B / `3d341706…`，其 payload 与本机新包**逐文件相同**
+  （E14 用 Releases API 独立复核；登记项「本机包比已发布资产多出的文件」实测 = 0 个）。
+- 设备侧（只读、**状态感知**）：锚是**设备自报的 manifest 版本**（实测 `1.6.19`），不是本套件挑的版本 ——
+  实测设备 `server/**` 的 **35 个源文件**与该版本包 payload 逐字节一致（**单向包含**：允许设备多出 `__pycache__`/`*.pyc`，
+  实测 23 个 = 3 个 R19 痕迹 + 20 个运行时生成），设备 `wb_proxy.py` 的 banner 与包 payload 的相同，
+  设备版本 `1.6.19` 不新于本仓最后一个发布版本，数据目录只读检查通过。**我没有对设备做任何写操作**，
+  也**不用 mtime 判设备状态**（服务在跑、目录会一直被写）。
+- 设备 provenance：设备 manifest `checksum = be761a0f2715cd903edcf8e88d4198f9` 在 `dist/` 里**没有**对应产物
+  （现存 1.6.17.1 / 1.6.19 / 1.6.10.13 / 1.6.10.2 的 checksum 都对不上）⇒ 设备装的是**已被重建覆盖**的那一版
+  1.6.19 本地包 —— 是**用户自己**装的（Lead 确认，见 §3 R23）。
 - 反向取证（E12，Phase E 遗留的错包）：Release 上那份 `WorkBuddy2API-Hub_1.6.10.3_all.fpk` 与 Phase E 1.6.17.1 包
   payload 逐文件一致，只有 `manifest.version` 与 `checksum` 不同 ⇒ 包内部自洽、完整性断言抓不到版本错。
   这条依然是「已发布资产是错包」的硬证据（R8）。
@@ -198,16 +238,16 @@ $ bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.6.19_all.fpk | tail -2
 ```
 $ python3 tests/run_all.py --jobs 4
   ...
-  [PASS] _test_phase_e_verify.py   PASS=334 FAIL=0 SKIP=3   53.4s
-  121 passed, 0 failed, 0 skipped  (/vol2/1000/AgentWork/2api/workbuddy2api-hub)
-  total 57.7s with --jobs 4
+  122 passed, 0 failed, 0 skipped  (/vol2/1000/AgentWork/2api/workbuddy2api-hub)
+  total 85.2s with --jobs 4
 ```
 
-- 树里套件数（91 Python + 30 JS = 121）与 `README.md:134` 写的「121 个套件：91 个 Python + 30 个 JS」**逐字一致**。
+- 树里套件数（92 Python + 30 JS = 122）与 `README.md:134` 写的「122 个套件：92 个 Python + 30 个 JS」**逐字一致**；
+  本轮 `122 passed + 0 failed` 全绿（交付说明回填前是 `121 passed / 1 failed`，唯一红就是本套件的 R17/R23 四条）。
 - e1 的三条自指断言已删（「passed == 树里套件数」「0 failed」「退出码 0」），改成「除本套件外无失败」+
   「本套件记为 PASS」+「退出码 0 或本套件是唯一红」；嵌套 run_all 时自我 `skip` 防递归。
 - 交付说明 §4.1 记的 `120 passed / 1 failed` 是**我改写前的旧数**（唯一红是我自己钉 Phase E 旧契约的套件）；
-  现在全套 121/0/0 —— 那条红属 E5/F5 的正常交接，不是产品缺陷。
+  那条红属 E5/F5 的正常交接，不是产品缺陷。改写后的三轮分别是 `121/1`（回填前）、`122/0`（回填后）。
 
 ### 2.10 平台形状（E10 = 8/0/0，E11 = 11/0/0）
 
@@ -220,30 +260,85 @@ $ python3 tests/run_all.py --jobs 4
   `/vol1/**` 先判目录存在；`tar`/`bash`/`git` 各有 gate；所有文本读取都显式 `encoding`（无 cp1252 打印陷阱）；
   路径比较统一 `.replace(os.sep, "/")`。
 
-### 2.11 交付说明与方案书一致性（E15 = 21/0/0）
+### 2.11 交付说明与方案书一致性（E15 = 22/0/0）
 
-- `docs/phase-f-delivery.md` 的包指纹与磁盘产物**逐项对上**：包名、601800 字节、sha256 `c482c9fc…`、
-  manifest `checksum` == 包内 `app.tgz` 的 md5、版本 `1.6.19`、`appname=workbuddy2api`。
-- 合并事实与 git 对上：`db9e58b` 的两个父、`upstream/main = e6902e2`、三条 cron（`17 3`/`23 9`/`41 15`）、
-  五个真缺陷的关键词都在文档里。
-- 设备声明：文档写「设备上跑的还是 1.6.17.1」，设备上的版本串与 Phase E 包 payload 里的相同 ⇒ 一致。
-- **R17（登记）**：交付说明 §4.2「独立终验」还是占位（「待 verifier 的 `docs/phase-f-verify.md` 收口后填」）——
-  本文件就是那份输入，回填由 Lead 在交付前完成。
+- `docs/phase-f-delivery.md` 的包指纹与磁盘产物**逐项对上**（包名、字节数、sha256、
+  manifest `checksum` == 包内 `app.tgz` 的 md5、版本 `1.6.19`、`appname=workbuddy2api`）。**回填后一致**
+  （`577330 B / 71edade7… / 27d6795c…`）；回填前它是红的（文档还写着重建前的 `601800 / c482c9fc… / be761a0f…`），
+  这就是 R17。
+- 合并事实与 git 对上（**动态，不写死 SHA**）：HEAD 历史里最近一次合并正好两个父、第二父 == `upstream/main`、
+  文档记录的上游 head 是本树历史的提交、三条 cron（`17 3`/`23 9`/`41 15`）、五个真缺陷的关键词都在文档里。
+- **设备声明必须与设备一致**（带牙，本轮新增）：正则抓「设备当前装的是 X / 设备上跑的还是 X」，X ≠ 设备实测版本即红。
+  **回填后一致**（设备 1.6.19 = 文档 1.6.19）；回填前文档写 `1.6.17.1`（第 17、103 行）→ 红，这就是 R23。
+  设备版本是我在真机上只读读出来的，不是抄文档。
+- **R17/R23 已关闭**：Lead 已回填包指纹、§4.2 与设备状态（并注明设备上的 1.6.19 是**用户自己**装的、
+  我方对设备只有只读核查）。回填前这四条是红的、回填后 22/0/0 —— 红→绿只由文档内容决定，这本身也是一条敏感性证明。
 - 方案书 `docs/phase-f-plan.md` 里 FnDepot 那段已按实测更正，我核对过：它写了「`generate_sources.py:344` 只有仓库搜索那一支」
   与「`:352-356` 两支没有任何名字过滤」，并明确「不必须新建仓库」。我另外**直接读生成器源码**验证了这条更正：
   名字过滤在 `:344`（只有一处），代码搜索的两个 query 在 `:353` 与 `:356`，且这两行**都不带** `full_name` 过滤。
 
+### 2.12 三环境 FAIL=0（task-27 的硬要求）
+
+- **(a) 开发树**：本套件 `PASS=351 / FAIL=0 / SKIP=3`，exit 0（`/tmp/wb-f9-full4.log`）；
+  `python3 tests/run_all.py --jobs 4` = **`122 passed / 0 failed / 0 skipped`（85.2s，exit 0）**。
+  交付说明回填前的那一轮是 `340 / 6 / 3` 与 `121 passed / 1 failed`（唯一红 = 本套件），差异全部来自 R17/R23 的文字。
+- **(b) depth-1 浅克隆（CI 形状）**：`git clone --quiet --depth 1 file://$PWD /tmp/wb-f9-ci3`（**必须用 `file://`**，
+  普通本地路径会忽略 `--depth` 而把整段历史拷过来，那样预演什么都证明不了），再把套件复制进去：用**已提交**的树跑
+  = `PASS=249 / FAIL=4 / SKIP=15`（唯一根因是**提交里**的交付说明还写着设备 1.6.17.1，另 3 条为派生）；把**回填后**的
+  交付说明放进同一个克隆再跑 = **`PASS=253 / FAIL=0 / SKIP=15`，exit 0**（`/tmp/wb-f9-ci3b.log`），
+  ⇒ 只要 Lead 提交回填，CI 就是绿的。15 条 SKIP 全部是 `gate()` 且都写了理由：没有 `dist/` 包（E5/E12/E15）、
+  depth-1 看不到历史对象（e8 的合并提交、e15 的合并事实与上游 head）、推不出版本（e8 的设备新旧比较）、
+  `55dfad2` 不可达（e13 的修复前红复现）、没有 `upstream/main`（e16 的祖先关系与上游 diff）。
+  分段：e1 10、e2 14、e2b 6、e3 33、e4 26、e5 0/0/1、e6 3、e7 10、e8 10/0/4、e9 35、e10 8、e11 11、
+  e12 0/0/1、e13 34/0/1、e14 30/0/1、e15 11/0/4、e16 7/0/3。
+- **(c) Windows 形状**：本机不是 Windows，用 `PLATFORM_SIM_CUSTOMIZE`（sitecustomize 在**整棵进程树**里删掉
+  `socket.AF_UNIX`、`socketserver` 的六个 `Unix*` 类与 `os.geteuid`）→ e10 在子进程里 `runpy` 跑整套：**8 / 0 / 0**；
+  e11 另跑一个非 root 子进程预演，要求 `e2b` 只 SKIP 不 FAIL（这正是 R12 在 windows-latest 上假红过的地方）。
+  真 Windows 以 CI 腿为准（§4）。
+- **为什么 CI 之前三平台全红（我独立复现出的两条根因）**：① `actions/checkout` 是 depth-1，问历史对象的断言
+  （`git merge-base --is-ancestor`、`git cat-file -t <tag>`）在浅克隆里根本问不出答案，必须 `gate()/SKIP`；
+  ② **发布 tag `fnos-1.6.19` 指向的 `26c2bcc` 是单父提交**（`26c2bcc db9e58b`，标题
+  `test(verify): rewrite the fnOS gates for the three-part version and FnDepot`），而 HEAD `39a16f6` 才是合并——
+  所以「HEAD 是合并提交」这条在任何 tag 检出下都是假的。两条都改成「HEAD 历史里最近一次合并」+ `have_object()` 前置后，
+  浅克隆里 FAIL=0。
+
+### 2.13 敏感性证明（改坏输入必红）与「发布后稳态」
+
+三条**故意改坏**的实验，证明这些断言不是碰巧绿的：
+
+| # | 改坏什么 | 命令 | 结果 |
+|---|---|---|---|
+| 1 | 把包副本里 `server/wb_export.py` 第 200 字节翻一位、重算 manifest checksum（`/tmp/wb-sens/WorkBuddy2API-Hub_1.6.19_all.fpk`） | `WB_PKG=/tmp/wb-sens/WorkBuddy2API-Hub_1.6.19_all.fpk python3 -u tests/_test_phase_e_verify.py e5` | **58 / 2**：`包载荷与 fnos-1.6.19 的树逐字节一致（40 个文件） -> ['server/wb_export.py (payload 9794a80a vs 26c2bcce… 的树)']`、`工作树上 verify-fpk 的失败数符合预期（1） -> []` |
+| 2 | 已发布资产副本尾部多 1 字节（`/tmp/wb-sens/badcopy.fpk`） | `WB_PUBLISHED_ASSET=/tmp/wb-sens/badcopy.fpk python3 -u tests/_test_phase_e_verify.py e14` | **30 / 1**：`已发布资产副本的字节数与 sha256 与报告常量一致 -> (577843, '1773d865ee2fab76')` |
+| 3 | 删掉 packager 套件里第 148 行调用点的 `cwd=`（`/tmp/wb-sens/pipeline_nocwd.py`） | `WB_RELEASE_PIPELINE_SUITE=/tmp/wb-sens/pipeline_nocwd.py python3 -u tests/_test_phase_e_verify.py e13` | **35 / 2**：`每个 subprocess.run 调用点都传了 cwd= -> {'call_sites': 5, 'sites_without_cwd': [148]}` |
+
+第 3 条还配了反证：只在注释里写 `cwd=` 的副本 `/tmp/wb-sens/pipeline_comment.py` → **该 check 仍 PASS**
+（而旧的 `count("subprocess.run(") == count("cwd=")` 计数门在同一份文件上会算成 `5 != 6` → 假红）。
+`tests/_test_release_pipeline.py` 里实测 5 个调用点（行 97/148/157/425/477）全部显式传了 `cwd=`。
+
+**「发布后稳态」的定义**（套件按它决定「真跑」还是「SKIP」）：HEAD 恰好是某个 `fnos-X.Y.Z` 的提交、
+`dist/` 里有该版本的包、设备装的就是那一版 —— 此时 E5 的「包载荷 == 该 tag 的树」必须 0 drift、
+E5 在 tag 检出上跑 `verify-fpk` 必须 0 failed、E8 的「设备 `server/**` == 该包 payload」必须逐字节相等、
+E14 的 fnpack 必须等于已发布资产。任何一环不在位（无 `dist/`、浅克隆、设备版本对不上、文档没回填）→
+`gate()`/SKIP 并写明理由，**绝不 FAIL**，也**绝不用别的版本的包冒充锚**。
+
 ## §3 缺陷与登记项
 
-本阶段**没有发现任何未修复的产品缺陷**（FAIL=0）。以下 4 条是登记项（`register()`，不计 PASS/FAIL），
-按「Lead 交付前必须处理」排序：
+本阶段**没有发现任何未修复的产品缺陷**：当前开发树上本套件 `351 / 0 / 3`、`run_all --jobs 4` 122 passed / 0 failed。
+以下 10 条是登记项（`register()`，不计 PASS/FAIL），按「Lead 交付前必须处理」排序：
 
 | 编号 | 事项 | 性质 | 归属 / 建议 |
 |---|---|---|---|
-| **R16** | `fnpack.json` 的 `size=0`、`sha256=000…` 是占位 | 发布前必须回填 | 用 `dist/WorkBuddy2API-Hub_1.6.19_all.fpk` 的 601800 与 `c482c9fc…` 回填；建议做成发布步骤的一环 |
-| **R17** | 交付说明 §4.2「独立终验」仍是占位 | 交付前必须回填 | Lead：把本报告 §0 的数字塞进去 |
+| **R17** | 交付说明第 11/90 行的包指纹曾指着重建前的包（601800 / `c482c9fc…` / `be761a0f…`），§4.2 曾占位 | **已修**（Lead 回填） | 现为 577330 B / `71edade7…` / checksum `27d6795c…` + 本报告 §0 的数字；e15 复测 22/0/0 |
+| **R23** | 交付说明曾写「设备当前装的是 1.6.17.1」「设备一个字没动」，但设备实际是 **1.6.19**（manifest checksum `be761a0f…`，20:18 装、20:19 起服务），且是**用户自己**装的 | **已修**（Lead 回填 §1/§5，含「我方只做只读核查」） | 旧文两句在「发布前」是真的、现已过时；新增的带牙断言（e15）复测通过 —— 这正是它该抓的东西 |
+| **R16** | `fnpack.json` 的 `size`/`sha256` 曾是占位 | **已关闭** | 已按**已发布资产**回填 `577842` / `3d341706…`；E14 用 Releases API 独立复核（release `408987082`）。**不要**回填成本机 dist 的 577330 |
+| **R19** | 嵌套 `__pycache__/*.pyc` 进包（本机构建 ≠ CI 构建） | **已修**（packager task-28） | `scripts/build-fpk.sh` +2 行：`--exclude='__pycache__'`（:230）与 `--exclude='*.pyc'`（:231）；新包载荷 0 个字节码、与已发布资产逐文件相同 |
+| **R20** | 验收套件必须「状态感知 + 浅克隆安全」 | 纪律（归我） | §2.12/§2.13 就是这条的定义；CI 上这套件只在 `26c2bcc` 才进树而 CI 是 depth-1，所以「CI 红 ≠ 包坏」，要先看是哪条 gate |
+| **R21** | `build-fpk.sh` 的排除式与 `.gitignore` 漂移（`logs/`、`suite-logs/`、`.pytest_cache/`、`wrt/ipk/`、`wrt/apk/`、`*.pyo`…） | **本阶段不修** | 根治 = 暂存源改成 `git ls-files`；本轮登记 |
+| **R22** | `app.tgz` 的 md5 随目录 mtime 变、字节级不可复现（同一 tag 两次构建 checksum 不同） | **本阶段不修** | 口径 = 载荷内容 + 已发布资产 sha256（E5/E12/E14 都按这个判） |
 | **R15** | 「现有仓库本身够格被召回」在 push 之前不成立 | 结论更正（文档与实际不符） | 上架说明改成「push 之后才可被代码搜索索引」 |
 | **R18** | `docker-publish.yml` / `release-checksums.yml` 在我们树里是 100755（上游 100644） | 噪音（内容一字未改） | 交付前 `chmod 644` 清掉；来源是 Phase E 的 `55dfad2`/`9dff35f` |
+| **R24** | 设备面板仍是默认密码（`panel_password_is_default: true`） | 设备配置，不是代码缺陷 | 交付说明里提一句；网关 socket 免密与它无关 |
 
 **R15 的完整证据**（这条是 Lead 主动要求我独立复核的，我复核的结论是「方向对、但前提缺一句」）：
 
@@ -262,27 +357,45 @@ $ python3 tests/run_all.py --jobs 4
 
 ### Lead 交付前必须处理的事（清单）
 
-1. **回填 `fnpack.json`**：`size` → `601800`、`sha256` → `c482c9fca2032d2aeee9e54b2dedc37139de9c669be883e85b18ce7d1ff89f0e`（R16）。
-   顺序很重要：**先把要发布的那个包定死再回填**——包一旦重建，这两个值立刻过期。
-2. **回填 `docs/phase-f-delivery.md` §4.2**：本报告 §0 的数字是 `PASS=334 / FAIL=0 / SKIP=3`、
-   `run_all --jobs 4` = `121 passed / 0 failed / 0 skipped`、`verify-fpk` = `70 passed / 0 failed`；
-   加上登记项 R15–R18 与 §4 的 6 条未验证（R17）。
+1. **`fnpack.json` 已回填正确，别再动**（R16 关闭）：`size = 577842`、`sha256 = 3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`，
+   对应的是**已发布的 Release 资产**，不是本机 `dist/` 里的新包（577330 / `71edade7…`）——
+   两者载荷逐文件相同、只差 gzip 外壳与产物时间，**不要**用本机包的数字覆盖。
+2. **回填 `docs/phase-f-delivery.md`**（R17 + R23）——**Lead 已完成**：包指纹改为 `577330` 字节 /
+   sha256 `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98` / checksum `27d6795c7ba2a4db89f1e82fabef6ef0`，
+   设备状态改为 **1.6.19 且由用户自装**，并注明我方只做只读核查。**注意**：回填只存在于工作树，**还没提交** ——
+   提交之前 depth-1 克隆/CI 看到的仍是旧文（我实测：红→绿只由这一份文件决定，见 §2.12(b)）。
 3. **改上架说明的口径**（R15）：写成「**push 之后**才具备被代码搜索索引的条件；作为上游 fork，
    一旦上游也上架同签名文件，我们会按查重规则判负」。
 4. **清掉可执行位噪音**（R18）：`chmod 644 .github/workflows/docker-publish.yml .github/workflows/release-checksums.yml`。
 5. **决定并执行外部动作**（只有用户能定）：push → 打 annotated tag `fnos-1.6.19` → 发 Release。
    Release 资产既是 `download_url` 的目标，也是 FnDepot 收录（中心仓库每天 16:00 UTC 生成 `valid_sources.txt`）的前提。
 6. **仓库 Issues 开关**：同步冲突路径要靠 issue/summary 留痕，而我们的 PAT 改不了 `has_issues`，需要用户在 Settings 里打开。
-7. **告诉用户设备现状**：设备上仍是 1.6.17.1（本次一个字没动），1.6.19 是就地升级。
+7. **设备现状已确认并由 Lead 写进交付说明 §5**（R23）：设备上**已经是 1.6.19**，而且是**用户自己装的**——
+   设备 manifest 的 `checksum = be761a0f2715cd903edcf8e88d4198f9` 正是 packager 重建前那一版本地包
+   （Lead 留证 `/tmp/wb-r19-old-dist-1.6.19.fpk`，601800 B / sha256 `c482c9fc…`）的 checksum，而那份包就是
+   Phase F 交付答复里 `present` 给用户的两份文件之一；用户随后「测试完成」时装上并跑起来（`server/**` mtime 20:18、
+   进程 20:19 起）。**我方对设备自始至终只有只读核查**（`ls`/`stat`/`md5sum`/socket 探针），没有 install/upgrade/uninstall。
+   交付说明旧文里「设备当前装的是 1.6.17.1」「设备一个字没动」两句是**当时（发布前）的事实**，现已过时。
+   另记一条（Lead 要求写进 R23）：设备载荷 = **已发布资产载荷的 40 个文件 + 3 个 `server/release/__pycache__/*.cpython-311.pyc`（R19 的字节码）+ 运行时
+   `__pycache__` 目录**，其余逐字节相同 ⇒ e8 的设备比对是**单向包含**（设备必须含包内每个文件的相同 md5，允许设备多出
+   `__pycache__`/`*.pyc`），不是双向集合相等。
 8. **`server/**` 在本次验证窗口内没有被任何人改过**（e5 的逐字节门与 e8 的未提交改动门在看着）。若交付前又有人动了包内文件，
    必须重建包并让我复跑 `e5`/`e12`，才能再说「可以交付」。
+9. **提一句设备默认密码**（R24）：设备 `/panel/status` 报 `panel_password_is_default: true`，直连 8788 即可尝试登录。
 
 ## §4 未验证清单（我做不到，或不在此范围）
 
 1. **真实 GitHub 上的自动并入**：三条 cron 的行为、冲突分支推送、issue/summary 都需要真实跑一次才能确认；
    交付说明自己也写「这套修复还没在真实 GitHub 上跑过一次」。我只能证明代码形状与行为级 fixture。
-2. **真机安装 1.6.19**：包能装、能原地升级、网关免密、主题/单位/说明这几项在 NAS 应用中心里的真实表现，
-   需要在设备上装（Phase F 明确不动设备）。设备现在跑的仍是 1.6.17.1。
+2. **真机安装动作本身**：包在应用中心里能不能装、能不能原地升级、主题/单位/说明在真机浏览器里的观感，
+   要有人**做安装动作**才能看（Phase F 我自己一个字没动设备）。但**运行态**我已用只读探针在设备上验过
+   （§2 里 e6 的 7 条）：设备实际装的是 1.6.19（manifest checksum `be761a0f…`，装于 20:18、服务 20:19 起），
+   免密口径（socket 上 `authenticated: true`、`via_gateway: true`）、挂载前缀（`<base href="/app/workbuddy2api/">`
+   与 `window.__WB_BASE__`/`__WB_VIA_GATEWAY__`）、版本串都成立。脚注：设备装的是**重建前**那版（R23），
+   与最终包差 3 个 `release/__pycache__/*.pyc`（R19 的字节码），载荷其余部分逐字节相同；
+   设备上那份 1.6.19 是**用户自己装的**（Lead 确认，见 §3 R23）。
+   另外 e8 的设备比对是**单向包含**：设备必须含包内每个源文件的相同 md5，允许设备多出 `__pycache__`/`*.pyc`
+   （实测设备上 23 个：3 个本地构建痕迹 + 20 个运行时生成），不是双向集合相等。
 3. **FnDepot 收录**：`valid_sources.txt` 由中心仓库每天 16:00 UTC 生成，收录与否要等它跑一次（且要先 push）；
    `download_url` 指向的 Release 资产要等 push + 打 tag + 发 Release 之后才存在。
 4. **Release/上架动作本身**：本阶段没 push、没打 tag、没发 Release（我也不允许做），这几步只有用户决定后才能做。
@@ -296,8 +409,10 @@ $ python3 tests/run_all.py --jobs 4
    连 `/v1` 也不需要 API key（TCP 直连仍 401 并有提示）。Lead 裁决保持现状，指定原句：
    「API key 仍然保护 TCP 入口；网关 socket 上的面板会话同时放开 `/v1`（`_key_ok()` 首行 `_panel_ok()` 的直接后果），
    属有意设计」。
-2. **`verify-fpk.sh` 的「包就是这棵树构建的」在 HEAD 无 tag 时跳过**：不是漏测，是 tag 门；
-   打上 `fnos-1.6.19` 后同一命令会真跑（70 → 71）。
+2. **`verify-fpk.sh` 的同一命令在不同检出上给出不同结果**（都不是产品缺陷）：在**发布 tag 的检出**
+   （`git worktree add --detach … fnos-1.6.19`）上对已发布包装的是 `71 passed / 0 failed`；在**前移了 24 个提交的
+   工作树**上对同一个新包装的是 `69 passed / 1 failed`，唯一失败是 `every packaged file is byte-identical to the tree`
+   （「包 != 这棵树」），另有「包就是这棵树构建的」因 HEAD 无 tag 而跳过。两个数字我都独立跑过（e5 里状态感知地覆盖两条路径）。
 3. **`create tarball` 的 `checksum` 派生自 app.tgz 的成员 mtime**：所以同一个源树两次构建的 checksum 可能不同，
    而「包内容是否一致」要用 payload 逐字节比对（E5/E12 就是这么做的）。
 4. **设备断言不用 mtime**：用户可能随时安装/升级，服务也在持续写数据目录；e8 只做「逐字节一致 + 数据目录可读」。
@@ -307,12 +422,16 @@ $ python3 tests/run_all.py --jobs 4
 
 | 文件 | 行数 / 字节 | sha256 |
 |---|---|---|
-| `tests/_test_phase_e_verify.py` | 3060 行 | `5f4ffb33c46f9ba29ee1b0448af788300541c088dcc7800a1596aa34e8a60e23` |
-| `dist/WorkBuddy2API-Hub_1.6.19_all.fpk` | 601800 B | `c482c9fca2032d2aeee9e54b2dedc37139de9c669be883e85b18ce7d1ff89f0e` |
+| `tests/_test_phase_e_verify.py` | 3741 行 / 198877 字节 | `636c2faa30fb043ce8e1fde3cfe8a16ed7d140e716fb89aa67f6d9ef863a2056` |
+| `dist/WorkBuddy2API-Hub_1.6.19_all.fpk`（本机重建后） | 577330 B | `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98` |
+| `/tmp/wb-published/WorkBuddy2API-Hub_1.6.19_all.fpk`（已发布资产副本） | 577842 B | `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c` |
 
 - 本报告：`docs/phase-f-verify.md`（自有 sha256 不写在正文里——写进来就会因为这一行立刻失效）。
-- 工作树状态（`git status --porcelain`，HEAD = `db9e58b`）：`M README.md`（Lead 的交付文档）、
-  `M docs/phase-f-plan.md`（Lead 已更正的方案书）、`M tests/_test_phase_e_verify.py`（我的套件）、
-  `?? docs/phase-f-delivery.md`（Lead 的交付说明）。包内文件（`server/**`、`ui/**`、`fnos/**`、`scripts/**`）
-  在这个窗口里**没有被任何人改过**——e5 的逐字节比对与 e8 的未提交改动门就是这条的看门人。
+- 工作树状态（`git status --porcelain`，HEAD = `39a16f6`「Merge upstream/main (5b5b5c1) into the fnOS fork」）：
+  `M docs/phase-f-delivery.md`（Lead 回填 R17/R23，**未提交**）、`M docs/phase-f-version-policy.md`、
+  `M docs/phase-f-verify.md`（本报告）、`M scripts/build-fpk.sh`（packager 的 R19 修复）、
+  `M tests/_test_phase_e_verify.py`（我的套件）、`M tests/_test_release_pipeline.py`（packager 的套件）。
+- **发布 tag**：`fnos-1.6.19`（annotated）→ `26c2bcc`，是 HEAD 的祖先（HEAD 领先 24 个提交）。
+- 包内文件（`server/**`、`ui/**`、`fnos/**`、`scripts/**`）在这个窗口里**没有被任何人改过**——
+  e5 的逐字节比对与 e8 的未提交改动门就是这条的看门人。
 - 我不 `git commit`、不 push、不打 tag、不动设备、不重建包（`dist/`、`build/` 的单写者是 Lead/packager）。
