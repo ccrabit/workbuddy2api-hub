@@ -34,7 +34,12 @@ Design notes (kept from the Phase D suite, same idioms):
 Sections: e1_suites e2_gateway e2_peer_matrix e3_mount e4_credit e5_package
           e6_device e7_hardening e8_delivery e9_cockpit_export
           e10_platform_sim e11_ci_rehearsal e12_released_pkg
-          e13_release_pipeline
+          e13_release_pipeline e14_fndepot_source e15_delivery_docs
+
+Environment knobs: WB_PHASE_E_STRICT (unlanded artefact -> FAIL), WB_PKG /
+WB_PKG_VERSION / WB_PHASE_E_PKG / WB_WRONG_PKG (which .fpk to unpack),
+WB_PHASE_F_MERGE (merge commit to inspect), WB_DASHBOARD_PATH (a frozen
+dashboard.html), WB_E1_NESTED / WB_E10_NESTED (set by the nesting guards).
 """
 import json
 import os
@@ -145,10 +150,44 @@ def is_shallow(cwd=None):
     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
     return rc == 0 and bool(lines) and lines[0] == "true"
 
-#: The final package WP-E3 produces; overridable so the suite can be pointed
-#: at a candidate while the packager iterates.
+def newest_upstream_release(cwd=None):
+    """The newest three-part `vX.Y.Z` tag that is merged into HEAD.
+
+    This is the number the contract in `docs/phase-f-version-policy.md` says a
+    release of this fork carries, computed here rather than read back from
+    `scripts/build-fpk.sh` so the expectation and the thing under test cannot
+    move together.
+    """
+    if not HAS_GIT:
+        return ""
+    rc, out = git_text(["tag", "--merged", "HEAD", "--list", "v*"], cwd=cwd)
+    if rc != 0:
+        return ""
+    tags = [t.strip() for t in out.splitlines()
+            if re.match(r"^v[0-9]+(\.[0-9]+){2}$", t.strip())]
+    if not tags:
+        return ""
+    newest = sorted(tags, key=lambda t: tuple(int(p) for p in t[1:].split(".")))[-1]
+    return newest[1:]
+
+
+#: The version this tree publishes (three components, upstream's own number).
+PKG_VERSION = os.environ.get("WB_PKG_VERSION") or newest_upstream_release()
+
+#: The package WP-F6 hands over; overridable so the suite can be pointed at a
+#: candidate while the packager iterates.
 PKG_PATH = os.environ.get("WB_PKG") or os.path.join(
-    ROOT, "dist", "WorkBuddy2API-Hub_1.6.17.1_all.fpk")
+    ROOT, "dist", "WorkBuddy2API-Hub_%s_all.fpk" % (PKG_VERSION or "1.6.19"))
+
+#: Phase E's release package. It is the anchor for two cross-state checks: the
+#: box runs that release (Phase F does not install anything), and the mistagged
+#: Release asset carried that package's payload byte for byte.
+PHASE_E_VERSION = "1.6.17.1"
+PHASE_E_PKG = os.environ.get("WB_PHASE_E_PKG") or os.path.join(
+    ROOT, "dist", "WorkBuddy2API-Hub_%s_all.fpk" % PHASE_E_VERSION)
+
+#: The merge commit WP-F6 assembled (override for a re-run on another tree).
+PHASE_F_MERGE = os.environ.get("WB_PHASE_F_MERGE") or "db9e58b"
 
 BASE_PREFIX = "/app/workbuddy2api"
 PANEL_PASSWORD = "phase-e-verify-pw"
@@ -778,9 +817,23 @@ def e3_mount():
         check("直连 TCP GET / -> 200", status == 200, status)
         check("直连时不注 <base href>（真标签；注释里的字样不算）",
               not re.search(r"""<base\s+href\s*=\s*["'][^"']*["']""", body3))
-        check('直连时 window.__WB_BASE__=""', 'window.__WB_BASE__=""' in body3)
-        check("直连时 window.__WB_VIA_GATEWAY__=false",
-              "window.__WB_VIA_GATEWAY__=false" in body3)
+        check("直连时不注入挂载脚本（无 <script>window.__WB_BASE__= 标记）",
+              "<script>window.__WB_BASE__=" not in body3)
+        check("直连时不注入 window.__WB_VIA_GATEWAY__ / __WB_GATEWAY_USER__",
+              "window.__WB_VIA_GATEWAY__=" not in body3
+              and "window.__WB_GATEWAY_USER__=" not in body3)
+        # Phase F contract change (docs/phase-f-plan.md §2.2.1): a plain TCP
+        # visitor has to get upstream's byte-for-byte contract - the file plus
+        # this run's language replacement - because upstream's cache-header
+        # suite asserts exactly that. Anything extra injected here is a
+        # different byte string and breaks it.
+        lang = re.search(r'data-ui-language="([^"]*)"', body3)
+        lang = lang.group(1) if lang else ""
+        expected = dashboard_source().replace(
+            'data-ui-language="__WB_UI_LANGUAGE__"',
+            'data-ui-language="%s"' % lang)
+        check("直连 GET / == dashboard.html + 本次语言替换（逐字节，上游缓存头契约）",
+              body3 == expected, (len(body3), len(expected), lang))
     finally:
         panel.stop()
 
@@ -911,10 +964,20 @@ def e4_credit():
     prev_log = getattr(P, "USAGE_LOG", None)
     try:
         P.USAGE_LOG = log
-        all_summary = P._new_analytics_stat()
-        window_summary = P._new_analytics_stat()
-        acct_map, model_map = {}, {}
-        P._scan_usage_log(all_summary, window_summary, acct_map, model_map)
+        # The one-shot scanner this used to call (`_scan_usage_log`) is gone:
+        # upstream replaced it with `_fold_usage_analytics(row, realm, maps,
+        # half)`, which folds one parsed row into one half of the payload. The
+        # same fixture rows go through the new entry point and every number the
+        # old assertions pinned is still pinned.
+        all_maps = P._new_analytics_maps()
+        win_maps = P._new_analytics_maps()
+        for row in rows:
+            P._fold_usage_analytics(row, "", all_maps, P._ANALYTICS_ALL)
+            P._fold_usage_analytics(row, "", win_maps, P._ANALYTICS_WINDOW)
+        all_summary = all_maps["summary"]
+        window_summary = win_maps["summary"]
+        model_map = all_maps["models"]
+        win_model_map = win_maps["models"]
         glm = model_map.get("glm-5.3") or {}
         glm_all = glm.get("all_time") or {}
         note("model_map 键", sorted(model_map))
@@ -922,9 +985,10 @@ def e4_credit():
                                   if k in ("requests", "errors", "total_tokens", "credit")})
         check("逐模型统计带 credit（glm-5.3 all_time.credit == 84）",
               abs((glm_all.get("credit") or 0) - 84.0) < 1e-6, glm_all.get("credit"))
+        glm_win = ((win_model_map.get("glm-5.3") or {}).get("window") or {})
         check("逐模型统计带 credit（window.credit == 84）",
-              abs(((glm.get("window") or {}).get("credit") or 0) - 84.0) < 1e-6,
-              (glm.get("window") or {}).get("credit"))
+              abs((glm_win.get("credit") or 0) - 84.0) < 1e-6,
+              glm_win.get("credit"))
         check("模型维度 tokens 正确（4,000,000）",
               glm_all.get("total_tokens") == 4_000_000, glm_all.get("total_tokens"))
         check("完成数 requests == 3", glm_all.get("requests") == 3,
@@ -950,7 +1014,7 @@ def e4_credit():
               abs((window_summary.get("credit") or 0) - 92.0) < 1e-6,
               window_summary.get("credit"))
     except Exception as exc:  # noqa: BLE001 - report, do not crash the suite
-        check("_scan_usage_log 可被调用并给出 credit", False, repr(exc))
+        check("_fold_usage_analytics 可被调用并给出 credit", False, repr(exc))
     finally:
         P.USAGE_LOG = prev_log
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1134,8 +1198,10 @@ def e5_package():
     note("包", os.path.basename(PKG_PATH))
     note("字节数", os.path.getsize(PKG_PATH))
     note("sha256", sha256_file(PKG_PATH))
-    check("包名 = WorkBuddy2API-Hub_1.6.17.1_all.fpk",
-          os.path.basename(PKG_PATH) == "WorkBuddy2API-Hub_1.6.17.1_all.fpk",
+    expected_name = ("WorkBuddy2API-Hub_%s_all.fpk" % PKG_VERSION) if PKG_VERSION else ""
+    note("本树发布版本（上游最新三段 release tag）", PKG_VERSION)
+    check("包名 = WorkBuddy2API-Hub_%s_all.fpk" % (PKG_VERSION or "<版本>"),
+          bool(expected_name) and os.path.basename(PKG_PATH) == expected_name,
           os.path.basename(PKG_PATH))
     if not HAS_TAR:
         gate("tar 可用（解包 fpk 并与仓库逐字节比对的必要条件）", "本机没有 tar")
@@ -1160,8 +1226,9 @@ def e5_package():
                                "service_port", "checksum")})
             check("manifest appname 仍是 workbuddy2api",
                   fields.get("appname") == "workbuddy2api", fields.get("appname"))
-            check("manifest version = 1.6.17.1",
-                  fields.get("version") == "1.6.17.1", fields.get("version"))
+            check("manifest version = %s（三段，无 -alpha 后缀：这是发布件）" % PKG_VERSION,
+                  bool(PKG_VERSION) and fields.get("version") == PKG_VERSION,
+                  fields.get("version"))
             shown = " ".join(str(fields.get(k, "")) for k in
                              ("display_name", "title", "name", "desc"))
             check("manifest/界面显示名含 WorkBuddy2API-Hub",
@@ -1294,23 +1361,20 @@ def e5_package():
         note("包版本 vs 本树派生版本",
              {"package": pkg_version, "deriving": derived, "same_tree": same_tree,
               "failed_names": named})
-        if same_tree:
-            check("verify-fpk: 0 failed（HEAD 仍在包对应的发布 tag 上）", n_fail == 0,
-                  "%s | failed=%s" % (match.group(0), named))
-        else:
-            # The tree has moved past the tag, so exactly one assertion may object
-            # - the one that compares the package with what this tree builds - and
-            # it must object *by name*. Every other assertion still has to pass.
-            check("verify-fpk 只反对「包版本 != 本树派生版本」这一条（树已越过发布 tag）",
-                  n_fail == 1 and named == ["the package is what this tree builds"]
-                  and bool(pkg_version) and derived != pkg_version,
-                  "%s | %s | package=%s deriving=%s" % (match.group(0), named,
-                                                        pkg_version, derived))
-            check("verify-fpk 的其余断言仍成规模（不是脚本半途夭折）", n_pass >= 60,
-                  n_pass)
-    check("verify-fpk 退出码 0，或仅因树越过 tag 而 1",
-          verify.returncode == 0 or (verify.returncode == 1 and not same_tree),
-          verify.returncode)
+        # verify-fpk.sh ends with "the package is what this tree builds": it
+        # compares the packaged version with the version this checkout derives.
+        # Under the Phase F contract a checkout that is not sitting on its
+        # release tag derives `<version>-alpha<k>`, and a package carrying that
+        # same three-part version is still what this tree builds - the old
+        # "exactly one named failure" shape belonged to the four-part policy.
+        base = derived.split("-alpha")[0]
+        check("verify-fpk: 0 failed（包版本 = 本树三段版本；alpha 后缀不算分歧）",
+              n_fail == 0 and bool(pkg_version) and base == pkg_version,
+              "%s | %s | package=%s deriving=%s" % (match.group(0), named,
+                                                   pkg_version, derived))
+        check("verify-fpk 的其余断言仍成规模（不是脚本半途夭折）", n_pass >= 60,
+              n_pass)
+    check("verify-fpk 退出码 0", verify.returncode == 0, verify.returncode)
 
 
 # ---------------------------------------------------------------------------
@@ -1487,25 +1551,59 @@ def e8_delivery():
                 rel = os.path.relpath(full, installed).replace(os.sep, "/")
                 pairs.append((rel, full))
         note("设备上 server/ 文件数", len(pairs))
-        unknown, differ = [], []
-        for rel, full in pairs:
-            src = os.path.join(ROOT, rel)
-            if not os.path.exists(src):
-                unknown.append(rel)
-                continue
+        box_md5 = dict((rel, md5_file(full)) for rel, full in pairs)
+        box_ver = ""
+        mod = os.path.join(installed, "wb_proxy.py")
+        if os.path.exists(mod):
+            with open(mod, encoding="utf-8", errors="replace") as fh:
+                m = re.search(r'"version"\s*:\s*"([^"]+)"', fh.read())
+            box_ver = m.group(1) if m else ""
+        note("设备上跑的源码版本", box_ver)
+        # Phase F ships a test package and installs nothing, so the box is
+        # expected to still run the previous release. The anchor is therefore
+        # the Phase E package on disk, never the working tree - the tree has
+        # already moved to the next upstream version, and comparing a correct
+        # deployment against it would go red for no reason. What has teeth is
+        # "every file the box runs came out of a package we shipped".
+        if HAS_TAR and os.path.exists(PHASE_E_PKG):
+            dest = tempfile.mkdtemp(prefix="wb-e8-device-")
             try:
-                with open(full, "rb") as fh:
-                    on_box = fh.read()
-                with open(src, "rb") as fh:
-                    in_tree = fh.read()
-            except OSError as exc:
-                differ.append("%s (%s)" % (rel, exc))
-                continue
-            if on_box != in_tree:
-                differ.append("%s (%d vs %d bytes)" % (rel, len(on_box), len(in_tree)))
-        check("设备上 server/** 与仓库工作树逐字节一致（设备跑的就是交付版）",
-              differ == [] and unknown == [], {"differ": differ[:6],
-                                               "not-in-tree": unknown[:6]})
+                _fields, payload, _outer = _release_parts(PHASE_E_PKG, dest)
+                differ = []
+                for rel in sorted(box_md5):
+                    want = payload.get("server/" + rel)
+                    if want is None:
+                        differ.append("%s (不在 %s 包里)" % (rel, PHASE_E_VERSION))
+                    elif want != box_md5[rel]:
+                        differ.append("%s (%s vs %s)" % (rel, box_md5[rel][:8],
+                                                        want[:8]))
+                missing = sorted(k[len("server/"):] for k in payload
+                                 if k.startswith("server/") and k[7:] not in box_md5)
+                check("设备 server/** 与 Phase E 发布包 %s 的 payload 逐字节一致"
+                      % PHASE_E_VERSION,
+                      differ == [] and missing == [],
+                      {"differ": differ[:6], "missing-on-box": missing[:6],
+                       "package": os.path.basename(PHASE_E_PKG)})
+            except Exception as exc:
+                gate("设备 server/** 与 Phase E 发布包 payload 逐字节一致",
+                     "解包 %s 失败: %r" % (PHASE_E_PKG, exc))
+        else:
+            gate("设备 server/** 与 Phase E 发布包 payload 逐字节一致",
+                 "本机没有 %s 或没有 tar" % PHASE_E_PKG)
+        box_t = _version_tuple(box_ver) or ()
+        tree_t = _version_tuple(PKG_VERSION) or ()
+        if not tree_t:
+            # a depth-1 CI clone carries no tags, so the tree's release version
+            # is unknowable there; judge nothing rather than cry wolf
+            gate("设备上跑的版本不新于本树要交付的版本（本阶段没往设备装东西）",
+                 "本 checkout 里推不出发布版本（浅克隆/无 tag），无法判新旧")
+        else:
+            check("设备上跑的版本不新于本树要交付的版本（本阶段没往设备装东西）",
+                  bool(box_t) and box_t <= tree_t,
+                  "box=%s delivering=%s" % (box_ver, PKG_VERSION))
+        register("设备上跑的版本",
+                 "box=%s（%d 个文件）vs 本树交付 %s" % (box_ver or "?",
+                                                      len(box_md5), PKG_VERSION))
         # The data dir is written by the running service, so judge only that it
         # is intact and readable - never by mtime (that would go red the moment
         # the box is in use, which proves nothing about this phase).
@@ -2100,19 +2198,21 @@ def _version_tuple(text):
 
 
 def e12_released_pkg():
-    section("WP-E12 已发布错包反向取证（Release 资产 vs 本机最终包 vs 仓库）")
+    section("WP-E12 已发布错包反向取证（Release 资产 vs Phase E 发布包）")
     wrong = WRONG_PKG
     if not os.path.exists(wrong):
         gate("已发布错包副本存在: %s" % wrong,
              "本机/CI 上没有下载过 Release 资产（用 WB_WRONG_PKG 指向下载物）")
         return
-    if not os.path.exists(PKG_PATH):
-        gate("本机最终包存在: %s" % PKG_PATH, "尚未构建")
+    if not os.path.exists(PHASE_E_PKG):
+        gate("Phase E 发布包存在: %s" % PHASE_E_PKG,
+             "本机/CI 上没有 Phase E 的发布包（用 WB_PHASE_E_PKG 指向它）")
         return
     note("错包", os.path.basename(wrong))
     note("错包字节数", os.path.getsize(wrong))
     note("错包 sha256", sha256_file(wrong))
-    note("本机包 sha256", sha256_file(PKG_PATH))
+    note("锚：Phase E 发布包", os.path.basename(PHASE_E_PKG))
+    note("Phase E 包 sha256", sha256_file(PHASE_E_PKG))
     side = wrong + ".sha256"
     if os.path.exists(side):
         line = open(side, encoding="utf-8", errors="replace").read().split()
@@ -2126,19 +2226,21 @@ def e12_released_pkg():
     tmp = tempfile.mkdtemp(prefix="wb-phaseE-rel-")
     try:
         wf, wp, wo = _release_parts(wrong, os.path.join(tmp, "wrong"))
-        lf, lp, lo = _release_parts(PKG_PATH, os.path.join(tmp, "local"))
+        lf, lp, lo = _release_parts(PHASE_E_PKG, os.path.join(tmp, "anchor"))
         note("错包 manifest", {k: wf.get(k) for k in
                                ("version", "checksum", "appname", "platform")})
-        note("本机 manifest", {k: lf.get(k) for k in
+        note("锚包 manifest", {k: lf.get(k) for k in
                                ("version", "checksum", "appname", "platform")})
+        check("锚就是 Phase E 的发布版本 %s" % PHASE_E_VERSION,
+              lf.get("version") == PHASE_E_VERSION, lf.get("version"))
         diff = sorted(k for k in set(wf) | set(lf) if wf.get(k) != lf.get(k))
         check("两份 manifest 只有 version 与 checksum 两处不同",
               diff == ["checksum", "version"], diff)
         wv, lv = _version_tuple(wf.get("version")), _version_tuple(lf.get("version"))
-        check("错包 version 是四段且与本机不同",
+        check("错包 version 是四段且与锚不同",
               wv is not None and lv is not None and wv != lv,
               (wf.get("version"), lf.get("version")))
-        check("错包 version 低于本机（装上会被应用中心判为降级）",
+        check("错包 version 低于锚（装上会被应用中心判为降级）",
               wv is not None and lv is not None and wv < lv,
               (wf.get("version"), lf.get("version")))
         check("外层成员名集合一致", sorted(wo) == sorted(lo), (len(wo), len(lo)))
@@ -2152,25 +2254,33 @@ def e12_released_pkg():
               wp == lp,
               sorted(k for k in set(wp) | set(lp) if wp.get(k) != lp.get(k))[:6])
         for label, fm, root in (("错包", wf, os.path.join(tmp, "wrong")),
-                                ("本机包", lf, os.path.join(tmp, "local"))):
+                                ("锚包", lf, os.path.join(tmp, "anchor"))):
             check("%s manifest checksum == md5(自身 app.tgz)（包内部自洽，"
                   "完整性门抓不到版本错）" % label,
                   fm.get("checksum") == md5_file(os.path.join(root, "app.tgz")),
                   fm.get("checksum"))
-        for label, pm in (("错包", wp), ("本机包", lp)):
-            bad = []
-            for rel, digest in sorted(pm.items()):
-                src = _repo_path_for_payload(rel)
-                if not src or not os.path.exists(src) or md5_file(src) != digest:
-                    bad.append(rel)
-            check("%s payload 的每个文件与仓库工作树逐字节一致" % label, not bad, bad[:6])
+        # The tree has since taken upstream 1.6.19, so a payload file may
+        # legitimately differ from the working tree - but a payload that points
+        # at a module the tree no longer has would mean the box runs dead code.
+        for label, pm in (("错包", wp), ("锚包", lp)):
+            gone = [rel for rel in sorted(pm)
+                    if rel.startswith("server/")
+                    and not os.path.exists(_repo_path_for_payload(rel) or "")]
+            check("%s payload 的模块在仓库里都还在（没有指向已删除的源文件）" % label,
+                  gone == [], gone[:6])
+            drift = [rel for rel in sorted(pm)
+                     if os.path.exists(_repo_path_for_payload(rel) or "")
+                     and md5_file(_repo_path_for_payload(rel)) != pm[rel]]
+            register("%s 与当前工作树的漂移" % label,
+                     "%d/%d 个 payload 文件与 1.6.19 的工作树不同（预期：树已并入上游）"
+                     % (len(drift), len(pm)))
         register("R8 已发布错包（version 1.6.10.3）",
-                 "Release v1.6.17.1 的附件是 %s：payload 与本机最终包逐文件一致、"
-                 "也与仓库逐字节一致，只有 manifest.version 与 checksum 不同（后者派生自 "
-                 "app.tgz 的成员 mtime），且两份包各自 checksum == md5(自身 app.tgz) → "
-                 "包内部自洽，完整性断言抓不到它；`scripts/verify-fpk.sh` 对错包实测 "
-                 "70 passed / 1 failed，唯一红是 `the package is what this tree builds`"
-                 % os.path.basename(wrong))
+                 "Release v1.6.17.1 的附件是 %s：它的 payload 与 %s（Phase E 发布包）"
+                 "逐文件一致，只有 manifest.version 与 checksum 不同（后者派生自 app.tgz 的"
+                 "成员 mtime），且两份包各自 checksum == md5(自身 app.tgz) → 包内部自洽，"
+                 "完整性断言抓不到它；`scripts/verify-fpk.sh` 对错包实测 70 passed / 1 failed，"
+                 "唯一红是 `the package is what this tree builds`"
+                 % (os.path.basename(wrong), os.path.basename(PHASE_E_PKG)))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2236,42 +2346,89 @@ def _suite_run(script, cwd, env=None, timeout=900):
 
 
 def e13_release_pipeline():
-    section("WP-E8 e13 — 发布流水线修复（tag 可见性 / 版本推导）独立复核")
-    build_yml = os.path.join(ROOT, ".github", "workflows", "build-fpk.yml")
-    sync_yml = os.path.join(ROOT, ".github", "workflows", "sync-upstream.yml")
-    build_text = ""
-    sync_text = ""
-    for path, holder in ((build_yml, "build"), (sync_yml, "sync")):
+    section("E13 — 版本与 tag 契约（fnos-X.Y.Z / 无四段发布号 / 不镜像上游 tag）")
+    paths = (("build", "build-fpk.yml"), ("sync", "sync-upstream.yml"),
+             ("tests", "tests.yml"))
+    texts = {}
+    for key, name in paths:
+        path = os.path.join(ROOT, ".github", "workflows", name)
         if os.path.isfile(path):
             with open(path, "r", encoding="utf-8") as handle:
-                text = handle.read()
-            if holder == "build":
-                build_text = text
-            else:
-                sync_text = text
-    check("build-fpk.yml 与 sync-upstream.yml 都在", bool(build_text) and bool(sync_text))
-    check("构建工作流把 tag 交给脚本，而不是让它猜（TAG_REF / ${TAG_REF#v} / export VERSION）",
-          "TAG_REF: ${{" in build_text and "${TAG_REF#v}" in build_text
-          and re.search(r"(?m)^\s*export VERSION=", build_text) is not None)
-    check("构建工作流读回派生版本再比对（--print-version）",
-          "--print-version" in build_text)
-    check("版本不一致时报 ::error:: 并 exit 1（拒绝发布 tag 没点名的包）",
+                texts[key] = handle.read()
+    check("build-fpk.yml / sync-upstream.yml / tests.yml 都在", len(texts) == 3,
+          sorted(texts))
+    build_text = texts.get("build", "")
+    sync_text = texts.get("sync", "")
+    tests_text = texts.get("tests", "")
+    script = ""
+    script_path = os.path.join(ROOT, "scripts", "build-fpk.sh")
+    if os.path.isfile(script_path):
+        with open(script_path, "r", encoding="utf-8") as handle:
+            script = handle.read()
+
+    # -- the script: one namespace, and no four-part release numbers ----------
+    code_lines = [ln for ln in script.splitlines() if not ln.lstrip().startswith("#")]
+    code = "\n".join(code_lines)
+    check("build-fpk.sh 定义了五个版本来源函数",
+          all(re.search(r"(?m)^%s\(\)" % name, script) is not None
+              for name in ("head_release_tag", "last_release_version",
+                           "upstream_version", "manifest_version", "derive_version")))
+    four_part = [ln for ln in code_lines if "{3}" in ln and "[0-9]" in ln]
+    check("四段发布号机制已从代码里删干净（没有 ordinal / 四段 tag 正则）",
+          "next_release_ordinal" not in code and four_part == [], four_part[:3])
+    check("release 版本优先取 HEAD 上的 fnos-X.Y.Z tag，且只认这一个命名空间",
+          "tag --points-at HEAD" in script
+          and r"^fnos-[0-9]+(\.[0-9]+){2}$" in script)
+    check("没有 fnos tag 时的回落链：最近一次 fnos 发布 → 本树可见的上游 release → manifest",
+          all(s in script for s in ("last_release_version",
+                                    "ls-remote --tags --refs upstream",
+                                    "manifest_version")))
+    check("回落值一律带 -alpha<k> 后缀（分支构建不可能冒充发布版本）",
+          "-alpha%s" in script and '"$base" "$ahead"' in script)
+    check("上游 tag 不镜像进本仓库（上游版本直接问 remote）",
+          "--refs upstream" in script)
+
+    # -- the workflows --------------------------------------------------------
+    check("同步工作流不再镜像上游 tag（没有 for upstream_tag 循环、没有 push --tags）",
+          "for upstream_tag in " not in sync_text
+          and re.search(r"git push[^\n]*--tags", sync_text) is None)
+    check("同步工作流只推自己那一个 release tag 的 ref（fnos-X.Y.Z）",
+          'git push origin "refs/tags/${ours}"' in sync_text
+          and 'ours="fnos-${version}"' in sync_text)
+    check("同步工作流推 tag 前先确认 origin 上没有（幂等，不重复推）",
+          'ls-remote --exit-code --tags origin "refs/tags/${ours}"' in sync_text)
+    check("同步工作流在「已发布版本不比上游新」时安静退出（只有上游新 release 才发版）",
+          "published" in sync_text
+          and re.search(r"fnos-##", sync_text) is not None)
+    check("冲突时仍推 sync-conflict/<UTC 日期> 分支（保留冲突标记）",
+          'conflict_branch="sync-conflict/$(date -u +%Y-%m-%d)"' in sync_text
+          and 'git push --force origin "HEAD:refs/heads/${conflict_branch}"' in sync_text)
+    check("冲突路径仍 abort 合并并以 exit 1 结束（红是结果，不是静默）",
+          "git merge --abort" in sync_text
+          and re.search(r"(?m)^\s*exit 1\s*$", sync_text) is not None)
+    check("同步工作流有三个 cron + workflow_dispatch（GitHub 延迟时仍有机会）",
+          sync_text.count("cron:") >= 3 and "workflow_dispatch" in sync_text)
+    check("构建工作流把 tag 交给脚本并读回派生版本比对（--print-version）",
+          "TAG_REF:" in build_text and "--print-version" in build_text)
+    check("版本不一致时报 ::error:: 并 exit 1（拒绝 tag 没点名的包）",
           "::error::" in build_text
           and re.search(r"(?m)^\s*exit 1\s*$", build_text) is not None)
-    check("branch/dispatch 构建不会发 Release（附加步骤被 ref/tag 门住）",
-          "if: inputs.ref != '' || startsWith(github.ref, 'refs/tags/v')" in build_text)
-    check("同步工作流镜像**每一个**上游三段 tag（不是只有最新的那个）",
-          re.search(r"for upstream_tag in ", sync_text) is not None
-          and 'git push origin "refs/tags/${upstream_tag}"' in sync_text)
-    check("同步工作流没有整体推 tag（无 `git push --tags`，本地临时 tag 泄不出去）",
-          re.search(r"git push[^\n]*--tags", sync_text) is None)
-    check("同步工作流只推它自己那一个 release tag 的 ref",
-          'git push origin "refs/tags/${ours}"' in sync_text)
-    check("同步工作流用 --print-version 定 tag，且已存在的 tag 不再切",
-          "--print-version" in sync_text
-          and 'ls-remote --exit-code --tags origin "refs/tags/${ours}"' in sync_text)
-    check("同步工作流推 tag 前先确认 origin 上没有（幂等，不重复推）",
-          'ls-remote --exit-code --tags origin "refs/tags/${upstream_tag}"' in sync_text)
+    check("构建工作流只认 fnos-* 与 v* 两种 tag 命名空间，其它一律拒绝",
+          "fnos-*)" in build_text and re.search(r"(?m)^\s*v\*\)", build_text) is not None)
+    check("构建工作流 checkout 了完整历史与 tag（否则派生版本只能靠猜）",
+          "fetch-depth: 0" in build_text)
+    check("tests.yml 的 tag 触发包含 fnos-*（发布 tag 必须跑测试）",
+          '"fnos-*"' in tests_text and '"v*"' in tests_text)
+    check("tests.yml 的版本门接受 fnos-X.Y.Z 并要求它正好点名源码版本",
+          "fnos-*)" in tests_text and "${ref#fnos-}" in tests_text)
+    check("tests.yml 的版本门仍接受历史四段 tag、并用 ::error:: 拒绝其它命名",
+          re.search(r"historical|hist", tests_text) is not None
+          and "::error::" in tests_text)
+    check("tests.yml 有 -ci 彩排 tag 的豁免分支（否则彩排无法跑）",
+          "*-ci)" in tests_text)
+
+    # -- behaviour: four fixtures, because the script's answer has to depend
+    #    on what the checkout can see and on nothing else ---------------------
     if not HAS_BASH or not HAS_GIT:
         missing = ", ".join(n for n, ok in (("bash", HAS_BASH), ("git", HAS_GIT))
                             if not ok)
@@ -2280,183 +2437,595 @@ def e13_release_pipeline():
         return
     tmp = tempfile.mkdtemp(prefix="wb-e13-")
     try:
-        # -- the tag set CI actually had, before and after the fix -----------
-        ci = _pipeline_fixture(tmp, "old-ci", OLD_CI_TAGS, ["v1.6.17.1"])
-        rc, out = _fixture_version(ci)
-        check("CI 当时的 tag 集合下，修复后 --print-version 就是 HEAD 上的 tag",
-              rc == 0 and out == "1.6.17.1", "rc=%d out=%r" % (rc, out))
+        # 1) a release commit: the fnos tag on HEAD is the answer, as-is
+        rel = _pipeline_fixture(tmp, "release", ["v1.6.18", "v1.6.19"],
+                                ["fnos-1.6.19"])
+        rc, out = _fixture_version(rel)
+        check("HEAD 上有 fnos-1.6.19 → --print-version 就是 1.6.19（tag 原样）",
+              rc == 0 and out == "1.6.19", "rc=%d out=%r" % (rc, out))
+        rc, out = _fixture_version(rel, "--alpha")
+        check("同一提交上 --alpha 仍是 1.6.19-alpha0（发布 tag 不会把彩排包变成发布版）",
+              rc == 0 and out == "1.6.19-alpha0", "rc=%d out=%r" % (rc, out))
+        stray = _pipeline_fixture(tmp, "stray", ["v1.6.18", "v1.6.19"],
+                                  ["fnos-1.6.19", "v9.9.9.9"])
+        rc, out = _fixture_version(stray)
+        check("HEAD 另有历史四段 tag（v9.9.9.9）时结论不变（仍取 fnos 那个）",
+              rc == 0 and out == "1.6.19", "rc=%d out=%r" % (rc, out))
+
+        # 2) dispatch: untagged HEAD, upstream's tags visible → newest upstream
+        disp = _pipeline_fixture(
+            tmp, "dispatch", OLD_CI_TAGS + UPSTREAM_TAGS + ["v1.6.18", "v1.6.19"])
+        rc, out = _fixture_version(disp)
+        check("dispatch（HEAD 无 tag、看得见 v1.6.19）→ 1.6.19-alpha1，不再是低版本",
+              rc == 0 and out == "1.6.19-alpha1", "rc=%d out=%r" % (rc, out))
+        check("dispatch 派生值一定带 -alpha（不可能被当成发布版本上传）",
+              out.startswith("1.6.19-alpha"), out)
+
+        # 3) a clone with no tags at all and no upstream remote: the manifest
+        #    placeholder is all that is left, and it still must not look like a
+        #    release.
+        starved = _pipeline_fixture(tmp, "starved", ["v1.6.18", "v1.6.19"])
+        for tag in ("v1.6.18", "v1.6.19"):
+            git_text(["tag", "-d", tag], cwd=starved)
+        rc, out = _fixture_version(starved)
+        check("没有任何 tag、也没有 upstream remote 的克隆 → 1.6.10-alpha0（仍不冒充发布版）",
+              rc == 0 and out == "1.6.10-alpha0", "rc=%d out=%r" % (rc, out))
+
+        # 4) the historical red, on the tag set CI actually had -----------------
         rc_old, _ = git_text(["cat-file", "-e", PRE_FIX_COMMIT + "^{commit}"])
         if rc_old == 0:
-            rc, old_script = git_text(["show", "%s:scripts/build-fpk.sh" % PRE_FIX_COMMIT])
+            rc, old_script = git_text(
+                ["show", "%s:scripts/build-fpk.sh" % PRE_FIX_COMMIT])
             if rc == 0 and old_script:
-                with open(os.path.join(ci, "scripts", "build-fpk.sh"), "w",
-                          encoding="utf-8", newline="\n") as handle:
+                red = _pipeline_fixture(tmp, "pre-fix", OLD_CI_TAGS, ["v1.6.17.1"])
+                keep = os.path.join(red, "scripts", "build-fpk.sh")
+                with open(keep, "w", encoding="utf-8", newline="\n") as handle:
                     handle.write(old_script.rstrip("\n") + "\n")
-                rc, out = _fixture_version(ci)
-                check("修复前的脚本在同一 fixture 里报 1.6.10.3（= 错包版本，红已独立复现）",
+                rc, out = _fixture_version(red)
+                check("修复前脚本在 CI 当时的 tag 集合下发 1.6.10.3（红独立复现）",
                       rc == 0 and out == "1.6.10.3", "rc=%d out=%r" % (rc, out))
-                shutil.copyfile(os.path.join(ROOT, "scripts", "build-fpk.sh"),
-                                os.path.join(ci, "scripts", "build-fpk.sh"))
+                shutil.copyfile(os.path.join(ROOT, "scripts", "build-fpk.sh"), keep)
+                rc, out = _fixture_version(red)
+                check("同一 fixture 下修复后的脚本改发 1.6.10-alpha3（不再是四段 release）",
+                      rc == 0 and out == "1.6.10-alpha3",
+                      "rc=%d out=%r" % (rc, out))
+                check("红绿的差别就是命名空间：同一个提交，一个说 release，一个说 alpha",
+                      out != "1.6.10.3")
+            else:
+                gate("修复前脚本的红复现（要 %s:scripts/build-fpk.sh 可读）"
+                     % PRE_FIX_COMMIT, "git show 失败")
         else:
             gate("修复前脚本的红复现（要 %s 可达）" % PRE_FIX_COMMIT,
                  "shallow clone 里修复前提交不可达")
-        rc, out = _fixture_version(ci, "--alpha")
-        check("alpha 构建在同样 tag 下仍是一个带 -alpha<k> 的推导值（有意：alpha 按构造就是猜）",
-              rc == 0 and re.match(r"^1\.6\.10\.\d+-alpha\d+$", out) is not None,
-              "rc=%d out=%r" % (rc, out))
 
-        # -- dispatch: an untagged HEAD, the shape "Run workflow" builds -----
-        dispatch = _pipeline_fixture(
-            tmp, "dispatch", OLD_CI_TAGS + UPSTREAM_TAGS + ["v1.6.17.1"])
-        rc, out = _fixture_version(dispatch)
-        check("dispatch（HEAD 无 tag、上游 tag 都可见）派生 1.6.17.2，而不是 1.6.10.x",
-              rc == 0 and out == "1.6.17.2", "rc=%d out=%r" % (rc, out))
-        starved = _pipeline_fixture(
-            tmp, "starved", OLD_CI_TAGS + ["v1.6.17.1"])
-        for tag in UPSTREAM_TAGS:
-            git_text(["tag", "-d", tag], cwd=starved)
-        rc, out = _fixture_version(starved)
-        check("镜像 tag 缺失的克隆里 dispatch 仍会派生低版本（1.6.10.3）——残留风险已量化",
-              rc == 0 and out == "1.6.10.3", "rc=%d out=%r" % (rc, out))
-        with open(os.path.join(starved, "fnos", "manifest"), "r", encoding="utf-8") as handle:
-            manifest_text = handle.read()
-        manifest_version = ""
-        for line in manifest_text.splitlines():
-            if line.startswith("version"):
-                manifest_version = line.split("=", 1)[1].strip()
-        check("fnos/manifest 里的 version 是构建时被 write_manifest 覆写的占位值（1.6.10）",
-              manifest_version == "1.6.10", "manifest version=%r" % manifest_version)
-        register("R11 dispatch 的版本下限只由「看得见的 tag」保证",
-                 "在只看得见 v1.6.10/.1/.2 + v1.6.17.1 的克隆里 dispatch 会派生 1.6.10.3；"
-                 "`fnos/manifest` 的 version 是 1.6.10（构建时被 write_manifest 覆写），"
-                 "所以「派生值低于 manifest.version 就拒绝」这条规则抓不到它"
-                 "（1.6.10.3 > 1.6.10）；真正能抓的下限是「本克隆可见的最新四段 release tag」"
-                 "（v1.6.17.1）。判定：可接受——dispatch 构建不发 Release（附加步骤被 tag/ref 门住，"
-                 "只出 artifact），且 origin 现在已镜像全部 54 个 tag，tag 饥饿的克隆只可能是还没跑过 "
-                 "sync 的 fork；若要加强，用四段 tag 作下限而不是 manifest。")
-
-        # -- tag objects on HEAD --------------------------------------------
-        multi = _pipeline_fixture(tmp, "multi", ["v1.6.17", "v1.6.17.1"],
-                                  ["v1.6.17.2", "v9.9.9.9"])
-        rc, kind = git_text(["cat-file", "-t", "v9.9.9.9"], cwd=multi)
-        rc2, at_head = git_text(["tag", "--points-at", "HEAD"], cwd=multi)
-        check("annotated tag 也出现在 `tag --points-at HEAD` 里（cat-file -t = tag）",
-              rc == 0 and kind == "tag"
-              and set(at_head.split()) == {"v1.6.17.2", "v9.9.9.9"},
-              "type=%r points-at=%r" % (kind, at_head))
-        rc, out = _fixture_version(multi)
-        check("HEAD 上有多个四段 tag 时取最高那个（sort -V 取尾，确定性的）",
-              rc == 0 and out == "9.9.9.9", "rc=%d out=%r" % (rc, out))
-        check("推 v1.6.17.2 而 HEAD 还带着 v9.9.9.9 时，工作流的比对会拒绝（不是静默出错版本）",
-              out != "1.6.17.2")
-        # old release tags of an older base still count towards the ordinal
-        tri = _pipeline_fixture(tmp, "tri", ["v1.6.10", "v1.6.10.1", "v1.6.10.2"])
-        rc, out = _fixture_version(tri)
-        check("旧提交上的 v1.6.10.1/.2 仍顶高 ordinal（无 tag 的 HEAD 报 1.6.10.3）",
-              rc == 0 and out == "1.6.10.3", "rc=%d out=%r" % (rc, out))
-        tagged_ci = _pipeline_fixture(tmp, "tagged-ci", OLD_CI_TAGS + ["v1.6.17"],
-                                    ["v1.6.17.1"])
-        rc, out = _fixture_version(tagged_ci)
-        check("HEAD 上有 release tag 时，旧 base 的 ordinal 不再参与（报 tag 本身）",
-              rc == 0 and out == "1.6.17.1", "rc=%d out=%r" % (rc, out))
-        # `upstream_tag()` greps for exactly three parts, so a four-part release
-        # tag can never be the base: with v1.6.17 visible an untagged HEAD lands
-        # on 1.6.17.1, not on 1.6.10.3.
-        four_part = _pipeline_fixture(tmp, "four-part", OLD_CI_TAGS + ["v1.6.17"])
-        rc, out = _fixture_version(four_part)
-        check("四段 release tag 不当 base（upstream_tag 只认三段）：旧 tag 也在时无 tag 的 HEAD 报 1.6.17.1 而非 1.6.10.3",
-              rc == 0 and out == "1.6.17.1", "rc=%d out=%r" % (rc, out))
-
-        # -- the packager's own suite, run by me ----------------------------
+        # -- the packager's own suite: re-run it, and check the two platform
+        #    traps it had to avoid (a Windows-shaped URL, and cwd= paths) ------
         suite = os.path.join(ROOT, "tests", "_test_release_pipeline.py")
         if not os.path.isfile(suite):
-            gate("packager 的 tests/_test_release_pipeline.py 存在", "文件不在")
-            return
-        rc, out = _suite_run(os.path.join("tests", "_test_release_pipeline.py"), ROOT)
-        ran8 = re.search(r"Ran (\d+) tests", out)
-        check("packager 的套件在本树独立跑绿（Ran <n> tests / OK）",
-              rc == 0 and ran8 is not None and int(ran8.group(1)) > 0
-              and "OK" in out,
-              "rc=%d tail=%r" % (rc, out.strip().splitlines()[-1] if out.strip() else ""))
-        env = dict(os.environ)
-        env["PATH"] = ""
-        env.pop("PYTHONPATH", None)
-        rc, out = _suite_run(os.path.join("tests", "_test_release_pipeline.py"), ROOT, env=env)
-        # Not "skipped=5": that pins the other owner's test count (add a case
-        # there and this line goes red for no defect). What matters is the shape
-        # - the suite still runs (static cases), the behaviour cases that need
-        # bash/git skip instead of crashing, exit code 0.
-        m_ran = re.search(r"Ran (\d+) tests", out)
-        m_skip = re.search(r"skipped=(\d+)", out)
-        n_ran = int(m_ran.group(1)) if m_ran else -1
-        n_skip = int(m_skip.group(1)) if m_skip else 0
-        check("bash/git 都不在 PATH 上时行为用例 SKIP 而不是崩（静态用例照跑，Windows 形状）",
-              rc == 0 and n_ran > 0 and n_skip >= 1 and n_skip < n_ran,
-              {"rc": rc, "ran": n_ran, "skipped": n_skip,
-               "tail": out.strip().splitlines()[-1] if out.strip() else ""})
-        clone = os.path.join(tmp, "depth1")
-        uri = pathlib.Path(ROOT).resolve().as_uri()
-        rc, out = git_text(["clone", "--quiet", "--depth", "1", uri, clone])
-        if rc != 0:
-            gate("depth-1 clone 里跑 packager 套件", "clone 失败：%s" % out.splitlines()[:1])
+            gate("packager 发布流水线套件存在", "没有 tests/_test_release_pipeline.py")
         else:
-            # the clone carries HEAD, and the fix is still uncommitted: hand it
-            # the working tree's files so this checks the tree as it will be
-            for rel in ("scripts/build-fpk.sh",
-                        os.path.join(".github", "workflows", "build-fpk.yml"),
-                        os.path.join(".github", "workflows", "sync-upstream.yml"),
-                        os.path.join("tests", "_test_release_pipeline.py")):
-                src = os.path.join(ROOT, rel)
-                dst = os.path.join(clone, rel)
-                if os.path.isfile(src) and os.path.isdir(os.path.dirname(dst)):
-                    shutil.copyfile(src, dst)
-            check("clone 确实是 depth 1（CI 的 tests job 就是这种 checkout）",
-                  is_shallow(clone))
-            rc, out = _suite_run(os.path.join("tests", "_test_release_pipeline.py"), clone)
-            ran_deep = re.search(r"Ran (\d+) tests", out)
-            check("depth-1 clone 里 packager 套件也绿（CI 形状）",
-                  rc == 0 and ran_deep is not None and int(ran_deep.group(1)) > 0
-                  and "OK" in out,
-                  "rc=%d tail=%r" % (rc, out.strip().splitlines()[-1] if out.strip() else ""))
-        with open(suite, "r", encoding="utf-8") as handle:
-            suite_text = handle.read()
-        # R10, fixed by the Lead: the clone source has to be a real URL built by
-        # pathlib. `"file://" + path` is not a URL on Windows (git answers
-        # `fatal: no path specified` for `file://C:\...`), and the fix's own
-        # comment still quotes that shape, so comment lines are stripped first.
-        code_lines = [line for line in suite_text.splitlines()
-                      if not line.lstrip().startswith("#")]
-        suite_code = "\n".join(code_lines)
-        check("packager 套件不再在代码里裸拼 file:// URL（R10 已修）",
-              re.search(r'file://["\']\s*\+', suite_code) is None)
-        check("浅克隆的 clone 源用 pathlib 造 URL（import pathlib + as_uri）",
-              "import pathlib" in suite_code and "as_uri()" in suite_code)
-        check("packager 套件里每个 subprocess.run 都用 cwd= 传路径（不把路径拼进命令行/URL）",
-              suite_code.count("subprocess.run(") > 0
-              and suite_code.count("subprocess.run(") == suite_code.count("cwd="),
-              "subprocess.run=%d cwd==%d"
-              % (suite_code.count("subprocess.run("), suite_code.count("cwd=")))
-        win_shape = ("file://"
-                     + "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\wb-release-pipeline-x\\work")
-        rc, url_out = git_text(["ls-remote", win_shape])
-        # Only the refusal is asserted: the wording is the platform's, and
-        # Windows words it "does not appear to be a git repository" where Linux
-        # says "no path specified". The control below is what proves the call
-        # itself is sound, so this stays a counter-assertion either way.
-        check("反证：裸拼出来的形状在 git 眼里不是可用的 URL（rc≠0）",
-              rc != 0,
-              "rc=%d out=%r" % (rc, (url_out.splitlines() or [""])[0]))
-        rc_control, _ = git_text(["ls-remote", pathlib.Path(ROOT).resolve().as_uri()])
-        check("对照：同一次调用配上 pathlib 造出的 URL 能读到仓库（rc=0）",
-              rc_control == 0, "rc=%d" % rc_control)
+            with open(suite, "r", encoding="utf-8", errors="replace") as handle:
+                suite_code = handle.read()
+            check("packager 套件保留了把命名空间退回旧契约的「红半」"
+                  "（否则它的绿什么都没证明）",
+                  "revert_the_namespace" in suite_code)
+            check("packager 套件用 pathlib 造 file:// URL（Windows 上 git ls-remote "
+                  "不认裸路径）",
+                  "import pathlib" in suite_code and "as_uri()" in suite_code)
+            check("packager 套件每个 subprocess.run 都用 cwd= 传路径"
+                  "（不把路径拼进命令行/URL）",
+                  suite_code.count("subprocess.run(") > 0
+                  and suite_code.count("subprocess.run(") == suite_code.count("cwd="),
+                  "subprocess.run=%d cwd=" % suite_code.count("subprocess.run(")
+                  + str(suite_code.count("cwd=")))
+            rc, output = _suite_run(suite, ROOT)
+            ran = re.search(r"Ran (\d+) tests", output)
+            n_ran = int(ran.group(1)) if ran else 0
+            check("packager 的发布流水线套件独立重跑通过（>=15 条用例，rc=0）",
+                  rc == 0 and n_ran >= 15 and "OK" in output,
+                  "rc=%d cases=%d tail=%r" % (rc, n_ran, output.strip().splitlines()[-1:]))
+            win_shape = ("file://"
+                         "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\wb-rel-x\\work")
+            rc, url_out = git_text(["ls-remote", win_shape])
+            # Only the refusal is asserted: the wording is the platform's, and
+            # Windows words it "does not appear to be a git repository" where
+            # Linux says "no path specified". The control below proves the call
+            # itself is sound, so this stays a counter-assertion either way.
+            check("反证：裸拼出来的 file://C:\\... 形状在 git 眼里不是可用的 URL（rc≠0）",
+                  rc != 0, "rc=%d out=%r" % (rc, (url_out.splitlines() or [""])[0]))
+            rc_control, _ = git_text(
+                ["ls-remote", pathlib.Path(ROOT).resolve().as_uri()])
+            check("对照：同一次调用配上 pathlib 造出的 URL 能读到仓库（rc=0）",
+                  rc_control == 0, "rc=%d" % rc_control)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+def e14_fndepot_source():
+    section("E14 — FnDepot 源（fnpack.json）与 ls-remote 解析对抗")
+    path = os.path.join(ROOT, "fnpack.json")
+    if not os.path.isfile(path):
+        gate("仓库根有 fnpack.json", "缺失")
+        return
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    check("fnpack.json 是 UTF-8 无 BOM", not raw.startswith(b"\xef\xbb\xbf"))
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - malformed JSON is the finding
+        check("fnpack.json 是严格 JSON", False, repr(exc))
+        return
+    check("fnpack.json 是 JSON 对象", isinstance(data, dict))
+    check('schema_version 是字符串 "2"（规范 §3.1 要字符串，中心也接受数字 2）',
+          data.get("schema_version") == "2", data.get("schema_version"))
+    info = data.get("source_info") or {}
+    check("source_info 有非空 name 与 author",
+          isinstance(info.get("name"), str) and bool(info["name"].strip())
+          and isinstance(info.get("author"), str) and bool(info["author"].strip()), info)
+    apps = data.get("apps") or {}
+    fields = _manifest_fields(os.path.join(ROOT, "fnos"))
+    appname = fields.get("appname", "")
+    check("apps 的键正好是 FPK manifest 的 appname（%s）" % appname,
+          list(apps) == [appname], list(apps))
+    app = apps.get(appname) or {}
+    check("display_name 与 fnos/manifest 的 display_name 一致",
+          app.get("display_name") == fields.get("display_name"),
+          (app.get("display_name"), fields.get("display_name")))
+    check("platform 非空且取值在 all/x86/arm 内",
+          isinstance(app.get("platform"), list) and bool(app["platform"])
+          and all(p in ("all", "x86", "arm") for p in app["platform"]),
+          app.get("platform"))
+    check('run_as ∈ {package,root}，install_type ∈ {"",root}',
+          app.get("run_as") in ("package", "root")
+          and app.get("install_type") in ("", "root"),
+          (app.get("run_as"), app.get("install_type")))
+    check("is_docker 是真正的 bool", isinstance(app.get("is_docker"), bool),
+          app.get("is_docker"))
+    cats = app.get("categories")
+    check("categories 是 1..2 个非空字符串（中心限最多两个）",
+          isinstance(cats, list) and 1 <= len(cats) <= 2
+          and all(isinstance(c, str) and c.strip() for c in cats), cats)
+    # Relative URLs are legal (FnDepot README §8 resolves them against the main
+    # JSON), so they are resolved locally here instead of being called defects.
+    for key in ("icon_url", "readme_url"):
+        url = app.get(key) or ""
+        if url and "://" not in url:
+            rel = url[2:] if url.startswith("./") else url
+            check("%s 是相对 URL 且文件存在（README §8 允许相对 URL）" % key,
+                  os.path.isfile(os.path.join(ROOT, rel)), url)
+        else:
+            check("%s 是 http(s) URL" % key,
+                  url.startswith("https://") or url.startswith("http://"), url)
+    icon = os.path.join(ROOT, "fndepot", "ICON.PNG")
+    if os.path.isfile(icon):
+        blob = open(icon, "rb").read()
+        check("fndepot/ICON.PNG 是真 PNG 且 < 500KB",
+              blob[:8] == b"\x89PNG\r\n\x1a\n" and len(blob) < 500 * 1024,
+              len(blob))
+    releases = app.get("releases") or {}
+    versions = sorted(releases)
+    version = versions[0] if versions else ""
+    check("releases 只有一个版本键（本阶段只发一版）", len(versions) == 1, versions)
+    check("releases 的版本键 == 本树发布版本 %s" % PKG_VERSION,
+          bool(PKG_VERSION) and version == PKG_VERSION, version)
+    packages = ((releases.get(version) or {}).get("packages") or {})
+    check("packages 的键都在 all/x86/arm 内且非空",
+          bool(packages) and set(packages) <= {"all", "x86", "arm"}, list(packages))
+    for plat, pkg in sorted(packages.items()):
+        url = pkg.get("download_url") or ""
+        wanted = "WorkBuddy2API-Hub_%s_%s.fpk" % (version, plat)
+        check("%s.download_url 是 https 且指向 fnos-%s 的 %s" % (plat, version, wanted),
+              url.startswith("https://")
+              and "/releases/download/fnos-%s/" % version in url
+              and os.path.basename(url) == wanted, url)
+        size, digest = pkg.get("size"), pkg.get("sha256")
+        placeholder = (size == 0
+                       or (isinstance(digest, str) and digest.strip("0") == ""))
+        if placeholder:
+            register("R16 fnpack.json 的 size/sha256 仍是占位值",
+                     "发布前必须用 dist/%s 的真实字节数与 sha256 回填（当前 size=%r、"
+                     "sha256=%s）；中心只把它标为建议项，但下载器要靠它校验完整性"
+                     % (wanted, size, (digest or "")[:16]))
+        elif os.path.exists(PKG_PATH) and os.path.basename(PKG_PATH) == wanted:
+            check("%s.size 与真实包一致" % plat,
+                  size == os.path.getsize(PKG_PATH),
+                  (size, os.path.getsize(PKG_PATH)))
+            check("%s.sha256 与真实包一致" % plat,
+                  digest == sha256_file(PKG_PATH), (digest, sha256_file(PKG_PATH)))
+        else:
+            gate("%s 的 size/sha256 与真实包核对" % plat,
+                 "本机没有 %s 可比" % PKG_PATH)
+    # The centre's own validator, in a subprocess: the module calls sys.exit(1)
+    # at import time when GITHUB_TOKEN is missing, so it cannot be imported here.
+    vendor = "/tmp/fndepot/generate_sources.py"
+    if not os.path.isfile(vendor):
+        gate("中心仓库官方校验器接受这个源",
+             "本机没有 %s（CI 走这条；packager 的套件自带一份副本）" % vendor)
+    else:
+        probe = (
+            "import json, sys\n"
+            "sys.path.insert(0, %r)\n"
+            "import generate_sources as g\n"
+            "d = json.load(open(%r, encoding='utf-8'))\n"
+            "ok, names, sigs, ver = g.parse_and_fingerprint(d)\n"
+            "key = list(d['apps'])[0]\n"
+            "app = d['apps'][key]\n"
+            "print(json.dumps({'ok': ok, 'names': sorted(names),\n"
+            "                  'sigs': sorted(sigs), 'ver': ver,\n"
+            "                  'app': list(g.validate_v2_app(key, app)),\n"
+            "                  'forbidden': [g.is_forbidden_identity(v) for v in\n"
+            "                                (d['source_info'].get('author'),\n"
+            "                                 app.get('maintainer'),\n"
+            "                                 app.get('distributor'))]}))\n"
+            % (os.path.dirname(vendor), path))
+        done = subprocess.run([sys.executable, "-c", probe],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              env=dict(os.environ, GITHUB_TOKEN="dummy"),
+                              timeout=120)
+        text = done.stdout.decode("utf-8", "replace").strip()
+        try:
+            got = json.loads(text.splitlines()[-1])
+        except Exception:  # noqa: BLE001 - an unparseable probe is the finding
+            got = None
+        check("中心校验器 parse_and_fingerprint 接受（ok + names/sigs/ver 都对）",
+              got is not None and got["ok"] is True and got["names"] == [appname]
+              and got["sigs"] == ["%s|%s" % (appname, version)]
+              and got["ver"] == "v2", text[-200:])
+        check("中心校验器 validate_v2_app 接受该应用",
+              got is not None and got["app"][0] is True, got and got.get("app"))
+        check("中心校验器不把 author/maintainer/distributor 判成冒用官方身份",
+              got is not None and got["forbidden"] == [False, False, False],
+              got and got.get("forbidden"))
+    suite = os.path.join(ROOT, "tests", "_test_fndepot_source.py")
+    if os.path.isfile(suite):
+        rc, output = _suite_run(suite, ROOT)
+        match = re.search(r"PASS=(\d+) FAIL=(\d+) SKIP=(\d+)", output)
+        check("packager 的 fnpack.json 套件独立重跑全绿（rc=0、>=30 条断言）",
+              rc == 0 and match is not None and int(match.group(2)) == 0
+              and int(match.group(1)) >= 30,
+              "rc=%d %r" % (rc, output.strip().splitlines()[-1:]))
+    else:
+        gate("tests/_test_fndepot_source.py 存在", "缺失")
+
+    # -- ls-remote: the shapes a real remote answers with --------------------
+    if not HAS_BASH or not HAS_GIT:
+        skip("ls-remote 解析对抗（fixture 里跑 build-fpk.sh）", "本平台没有 bash/git")
+        return
+    tmp = tempfile.mkdtemp(prefix="wb-e14-")
+    try:
+        # 1) an "upstream" whose path ends in .git, carrying annotated tags
+        #    including the four-part and out-of-range shapes we must ignore
+        up = os.path.join(tmp, "upstream.git")
+        os.makedirs(up)
+        git_text(["init", "--quiet", "--bare"], cwd=up)
+        author = os.path.join(tmp, "author")
+        os.makedirs(author)
+        git_text(["init", "--quiet"], cwd=author)
+        git_text(["config", "user.email", "v@example.invalid"], cwd=author)
+        git_text(["config", "user.name", "verifier"], cwd=author)
+        for tag in ("v1.6.17", "v1.6.18", "v1.6.19", "v1.6.19.1", "v9.9.9.9"):
+            git_text(["commit", "--quiet", "--allow-empty", "-m", tag], cwd=author)
+            git_text(["tag", "-a", tag, "-m", tag], cwd=author)
+        git_text(["remote", "add", "up", up], cwd=author)
+        git_text(["push", "--quiet", "up", "HEAD:main", "--tags"], cwd=author)
+        rc, plain = git_text(["ls-remote", "--tags", "up"], cwd=author)
+        rc_refs, refs = git_text(["ls-remote", "--tags", "--refs", "up"], cwd=author)
+        check("未加 --refs 的 ls-remote 会多出 peel 行（^{}）——这正是要过滤的坑",
+              rc == 0 and "^{}" in plain, (plain.splitlines() or [""])[:2])
+        check("加了 --refs 就没有 peel 行（脚本用的就是它）",
+              rc_refs == 0 and "^{}" not in refs and "v1.6.19" in refs,
+              refs.splitlines()[:3])
+        clone = _pipeline_fixture(tmp, "tagless", [])
+        git_text(["remote", "add", "upstream", up], cwd=clone)
+        rc, out = _fixture_version(clone)
+        check("无本地 tag 的克隆靠 ls-remote 从 .git 结尾的 remote 取到 1.6.19"
+              "（不是低版本，也不是四段/超范围 tag）",
+              rc == 0 and out == "1.6.19-alpha0", "rc=%d out=%r" % (rc, out))
+
+        # 2) three-part tags are compared numerically, not lexicographically
+        up2 = os.path.join(tmp, "plain-remote")
+        os.makedirs(up2)
+        git_text(["init", "--quiet", "--bare"], cwd=up2)
+        author2 = os.path.join(tmp, "author2")
+        os.makedirs(author2)
+        git_text(["init", "--quiet"], cwd=author2)
+        git_text(["config", "user.email", "v@example.invalid"], cwd=author2)
+        git_text(["config", "user.name", "verifier"], cwd=author2)
+        for tag in ("v1.6.9", "v1.6.10"):
+            git_text(["commit", "--quiet", "--allow-empty", "-m", tag], cwd=author2)
+            git_text(["tag", "-a", tag, "-m", tag], cwd=author2)
+        git_text(["remote", "add", "up", up2], cwd=author2)
+        git_text(["push", "--quiet", "up", "HEAD:main", "--tags"], cwd=author2)
+        order = _pipeline_fixture(tmp, "order", [])
+        git_text(["remote", "add", "upstream", up2], cwd=order)
+        rc, out = _fixture_version(order)
+        check("三段 tag 按数值排序（v1.6.10 比 v1.6.9 新，不是字典序）",
+              rc == 0 and out == "1.6.10-alpha0", "rc=%d out=%r" % (rc, out))
+
+        # 3) upstream archived or renamed: no crash, and never a release number
+        gone = _pipeline_fixture(tmp, "gone", [])
+        git_text(["remote", "add", "upstream",
+                  os.path.join(tmp, "archived-away")], cwd=gone)
+        rc, out = _fixture_version(gone)
+        check("上游被归档/改名（remote 不可达）时不炸，回落 manifest 的 -alpha 推导值",
+              rc == 0 and out == "1.6.10-alpha0", "rc=%d out=%r" % (rc, out))
+        register("ls-remote 对抗面",
+                 "peel 行（--refs 已挡住）、.git 结尾的 URL、三段数值排序、"
+                 "四段/超范围 tag 忽略、remote 不可达回落 manifest——五种形状都实测过")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def e15_delivery_docs():
+    section("E15 — 交付说明与方案书的一致性（F6 与源码交叉核对）")
+    doc_path = os.path.join(ROOT, "docs", "phase-f-delivery.md")
+    if not os.path.isfile(doc_path):
+        gate("docs/phase-f-delivery.md 存在", "缺失")
+        return
+    with open(doc_path, encoding="utf-8") as handle:
+        doc = handle.read()
+    check("交付说明有实际内容（>=60 行）", len(doc.splitlines()) >= 60,
+          len(doc.splitlines()))
+
+    # -- the package fingerprint in the doc must match the package on disk ----
+    if not os.path.isfile(PKG_PATH):
+        gate("交付说明里的包指纹与磁盘上的包一致", "没有 %s" % PKG_PATH)
+    else:
+        size = os.path.getsize(PKG_PATH)
+        digest = sha256_file(PKG_PATH)
+        check("交付说明写了包名 %s" % os.path.basename(PKG_PATH),
+              os.path.basename(PKG_PATH) in doc)
+        check("交付说明写的字节数 %d 与磁盘一致" % size, str(size) in doc)
+        check("交付说明写的 sha256 与磁盘一致", digest in doc, digest)
+        tmp = tempfile.mkdtemp(prefix="wb-e15-")
+        try:
+            _safe_extract(PKG_PATH, tmp)
+            fields = _manifest_fields(tmp)
+            app_tgz = os.path.join(tmp, "app.tgz")
+            checksum = md5_file(app_tgz) if os.path.isfile(app_tgz) else ""
+            check("交付说明写的 manifest checksum 就是包内 app.tgz 的 md5",
+                  bool(checksum) and checksum in doc, checksum)
+            check("交付说明写的版本 %s == manifest 的 version" % PKG_VERSION,
+                  fields.get("version") == PKG_VERSION
+                  and PKG_VERSION in doc, fields.get("version"))
+            check("交付说明写的 appname workbuddy2api == manifest 的 appname",
+                  fields.get("appname") == "workbuddy2api"
+                  and "workbuddy2api" in doc, fields.get("appname"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # -- merge facts, cross-checked against git itself -----------------------
+    rc, merge = git_text(["rev-list", "--parents", "-n", "1", PHASE_F_MERGE])
+    parents = merge.split()[1:] if rc == 0 else []
+    rc_head, upstream_head = git_text(["rev-parse", "--short", "upstream/main"])
+    check("合并提交 %s 在本地能找到（而且有两个父）" % PHASE_F_MERGE,
+          rc == 0 and len(parents) == 2, merge.strip() or "rc=%d" % rc)
+    if len(parents) == 2:
+        first = git_text(["rev-parse", "--short", parents[0]])[1]
+        second = git_text(["rev-parse", "--short", parents[1]])[1]
+        check("交付说明写的父提交 %s 就是合并的第一个父" % first, first in doc,
+              (first, second))
+        check("交付说明写的上游 head %s 出现在合并的第二个父里"
+              % (upstream_head or "?"),
+              bool(upstream_head) and (upstream_head in (first, second)
+                                       or upstream_head in doc),
+              (upstream_head, first, second))
+    check("交付说明写了同步没生效的 UTC 时区根因（17 3 / 23 9 / 41 15 三条 cron）",
+          "17 3" in doc and "23 9" in doc and "41 15" in doc)
+    check("交付说明写了五个真缺陷的关键词（TCP_NODELAY / ETag / fmtTok / fnos-）",
+          all(tok in doc for tok in ("TCP_NODELAY", "ETag", "fmtTok", "fnos-")))
+
+    # -- device claim --------------------------------------------------------
+    box_proxy = "/vol1/@appcenter/workbuddy2api/server/wb_proxy.py"
+    if not os.path.isfile(box_proxy):
+        skip("交付说明写的设备版本与设备实际一致", "本机没有 %s" % box_proxy)
+    else:
+        with open(box_proxy, encoding="utf-8", errors="replace") as handle:
+            box_text = handle.read()
+        match = re.search(r'server_version\s*=\s*"wb-proxy/([^"]+)"', box_text)
+        if match is None:  # upstream moved the banner before; keep the old probe
+            match = re.search(r'"version"\s*:\s*"([0-9][^"]*)"', box_text)
+        box_ver = match.group(1) if match else ""
+        check("交付说明写了设备当前跑的版本（%s 的发布包）" % PHASE_E_VERSION,
+              PHASE_E_VERSION in doc, box_ver)
+        # the device must carry exactly the banner of the package it was
+        # installed from -- byte identity of the files is e8's job
+        if os.path.isfile(PHASE_E_PKG):
+            import tarfile
+            tmp2 = tempfile.mkdtemp(prefix="wb-e15-box-")
+            try:
+                _safe_extract(PHASE_E_PKG, tmp2)
+                with tarfile.open(os.path.join(tmp2, "app.tgz"), "r:gz") as tgz:
+                    member = [m for m in tgz.getmembers()
+                              if m.name.endswith("server/wb_proxy.py")]
+                    blob = tgz.extractfile(member[0]).read().decode("utf-8", "replace")
+                found = re.search(r'server_version\s*=\s*"wb-proxy/([^"]+)"', blob)
+                pkg_ver = found.group(1) if found else ""
+                check("设备上的 wb-proxy 版本串 %r 与 %s 包 payload 里的相同"
+                      % (box_ver, PHASE_E_VERSION),
+                      bool(pkg_ver) and box_ver == pkg_ver, pkg_ver)
+            finally:
+                shutil.rmtree(tmp2, ignore_errors=True)
+        else:
+            gate("设备上的版本串与 %s 包 payload 相同" % PHASE_E_VERSION,
+                 "本机没有 %s" % PHASE_E_PKG)
+        register("「设备一个字没动」无法由我证明",
+                 "只能证明设备上的 server/** 与发布的 %s 包 payload 逐字节一致"
+                 "（见 e8），以及设备版本 %s 未变；谁在什么时候装过它、"
+                 "有没有第三方动过设备，本机取不到证据" % (PHASE_E_VERSION, box_ver))
+
+    # -- no leftover placeholders -------------------------------------------
+    check("交付说明没有 PENDING/TBD 遗留占位符",
+          "PENDING" not in doc and "TBD" not in doc)
+    if "待 verifier" in doc:
+        register("R17 交付说明 §4.2「独立终验」还是占位",
+                 "该节明写「待 verifier 的 docs/phase-f-verify.md 收口后填」；"
+                 "本报告就是那份输入，回填由 Lead 在交付前完成")
+
+    # -- README 的套件数与树一致（R2 那一类的常驻门）-------------------------
+    readme_path = os.path.join(ROOT, "README.md")
+    if os.path.isfile(readme_path):
+        with open(readme_path, encoding="utf-8") as handle:
+            readme = handle.read()
+        names = sorted(n for n in os.listdir(HERE)
+                       if n.startswith("_test_") and n.endswith((".py", ".js")))
+        n_py = len([n for n in names if n.endswith(".py")])
+        match = re.search(r"(\d+) 个套件：(\d+) 个 Python \+ (\d+) 个 JS", readme)
+        check("README 写的套件数 = 树里实际（%d = %d py + %d js）"
+              % (len(names), n_py, len(names) - n_py),
+              match is not None
+              and (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+              == (len(names), n_py, len(names) - n_py),
+              match.group(0) if match else "没找到那句")
+    else:
+        gate("README.md 存在", "缺失")
+
+    # -- the FnDepot recall mechanism: verify it against the generator source
+    plan_path = os.path.join(ROOT, "docs", "phase-f-plan.md")
+    if os.path.isfile(plan_path):
+        with open(plan_path, encoding="utf-8") as handle:
+            plan = handle.read()
+        check("方案书写了更正后的两条召回路径（generate_sources.py:344 与 :352-356）",
+              "generate_sources.py:344" in plan and "generate_sources.py:352-356" in plan)
+        check("方案书明确「代码搜索这两支没有任何名字过滤」「不必须新建仓库」",
+              "没有任何名字过滤" in plan and "不必须新建仓库" in plan)
+    else:
+        gate("docs/phase-f-plan.md 存在", "缺失")
+    vendor = "/tmp/fndepot/generate_sources.py"
+    if not os.path.isfile(vendor):
+        gate("生成器源码证实「名字过滤只作用于仓库搜索」",
+             "本机没有 %s" % vendor)
+    else:
+        with open(vendor, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        filter_lines = [i + 1 for i, t in enumerate(lines)
+                        if '"fndepot" in full_name' in t]
+        code_lines = [i + 1 for i, t in enumerate(lines)
+                      if "filename:fnpack.json" in t]
+        check("生成器里确实有一条仓库搜索的名字过滤", bool(filter_lines),
+              filter_lines)
+        check("生成器里的代码搜索两支（filename:fnpack.json / +fork:true）"
+              "都不带名字过滤",
+              len(code_lines) >= 2
+              and all('"fndepot" in full_name' not in lines[i - 1]
+                      for i in code_lines),
+              [(i, lines[i - 1].strip()[:60]) for i in code_lines])
+        check("名字过滤在代码搜索之前出现（即分属两支，不是全局过滤）",
+              bool(filter_lines) and bool(code_lines)
+              and min(filter_lines) < min(code_lines),
+              (filter_lines, code_lines))
+        note("生成器源码行号（我独立读的）",
+             "名字过滤 %s；代码搜索 %s" % (filter_lines, code_lines))
+        register("R15 「现有仓库本身够格被召回」的前提是它已推送",
+                 "GitHub 代码搜索索引的是默认分支：实测 origin/main = 316eb8f "
+                 "上既没有 fnpack.json 也没有 fndepot/（合并提交 db9e58b 未推送），"
+                 "`GET /repos/ccrabit/workbuddy2api-hub/contents/fnpack.json` → 404；"
+                 "且该仓库 fork=true，上游 ardeyouxipianyi/workbuddy2api-hub 目前没有 "
+                 "fnpack.json（其 contents 也是 404），一旦上游上架同签名文件，"
+                 "process_overlap 的 :306-307「fork 永远输给非 fork」就会判我们负。"
+                 "⇒ push 之前不存在「已被收录」的既成事实；方案书的结论方向对，"
+                 "但要作为「发布后待确认」而不是「已经具备」")
+
+
+def e16_merge_audit():
+    section("E16 — 合并正确性审计（合并基 / 上游文件未动 / 飞牛层在位）")
+    if not HAS_GIT:
+        skip("合并审计", "本平台没有 git")
+        return
+    rc, raw = git_text(["rev-list", "--parents", "-n", "1", PHASE_F_MERGE])
+    parts = raw.split() if rc == 0 else []
+    check("合并提交 %s 在本地能找到，而且正好两个父" % PHASE_F_MERGE,
+          len(parts) == 3, raw.strip() or "rc=%d" % rc)
+    rc_up, upstream_ref = git_text(["rev-parse", "--short", "upstream/main"])
+    if len(parts) == 3:
+        first = git_text(["rev-parse", "--short", parts[1]])[1]
+        second = git_text(["rev-parse", "--short", parts[2]])[1]
+        check("第一个父是我们上一版发布提交 316eb8f（飞牛这一侧）",
+              first == "316eb8f", first)
+        if rc_up != 0:
+            gate("第二个父就是 upstream/main",
+                 "这个 checkout 里没有 upstream/main（浅克隆或没加 remote）")
+        else:
+            check("第二个父就是 upstream/main（%s）" % upstream_ref,
+                  second == upstream_ref, (second, upstream_ref))
+    if is_shallow():
+        gate("合并基成立（upstream/main 是合并提交的祖先）",
+             "shallow checkout（depth 1）里祖先关系不可问")
+    else:
+        rc_anc, _ = git_text(["merge-base", "--is-ancestor", "upstream/main",
+                              PHASE_F_MERGE])
+        check("合并基成立：upstream/main 已并入（acceptance §4.1）",
+              rc_anc == 0, "rc=%d" % rc_anc)
+    ours = ["fnos/manifest", "scripts/build-fpk.sh", "scripts/verify-fpk.sh",
+            ".github/workflows/build-fpk.yml", ".github/workflows/sync-upstream.yml",
+            "wb_export.py", "fnpack.json", "fndepot/ICON.PNG", "fndepot/README.md"]
+    missing = [p for p in ours if not os.path.exists(os.path.join(ROOT, p))]
+    check("飞牛层与 FnDepot 件在合并后的树里都在位（%d 个）" % len(ours),
+          not missing, missing)
+    landed = ["tests/_test_dashboard_cache_headers.py", "wb_pricing.py",
+              "wb_modelsdev.py", "wb_probes.py", "wb_identity.py",
+              ".github/workflows/release.yml"]
+    missing_up = [p for p in landed if not os.path.exists(os.path.join(ROOT, p))]
+    check("上游的关键文件也都还在（合并没有把它们丢掉）", not missing_up,
+          missing_up)
+    # three-way conflict markers must not survive the merge anywhere (task-25 §1)
+    for pattern, label in (("^<<<<<<< ", "冲突标记 <<<<<<<（左）"),
+                           ("^>>>>>>> ", "冲突标记 >>>>>>>（右）"),
+                           ("^=======$", "冲突标记 =======（分隔）")):
+        rc_grep, hits = git_text(["grep", "-n", "-E", pattern, "--", "."])
+        check("树里没有 %s（git grep 全仓）" % label,
+              rc_grep != 0 and not hits.strip(), hits.strip()[:200])
+    rc_subj, subject = git_text(["log", "-1", "--format=%s", PHASE_F_MERGE])
+    check("合并提交的标题写明是并入 upstream/main 的 fork 合并",
+          rc_subj == 0 and "Merge upstream/main" in subject
+          and "fnOS fork" in subject, subject)
+    note("当前 HEAD（本报告写就时的提交）",
+         git_text(["rev-parse", "--short", "HEAD"])[1].strip())
+    if is_shallow() or rc_up != 0:
+        gate("上游文件里面只有 tests.yml 被我们动过", "浅克隆/没 remote 时比不了上游")
+        return
+    rc, changed = git_text(["diff", "--name-only", "upstream/main", "HEAD"])
+    files = [line for line in changed.splitlines() if line.strip()]
+    up_ci = [f for f in files if f.startswith(".github/workflows/")]
+    check("上游的 .github/workflows/release.yml 我们一个字没改（acceptance §5）",
+          ".github/workflows/release.yml" not in files,
+          [f for f in up_ci])
+    modified_upstream = []
+    mode_only = []
+    for name in up_ci:
+        if git_text(["cat-file", "-e", "upstream/main:%s" % name])[0] != 0:
+            continue  # a file upstream does not have is our addition
+        # compare the blob, not the diff: a chmod 755 shows up as a change in
+        # `git diff` while the bytes are identical
+        up_blob = git_text(["rev-parse", "upstream/main:%s" % name])[1]
+        head_blob = git_text(["rev-parse", "HEAD:%s" % name])[1]
+        if up_blob != head_blob:
+            modified_upstream.append(name)
+        elif up_blob:
+            mode_only.append(name)
+    check("上游 workflow 里唯一被改内容的只有 tests.yml（fnos-* 这一处有记录的例外）",
+          modified_upstream == [".github/workflows/tests.yml"], modified_upstream)
+    if mode_only:
+        register("R18 树里几个上游 workflow 带了可执行位（内容一字未改）",
+                 "%s 在上游是 100644、在我们树里是 100755（blob sha 相同，"
+                 "来源是 Phase E 的 55dfad2 / 9dff35f）；GitHub 不读这个位，"
+                 "但给上游提 PR 或做 diff 时是噪音，交付前 `chmod 644` 就能清掉"
+                 % mode_only)
+    rc, tests_diff = git_text(["diff", "upstream/main", "HEAD", "--",
+                               ".github/workflows/tests.yml"])
+    check("tests.yml 的改动是加 fnos-* tag 命名空间（不是别的语义改动）",
+          'tags: ["v*", "fnos-*"]' in tests_diff
+          and "fnos-" in tests_diff, tests_diff.count("\n"))
+    register("合并后相对 upstream/main 的改动面",
+             "%d 个文件（含我们的 fnOS 层、README、dashboard.html、wb_proxy.py 等）；"
+             "workflow 目录下只有 tests.yml 是我们的改动" % len(files))
+
 SECTIONS_FNS = (e1_suites, e2_gateway, e2_peer_matrix, e3_mount, e4_credit,
                 e5_package, e6_device, e7_hardening, e8_delivery,
                 e9_cockpit_export, e10_platform_sim, e11_ci_rehearsal,
-                e12_released_pkg, e13_release_pipeline)
+                e12_released_pkg, e13_release_pipeline, e14_fndepot_source,
+                e15_delivery_docs, e16_merge_audit)
 
 
 def main(argv):

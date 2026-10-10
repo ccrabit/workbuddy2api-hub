@@ -58,11 +58,14 @@ Phase E 已把任务中心队列 / 模型锁池 / 暂停选号 / 积分 FEFO 明
 - URL 只允许 http/https；单源 JSON ≤2MB、单应用 ≤100 版本、单请求 ≤8 张预览图；图标建议 PNG/WebP <500KB。
 - **不要冒用官方身份**：`source_info.author` / `maintainer` / `distributor` 不能是 FnDepot 或官方名（`generate_sources.py:is_forbidden_identity`）。
 - **「上架」的真实机制**（读 `scripts/generate_sources.py` + `.github/workflows/update-sources.yml` 得到）：中心仓库每天 16:00 UTC 用 GitHub 搜索自动生成 `valid_sources.txt`（现 62 条），召回途径是
-  1. 仓库搜索 `fndepot` / `fn depot`（±`fork:true`），且脚本只保留 **`full_name` 里含 "fndepot"** 的（描述/topic 里含不算）；
-  2. 代码搜索 `filename:fnpack.json`（只取第一页 100 条）；
-  3. 脚本里硬编码的 `WHITELIST`；
-  然后按仓库血缘 + `appname|version` 重叠查重：**Fork 永远输给上游原创**，同源时后来创建者被剔除。
-- 因此：`ccrabit/workbuddy2api-hub`（是上游的 fork）**既不满足名字含 fndepot，也吃 FnDepot 的 fork 判负规则**，只靠加 `fnpack.json` 很不稳。稳妥做法是另外建一个**非 fork、名字带 fndepot** 的仓库（例如 `WorkBuddy2API-FnDepot`）承载 `fnpack.json` + 图标/预览 + README，FPK 用绝对 URL 指向我们主仓库的 Release 资产（不入 git）。中心仓库的 `fnpack.json` 只放作者自己的应用（fntermx/flatcms/flatnas/picoclaw），第三方不走 PR 进中心源，而是进 `valid_sources.txt`。
+  1. 仓库搜索 `fndepot` / `fn depot`（±`fork:true`），**只有这一支**带有脚本内过滤 `if "fndepot" in full_name.lower()`（`generate_sources.py:344`，描述/topic 里含不算）；
+  2. 代码搜索 `filename:fnpack.json` 与 `filename:fnpack.json+fork:true`（`generate_sources.py:352-356`）——**这两支没有任何名字过滤**，只取第一页 100 条；
+  3. 脚本里硬编码的 `WHITELIST`。
+  然后按仓库血缘 + `appname|version` 重叠查重（`process_overlap()`）：**Fork 永远输给非 Fork**（`generate_sources.py:280-300`），同源时后来创建者被剔除。
+- **2026-10-10 Lead 更正（实测，推翻先前的过强结论）**：仓库名不含 fndepot 也能被收录——代码搜索这条路的候选**不做名字过滤**。用 PAT 实跑 `GET /search/code?q=filename:fnpack.json` → `total_count=41`，返回里 `RROrg/fn-apps`、`qilin-zhu/LitePan-fpk`、`mg6630/fnos-lxc` 都不叫 FnDepot；`+fork:true` → `total_count=14`，返回里确有 fork（如 `coder23j/FnDepot-arm`、`Soley911/fn`、`tzi-shue/FnDepot-1`）。所以 `ccrabit/workbuddy2api-hub`（上游 fork、根目录放 `fnpack.json`）**本身就可被召回**，不必须新建仓库。两个前提：① 仓库必须**公开**且 `fnpack.json` 在根目录（大小写一致）；② 上游 `ardeyouxipianyi/workbuddy2api-hub` 目前**没有** `fnpack.json`，所以 fork 判负规则现在没有对手——但上游哪天也做了 fnOS 包，我们的 fork 会按血缘判负。
+  ⇒ 决策：**先走现有仓库**（用户已确认过不新建仓库就不新建）；把「新建一个非 fork、名字含 fndepot 的仓库（如 `WorkBuddy2API-FnDepot`）」留作风险备选，写进上架说明的建议而不是必做项。中心仓库的 `fnpack.json` 只放作者自己的应用（fntermx/flatcms/flatnas/picoclaw），第三方不进中心源，而是进 `valid_sources.txt`。
+- **前提（R15，verifier 复核）**：代码搜索索引的是**默认分支**——`fnpack.json` 现在只存在于**未推送**的合并提交（`GET /repos/ccrabit/workbuddy2api-hub/contents/fnpack.json` → 404、`git ls-tree origin/main` 里没有它、`origin/main` 仍是 `316eb8f`）⇒ 正确口径是「**push 之后**才具备被召回条件」。另外 fork 判负**不是无条件**的：`process_overlap()` 的 `:306-307` 只在配对已判 high-risk（血缘对门槛 `name_rate>=0.50 or sig_rate>=0.30`）时才让 fork 输。
+- 相对 URL 是**允许**的（README §8「所有 URL 只能使用 http 或 https，支持绝对 URL 和相对 URL」，相对主 JSON 所在地址解析；`README.md:78` 目录结构不强制）⇒ `icon_url`/`readme_url` 用 `./fndepot/...` 合法。
 - 本地可直接复用中心仓库的校验逻辑：`/tmp/fndepot/generate_sources.py` 的 `validate_v2_app()` / `parse_and_fingerprint()` / `is_forbidden_identity()`（只 import，别跑 `main()`）。
 - 参考事实副本：`/tmp/fndepot/{README.md,fnpack.json,valid_sources.txt,generate_sources.py,update-sources.yml}`。
 

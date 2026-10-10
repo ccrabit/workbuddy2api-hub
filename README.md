@@ -345,7 +345,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 ### Unreleased
 
-- **飞牛 fnOS 这一层：并入上游 v1.6.18–v1.6.19、版本号与上游对齐、发布 tag 改 `fnos-X.Y.Z`**（本仓库改动，上游没有对应 tag）：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库发布 tag 从 `v<版本>.<序号>` 改为 `fnos-X.Y.Z`——上游新增的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发。`sync-upstream.yml` 因此不再把上游 tag 镜像进本仓库，并把 cron 加到三条（`17 3` / `23 9` / `41 15`，GitHub 的 schedule 常年晚约 7 小时），冲突时除失败 + summary 外再推一个 `sync-conflict/<UTC 日期>` 分支（带冲突标记，省得人重做合并）。飞牛层重贴后还修掉两处真缺陷：上游给 `Handler` 新加的 `disable_nagle_algorithm` 在 AF_UNIX 上会抛 `Errno 95`，网关路径单独派生了一个关掉它的 handler（否则每个网关请求都在 `setup()` 死掉）；看板直连 `GET /` 的响应体要求与文件逐字节一致，因此缺省直连不再注入 `window.__WB_BASE__`/`__WB_VIA_GATEWAY__`（挂载态照旧注入，且 ETag 增加了一个覆盖网关上下文的校验分量，否则第二个 NAS 用户会拿到 304 + 别人的页面）。看板另修掉一个同名函数覆盖（上游新的 `fmtTok` 会静默盖掉我们的精确版，全站 token 显示退化成 `8.3K`）。上架飞牛第三方源（FnDepot）的材料见 `fnpack.json`。
+- **飞牛 fnOS 这一层：并入上游 v1.6.18–v1.6.19 及 v1.6.19 之后的 34 个提交、版本号与上游对齐、发布 tag 改 `fnos-X.Y.Z`**（本仓库改动，上游没有对应 tag）：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库发布 tag 从 `v<版本>.<序号>` 改为 `fnos-X.Y.Z`——上游新增的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发。`sync-upstream.yml` 因此不再把上游 tag 镜像进本仓库，并把 cron 加到三条（`17 3` / `23 9` / `41 15`，GitHub 的 schedule 常年晚约 7 小时），冲突时除失败 + summary 外再推一个 `sync-conflict/<UTC 日期>` 分支（带冲突标记，省得人重做合并）。飞牛层重贴后还修掉两处真缺陷：上游给 `Handler` 新加的 `disable_nagle_algorithm` 在 AF_UNIX 上会抛 `Errno 95`，网关路径单独派生了一个关掉它的 handler（否则每个网关请求都在 `setup()` 死掉）；看板直连 `GET /` 的响应体要求与文件逐字节一致，因此缺省直连不再注入 `window.__WB_BASE__`/`__WB_VIA_GATEWAY__`（挂载态照旧注入，且 ETag 增加了一个覆盖网关上下文的校验分量，否则第二个 NAS 用户会拿到 304 + 别人的页面）。看板另修掉一个同名函数覆盖（上游新的 `fmtTok` 会静默盖掉我们的精确版，全站 token 显示退化成 `8.3K`）。上架飞牛第三方源（FnDepot）的材料见 `fnpack.json`。
 
 - **小响应不再白付 40ms、突发并发不再卡 1 秒**（[PR #237](https://github.com/ardeyouxipianyi/workbuddy2api-hub/pull/237)，感谢 [@aodianjun](https://github.com/aodianjun)）：服务端关掉 Nagle（响应头与响应体两次 write 不再互相等 ACK，werkzeug/uvicorn 同做法），listen backlog 从 stdlib 默认的 5 提到 128（面板打开一页就是 ~7 个并发）。真机（OpenWrt / Celeron N2840）：`/health` 中位 50.0ms → 1.41ms，64 并发突发「卡 ≥1s」43/64 → 0/64。顺带把单请求体上限默认从 50MB 收到 16MB（`WB_MAX_PAYLOAD_BYTES` 可调回）——读 body 发生在 chat 信号量之前，路由器上几个并发大 body 就能把内存打穿。
 
@@ -381,6 +381,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 - **数据看板新增「积分获取历史」**：原来只有扣减（花掉的积分），现在把上游发给每个账号的**积分包清单**（每日活跃奖励的 Bonus Pack、免费套餐、活动包…）摊平成一张表——发放时间 / 账号 / 区域 / 名称（悬停看发放原因）/ 积分 / 剩余 / 到期 / 状态，新的在前；状态按「过期 > 用完 > 在扣减 > 可用」归类（`in_usage` 的包标「生效中」，`no_expiry` 的显示「不过期」），摘要行给出笔数与合计并标**快照时刻**。新增 `GET /accounts/credits/grants`（管理面路由）：只读内存里的积分快照、**不发上游请求**，数字随「一键刷新积分」（签到 / 每日活跃打卡也会刷新它）更新。新增 `tests/_test_credit_grants.py`（24 项）与 `tests/_test_credit_grants.js`（18 项）。
 
 已发布版本的完整记录（v1.4.5 ~ v1.6.19，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
+
 ## 七、致谢与引用声明 (Credits & References)
 
 协议兼容、风控规避与任务链路设计过程中，参考并吸纳了以下开源项目的经验与逆向成果：
