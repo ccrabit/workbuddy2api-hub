@@ -62,7 +62,7 @@
 
 - **构建不可复现**：同一棵树两次构建的 `.fpk` 字节不同（载荷文件 mtime 进 tar），
   所以校验请以本 Release 的 sha256 为准，别用「重建一遍再比」。
-- 设备上如果装的是更早那次发布的同版本包（Phase F 的 CI 构建），覆盖安装即可；
+- 设备上如果装的是更早那次发布的同版本包（Phase F 的 CI 构建），一般覆盖安装即可（**同版本号能否安装未在真机验证**）；
   实测差别只有 7 项：内容不同的 6 个载荷文件（`dashboard.html`、`wb_proxy.py`、`wb_accounts.py`、
   `wb_scheduler.py`、`wb_tasks.py`、`wb_settings.py`）＋旧包里多一个 `server/fnpack.json`
   （本包不再内嵌，它是自指的发布清单）。其余 33 个载荷文件逐字节相同。

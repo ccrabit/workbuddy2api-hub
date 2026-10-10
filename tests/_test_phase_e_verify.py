@@ -190,22 +190,144 @@ PHASE_E_PKG = os.environ.get("WB_PHASE_E_PKG") or os.path.join(
 #: The merge commit WP-F6 assembled (override for a re-run on another tree).
 PHASE_F_MERGE = os.environ.get("WB_PHASE_F_MERGE") or "db9e58b"
 
-#: The asset the FnDepot source points at is the **CI build of the release tag**,
-#: not the package in dist/: a local rebuild carries its own gzip wrapper (and,
-#: until R19 is fixed, its own byte-code entries), so its file sha256 can never
-#: equal the published one. Only the *payload* is comparable.
-PUBLISHED_ASSET = {"version": "1.6.19", "size": 577842,
-                   "sha256": "3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c"}
+# Release identity is resolved from facts, never typed in. Phase G publishes
+# from this machine, and the tag `fnos-<version>` is re-pointed (with a fresh
+# asset upload) every time a merge is accepted - the third upstream merge moved
+# the released artifact from 577842/3d341706... to 626248/e65dcb84..., and a
+# hard-coded fingerprint here is precisely what turned this suite red with no
+# product change. The claim lives in three places that can be cross-checked:
+# `fnpack.json` (what the FnDepot source advertises), the Releases API (what
+# GitHub serves) and a local copy of the artifact (what the bytes hash to).
 PUBLISHED_ASSET_URL = ("https://github.com/ccrabit/workbuddy2api-hub/releases/download/"
                        "fnos-%s/WorkBuddy2API-Hub_%s_all.fpk")
 PUBLISHED_RELEASE_API = ("https://api.github.com/repos/ccrabit/workbuddy2api-hub/"
                          "releases/tags/fnos-%s")
-#: A downloaded copy of the published asset, when one is on this host (a copy is
-#: never required: the release API metadata plus the local package's payload
-#: already carry the claim, and the sandbox usually cannot reach the asset CDN).
+#: The FnDepot source in this tree: it advertises the release the centre serves.
+FNDEPOT_SOURCE = os.path.join(ROOT, "fnpack.json")
+#: A staged copy of the FnDepot source (task-33), reviewed when it is present.
+FNDEPOT_SRC = os.environ.get("WB_FNDEPOT_SRC") or "/tmp/fndepot-src"
+#: The three upstream workflows Phase G deliberately deleted (no CI at all).
+UPSTREAM_WORKFLOWS_DELETED = (".github/workflows/docker-publish.yml",
+                              ".github/workflows/release-checksums.yml",
+                              ".github/workflows/tests.yml")
+#: Suites that are red on **upstream/main itself** after the third merge (they
+#: are upstream's own, and red without a single fork-side change: R31). The e1
+#: gate pins the whole red set to these names, so a new red one - a real
+#: regression - turns it red instead of being absorbed by "0 failed".
+UPSTREAM_RED_SUITES = sorted(["_test_activity_history.js", "_test_model_cooldowns.js",
+                              "_test_page_nav.js", "_test_run_all_encoding.py",
+                              "_test_settings_load.js",
+                              "_test_settings_update_ui.js"])
+
+
+def load_json_file(path):
+    """Best-effort JSON read; {} on a missing or malformed file."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def failed_suite_names(text):
+    """Suite names on run_all's `[FAIL] ...` lines."""
+    names = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("[FAIL]"):
+            continue
+        rest = line[len("[FAIL]"):].strip().split()
+        if rest:
+            names.append(rest[0])
+    return sorted(names)
+
+
+def advertised_release_version(source=None):
+    """The single version key fnpack.json advertises, when it has exactly one."""
+    try:
+        with open(source or FNDEPOT_SOURCE, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    apps = doc.get("apps") or {}
+    app = apps.get("workbuddy2api") or next(iter(apps.values()), {})
+    releases = list((app.get("releases") or {}))
+    return releases[0] if len(releases) == 1 else ""
+
+
+RELEASE_VERSION = (os.environ.get("WB_RELEASE_VERSION")
+                   or advertised_release_version() or "1.6.19")
+RELEASE_ASSET_NAME = "WorkBuddy2API-Hub_%s_all.fpk" % RELEASE_VERSION
+
+
+def declared_release_asset(version=None, source=None):
+    """`{size, sha256, download_url}` this tree advertises for <version>."""
+    version = version or RELEASE_VERSION
+    try:
+        with open(source or FNDEPOT_SOURCE, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    apps = doc.get("apps") or {}
+    app = apps.get("workbuddy2api") or {}
+    pkg = (((app.get("releases") or {}).get(version) or {}).get("packages")
+           or {}).get("all") or {}
+    return {k: pkg[k] for k in ("size", "sha256", "download_url") if pkg.get(k) is not None}
+
+
+def release_asset_candidates(version=None):
+    """Local files that could be *the* released artifact, in provenance order.
+
+    Nothing here is trusted by position: `published_asset_copy` prefers the copy
+    whose bytes match the advertised fingerprint, and e14 asserts the agreement
+    between the source, the Releases API and the bytes - a previous build of the
+    same version sitting in /tmp must never masquerade as the release.
+    """
+    name = "WorkBuddy2API-Hub_%s_all.fpk" % (version or RELEASE_VERSION)
+    temp = tempfile.gettempdir()
+    out, seen = [], set()
+    for path in (os.environ.get("WB_PUBLISHED_ASSET") or "",
+                 os.path.join(temp, "wb-g2-dl", name),
+                 os.path.join(temp, "wb-published", name),
+                 os.path.join(temp, "rel-old.fpk"),
+                 os.path.join(ROOT, "dist", name)):
+        if path and path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out
+
+
+def device_artifact_candidates(version):
+    """Every local fpk that could be the build the appliance was flashed from."""
+    files = [p for p in release_asset_candidates(version) if os.path.isfile(p)]
+    dist = os.path.join(ROOT, "dist")
+    try:
+        names = sorted(os.listdir(dist))
+    except OSError:
+        names = []
+    for name in names:
+        if name.endswith(".fpk") and version and version in name:
+            path = os.path.join(dist, name)
+            if path not in files:
+                files.append(path)
+    return files
+
+
+def device_files_present(box_md5, payload):
+    """Is every file the appliance holds present in <payload>, byte for byte?"""
+    if not box_md5:
+        return False
+    return all(payload.get("server/" + rel) == digest
+               for rel, digest in box_md5.items())
+
+
+#: Filled in below, once the hashing helpers exist: `size`/`sha256` describe what
+#: this host actually holds (or, with nothing local, what the tree advertises).
+PUBLISHED_ASSET = {"version": RELEASE_VERSION, "size": 0, "sha256": "",
+                   "url": PUBLISHED_ASSET_URL % (RELEASE_VERSION, RELEASE_VERSION),
+                   "path": "", "measured": None, "declared": {}}
 PUBLISHED_ASSET_COPY = os.environ.get("WB_PUBLISHED_ASSET") or os.path.join(
-    tempfile.gettempdir(), "wb-published",
-    "WorkBuddy2API-Hub_%s_all.fpk" % PUBLISHED_ASSET["version"])
+    tempfile.gettempdir(), "wb-published", RELEASE_ASSET_NAME)
 
 
 # ---------------------------------------------------------------------------
@@ -458,29 +580,70 @@ def published_asset_metadata(version):
 
 
 def published_asset_copy(version):
-    """A local copy of the published asset, fetching one when the network is up."""
-    if PUBLISHED_ASSET_COPY and os.path.isfile(PUBLISHED_ASSET_COPY):
-        return PUBLISHED_ASSET_COPY
-    if os.environ.get("WB_NO_NET") or not shutil.which("curl"):
+    """A local copy of the released artifact; never reaches the network.
+
+    Prefers the copy whose sha256 is the one this tree advertises, because a
+    re-tag leaves the *previous* build of the same version lying around and
+    silently anchoring on it is exactly how a stale artifact passes itself off
+    as the release (R27/R33). `fetch_release_asset` is the explicit download.
+    """
+    declared = declared_release_asset(version)
+    want = declared.get("sha256") or ""
+    existing = [p for p in release_asset_candidates(version) if os.path.isfile(p)]
+    if want:
+        for path in existing:
+            if sha256_file(path) == want:
+                return path
+    return existing[0] if existing else ""
+
+
+def fetch_release_asset(version=None, dest=None):
+    """Best-effort download of the published artifact; "" when it cannot be had."""
+    version = version or RELEASE_VERSION
+    dest = dest or PUBLISHED_ASSET_COPY
+    if dest and os.path.isfile(dest):
+        return dest
+    if os.environ.get("WB_NO_NET") or not shutil.which("curl") or not dest:
         return ""
-    part = PUBLISHED_ASSET_COPY + ".part"
+    part = dest + ".part"
     try:
-        os.makedirs(os.path.dirname(PUBLISHED_ASSET_COPY), exist_ok=True)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
     except OSError:
         return ""
     done = subprocess.run(["curl", "--http1.1", "-sS", "-L", "--connect-timeout", "8",
-                           "--max-time", "45", "--retry", "1", "-o", part,
+                           "--max-time", "90", "--retry", "1", "-o", part,
                            PUBLISHED_ASSET_URL % (version, version)],
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if done.returncode == 0 and os.path.isfile(part) and os.path.getsize(part) > 0:
-        os.replace(part, PUBLISHED_ASSET_COPY)
-        return PUBLISHED_ASSET_COPY
+        os.replace(part, dest)
+        return dest
     if os.path.exists(part):
         try:
             os.remove(part)
         except OSError:
             pass
     return ""
+
+
+# Resolved once, at import, and without touching the network: a depth-1 CI
+# checkout has no local copy and must still start instantly.
+_resolved_copy = published_asset_copy(RELEASE_VERSION)
+_measured_asset = None
+if _resolved_copy:
+    _measured_asset = {"path": _resolved_copy, "size": os.path.getsize(_resolved_copy),
+                       "sha256": sha256_file(_resolved_copy)}
+_declared_asset = declared_release_asset(RELEASE_VERSION)
+PUBLISHED_ASSET.update({
+    "version": RELEASE_VERSION,
+    "path": _resolved_copy,
+    "measured": _measured_asset,
+    "declared": _declared_asset,
+    "size": (_measured_asset or _declared_asset).get("size", 0),
+    "sha256": (_measured_asset or _declared_asset).get("sha256", ""),
+    "url": _declared_asset.get("download_url")
+           or PUBLISHED_ASSET_URL % (RELEASE_VERSION, RELEASE_VERSION),
+})
+PUBLISHED_ASSET_COPY = _resolved_copy or PUBLISHED_ASSET_COPY
 
 
 def make_clean_checkout(ref, dest):
@@ -921,24 +1084,85 @@ def e1_suites():
     # very file, so "0 failed" would mean "I pass because I pass" - a red gate
     # could never report the truth about anything else. Everything except this
     # file has to be green, and this file has to be counted as passed.
+    # Phase G deleted CI, and the third upstream merge left six **upstream**
+    # suites red - they are red on upstream/main itself, without a single
+    # fork-side change (R31). So the gate pins the *set* of red suites to exactly
+    # those names: a seventh name is our regression and must turn this red.
+    # "0 failed" would be a lie in this state, so it is not asserted; the
+    # fork-side assertion ("none of ours is red") is.
     failed_lines = [ln.strip() for ln in text.splitlines()
                     if ln.strip().startswith("[FAIL]")]
-    others = [ln for ln in failed_lines if me not in ln]
+    red = failed_suite_names(text)
     note("run_all 失败的套件", failed_lines)
-    check("run_all: 除本套件外没有失败的套件（排除自身，避免自指）",
-          others == [], others)
+    note("run_all 里处于红状态的套件", red)
+    check("run_all: 处于红状态的套件恰好是这 %d 个上游自带的套件（多一个就是我们的回归）"
+          % len(UPSTREAM_RED_SUITES),
+          red == UPSTREAM_RED_SUITES,
+          {"actual": red, "expected": UPSTREAM_RED_SUITES})
+    check("run_all: 本 fork 的套件（含本文件）一条都不红",
+          not [n for n in red if n not in UPSTREAM_RED_SUITES], red)
     own_lines = [ln.strip() for ln in text.splitlines() if me in ln]
     check("run_all: 本套件在 run_all 内被算作 passed（没有被跳过或超时）",
           any("[PASS]" in ln for ln in own_lines)
           and not any("[FAIL]" in ln or "timed out" in ln for ln in own_lines),
           own_lines[:3])
     check("run_all: 0 skipped", skipped == 0)
-    check("run_all 退出码 0（本套件红时只允许它自己是唯一红）",
-          done.returncode == 0 or (others == [] and failed <= 1), done.returncode)
+    check("run_all 退出码与「有失败」一致（名册里那几套红时它就该是非 0）",
+          (done.returncode == 0) == (failed == 0),
+          {"exit": done.returncode, "failed": failed})
     for name in OUR_SUITES:
         line = next((ln for ln in text.splitlines() if name in ln), "")
         check("我们的套件真的跑了: %s" % name,
               "[PASS]" in line and "[skip]" not in line, line.strip())
+
+    # -- R31: the red suites are upstream's own, red upstream too -------------
+    # Two halves, because "upstream broke it" is a claim that must not rest on
+    # my word: we never touched those files (git diff against upstream/main) and
+    # they fail in a pristine checkout of upstream/main as well.
+    missing_red = [n for n in UPSTREAM_RED_SUITES
+                   if not os.path.isfile(os.path.join(HERE, n))]
+    check("R31 名册里的 %d 个红套件都在树里（是上游自带的文件）"
+          % len(UPSTREAM_RED_SUITES), missing_red == [], missing_red)
+    if not have_object("upstream/main"):
+        gate("R31：那 %d 个套件相对 upstream/main 一个字节都没被我们改过"
+             % len(UPSTREAM_RED_SUITES),
+             "本检出里没有 upstream/main（浅克隆）")
+    else:
+        rc, diff = git_text(["diff", "--name-only", "upstream/main", "HEAD", "--"]
+                            + ["tests/" + n for n in UPSTREAM_RED_SUITES])
+        check("R31：那 %d 个套件相对 upstream/main 一个字节都没被我们改过"
+              % len(UPSTREAM_RED_SUITES), not diff.strip(), diff.strip()[:300])
+    pristine = os.environ.get("WB_UPSTREAM_PRISTINE") or "/tmp/up-pristine"
+    if not os.path.isdir(pristine):
+        gate("R31：那 %d 个套件在纯上游检出里也红" % len(UPSTREAM_RED_SUITES),
+             "本机没有纯上游检出（%s）：CI 与别的机器走这条" % pristine)
+    else:
+        node = shutil.which("node")
+        still_red, skipped_up = [], []
+        for name in UPSTREAM_RED_SUITES:
+            path = os.path.join(pristine, "tests", name)
+            if not os.path.isfile(path):
+                skipped_up.append(name)
+                continue
+            if name.endswith(".js") and not node:
+                skipped_up.append(name)
+                continue
+            cmd = [sys.executable, path] if name.endswith(".py") else [node, path]
+            done_up = subprocess.run(cmd, cwd=pristine, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, timeout=300)
+            if done_up.returncode != 0:
+                still_red.append(name)
+        check("R31：那 %d 个套件在纯上游检出（%s）里同样红（不是我们的回归）"
+              % (len(UPSTREAM_RED_SUITES), pristine),
+              still_red == UPSTREAM_RED_SUITES, {"red": still_red,
+                                                 "skipped": skipped_up})
+        register("R31 上游自带的 %d 个套件合并后是红的（纯上游树同样红）"
+                 % len(UPSTREAM_RED_SUITES),
+                 "上游 main（6cd1bc0）里 %s 各自非 0 退出；主树与 %s 的原始输出都收在 "
+                 "docs/phase-g-verify.md §2.6。run_all 的 e1 门因此钉「红集合恰好等于这 "
+                 "%d 个名字」而不是「0 failed」，多一个名字就是我们的回归"
+                 % ("、".join(UPSTREAM_RED_SUITES), pristine,
+                    len(UPSTREAM_RED_SUITES)))
 
 
 # ---------------------------------------------------------------------------
@@ -2135,35 +2359,30 @@ def e8_delivery():
         if os.path.isfile(dev_manifest):
             box_version = _manifest_fields(
                 os.path.dirname(dev_manifest)).get("version") or ""
-        # The box was flashed from the *released* asset, and dist/ now carries a
-        # candidate built from a later tree, so prefer the published copy; fall
-        # back to dist/ only when that package still is the release artifact
-        # (payload matches the tree its tag names).
+        # The box was flashed from *a* build of its version, and the tag's asset
+        # has been re-uploaded since (same version, newer build) - so the anchor
+        # is "whichever local artifact the appliance's files actually match, byte
+        # for byte", never "the file with the right name".
         anchor_kind = ""
-        box_pkg = published_asset_copy(box_version)
-        if box_pkg:
-            anchor_kind = "已发布资产副本"
-        else:
-            candidate_pkg = package_for_version(box_version)
-            if candidate_pkg and HAS_TAR and HAS_GIT:
+        box_pkg = ""
+        if HAS_TAR and box_version:
+            for cand in device_artifact_candidates(box_version):
                 probe_dir = tempfile.mkdtemp(prefix="wb-e8-anchor-")
                 try:
-                    _pf, _pp, _po = _release_parts(candidate_pkg, probe_dir)
-                    if payload_differs_from_git(_pp, "fnos-%s" % box_version) == []:
-                        box_pkg = candidate_pkg
-                        anchor_kind = "dist/ 本机构建的发布件"
-                    else:
-                        register("R29 设备锚点：dist 里那一版已不是发布件",
-                                 "设备装的是 %s 的发布件，而 dist/%s 的载荷与 fnos-%s 的树不同"
-                                 "（它是用新树构建的候选包）⇒ 不拿它冒充锚；"
-                                 "用 WB_PUBLISHED_ASSET 指向已发布资产副本即可核对"
-                                 % (box_version, os.path.basename(candidate_pkg),
-                                    box_version))
+                    _pf, _pp, _po = _release_parts(cand, probe_dir)
+                except Exception:  # noqa: BLE001 - a broken candidate is not fatal
+                    continue
                 finally:
                     shutil.rmtree(probe_dir, ignore_errors=True)
-            elif candidate_pkg:
-                box_pkg = candidate_pkg
-                anchor_kind = "dist/ 本机构建（无 tar/git 无法核实是否发布件）"
+                if device_files_present(box_md5, _pp):
+                    box_pkg = cand
+                    anchor_kind = "设备 payload 与该产物逐字节一致（%s）" % os.path.basename(cand)
+                    break
+            if not box_pkg:
+                register("R33 设备上的 %s 构建在本机找不到对应产物" % box_version,
+                         "试过 %s：设备 server/** 与它们任何一个都不逐字节一致。"
+                         "设备可能是从已被覆盖重建的那版资产装的，或本机没留那次构建"
+                         % [os.path.basename(p) for p in device_artifact_candidates(box_version)])
         note("设备安装版本", {"manifest_version": box_version,
                               "package": os.path.basename(box_pkg) or "<无>",
                               "anchor": anchor_kind or "<无>",
@@ -3329,15 +3548,25 @@ def e14_fndepot_source():
                 gate("fnpack 的 size/sha256 与 Release API 上的资产独立对上",
                      "Releases API 不可达（离线/沙箱）：只用报告里的常量核过")
             copy_path = published_asset_copy(advertised)
+            if copy_path and sha256_file(copy_path) != (digest or ""):
+                # A stale copy of a previous build of the same version must not
+                # decide the outcome: fetch what the Release actually serves.
+                fetched = fetch_release_asset(advertised)
+                if fetched and sha256_file(fetched) == (digest or ""):
+                    register("R33 本机存在同一版本更早一次构建的副本",
+                             "%s 与源里声明的指纹不符，改用现场下载的资产核对"
+                             % os.path.basename(copy_path))
+                    copy_path = fetched
             if not copy_path:
                 gate("本机 dist 包与已发布资产的 payload 逐文件相同",
                      "本机没有已发布资产副本（%s）且下载不可达"
                      % PUBLISHED_ASSET_COPY)
             else:
-                check("已发布资产副本的字节数与 sha256 与报告常量一致",
+                check("已发布资产副本的字节数与 sha256 与源/API 声明的指纹一致",
                       os.path.getsize(copy_path) == PUBLISHED_ASSET["size"]
                       and sha256_file(copy_path) == PUBLISHED_ASSET["sha256"],
-                      (os.path.getsize(copy_path), sha256_file(copy_path)[:16]))
+                      (os.path.getsize(copy_path), sha256_file(copy_path)[:16],
+                       PUBLISHED_ASSET["size"], PUBLISHED_ASSET["sha256"][:16]))
                 if not (HAS_TAR and os.path.exists(PKG_PATH)):
                     gate("本机 dist 包与已发布资产的 payload 逐文件相同",
                          "本机没有 dist 包或没有 tar")
@@ -3428,6 +3657,110 @@ def e14_fndepot_source():
               "rc=%d %r" % (rc, output.strip().splitlines()[-1:]))
     else:
         gate("tests/_test_fndepot_source.py 存在", "缺失")
+
+    # -- the staged FnDepot source (task-33), reviewed on its own terms ------
+    # credits-engine staged the files that will be pushed to the centre repo in
+    # FNDEPOT_SRC; their numbers came to me as a message, so re-derive them from
+    # the bytes instead of copying them into a report.
+    if not os.path.isdir(FNDEPOT_SRC):
+        gate("暂存的 FnDepot 源（%s）可复核" % FNDEPOT_SRC,
+             "本机没有这个暂存目录（CI 与别的机器走这条）")
+    else:
+        staged = {name: os.path.join(FNDEPOT_SRC, name)
+                  for name in ("fnpack.json", "ICON.PNG", "README.md")}
+        absent = sorted(n for n, p in staged.items() if not os.path.isfile(p))
+        check("暂存的 FnDepot 源有三个文件（fnpack.json / ICON.PNG / README.md）",
+              absent == [], absent)
+        if not absent:
+            icon_repo = os.path.join(ROOT, "fndepot", "ICON.PNG")
+            check("暂存 ICON.PNG 与仓库 fndepot/ICON.PNG 逐字节一致（同一张图）",
+                  os.path.isfile(icon_repo)
+                  and md5_file(staged["ICON.PNG"]) == md5_file(icon_repo),
+                  {"staged": os.path.getsize(staged["ICON.PNG"]),
+                   "repo": os.path.getsize(icon_repo) if os.path.isfile(icon_repo) else None})
+            check("暂存 ICON.PNG 是 PNG 且小于 500KB 的建议上限",
+                  open(staged["ICON.PNG"], "rb").read(8) == b"\x89PNG\r\n\x1a\n"
+                  and os.path.getsize(staged["ICON.PNG"]) < 500 * 1024,
+                  os.path.getsize(staged["ICON.PNG"]))
+            with open(staged["README.md"], encoding="utf-8") as handle:
+                staged_readme = handle.read()
+            check("暂存 README.md 有实际内容（>=500 字符且提到项目名）",
+                  len(staged_readme) >= 500 and "WorkBuddy2API-Hub" in staged_readme,
+                  len(staged_readme))
+            staged_doc = load_json_file(staged["fnpack.json"])
+            tree_doc = load_json_file(FNDEPOT_SOURCE)
+            staged_app = ((staged_doc or {}).get("apps") or {}).get(appname) or {}
+            tree_app = ((tree_doc or {}).get("apps") or {}).get(appname) or {}
+            check("暂存 fnpack.json 的应用键与仓库那份一致（%s）" % appname,
+                  bool(staged_app) and list((staged_doc or {}).get("apps") or {}) == [appname],
+                  list((staged_doc or {}).get("apps") or {}))
+            staged_ver = list(staged_app.get("releases") or {})
+            check("暂存 fnpack.json 的发布版本与仓库那份一致（%s）" % version,
+                  staged_ver == [version], staged_ver)
+            staged_pkg = (((staged_app.get("releases") or {}).get(version) or {})
+                          .get("packages") or {}).get("all") or {}
+            tree_pkg = (((tree_app.get("releases") or {}).get(version) or {})
+                        .get("packages") or {}).get("all") or {}
+            check("暂存 fnpack.json 的 all.size/sha256 与仓库那份一致（回填只需改一处）",
+                  staged_pkg.get("size") == tree_pkg.get("size")
+                  and staged_pkg.get("sha256") == tree_pkg.get("sha256"),
+                  {"staged": [staged_pkg.get("size"), (staged_pkg.get("sha256") or "")[:12]],
+                   "tree": [tree_pkg.get("size"), (tree_pkg.get("sha256") or "")[:12]]})
+            check("暂存 fnpack.json 的 size/sha256 就是这台机器手上那份发布资产的指纹",
+                  staged_pkg.get("size") == PUBLISHED_ASSET["size"]
+                  and staged_pkg.get("sha256") == PUBLISHED_ASSET["sha256"],
+                  {"staged": [staged_pkg.get("size"), (staged_pkg.get("sha256") or "")[:12]],
+                   "asset": [PUBLISHED_ASSET["size"], (PUBLISHED_ASSET["sha256"] or "")[:12]]})
+            note("暂存的 FnDepot 源（我实读）",
+                 {"fnpack.json": [os.path.getsize(staged["fnpack.json"]),
+                                  sha256_file(staged["fnpack.json"])[:16]],
+                  "ICON.PNG": os.path.getsize(staged["ICON.PNG"]),
+                  "README.md": len(staged_readme),
+                  "same_as_tree": staged_pkg == tree_pkg})
+            if os.path.isfile(vendor):
+                probe_staged = (
+                    "import json, sys\n"
+                    "sys.path.insert(0, %r)\n"
+                    "import generate_sources as g\n"
+                    "d = json.load(open(%r, encoding='utf-8'))\n"
+                    "ok, names, sigs, ver = g.parse_and_fingerprint(d)\n"
+                    "key = list(d['apps'])[0]\n"
+                    "print(json.dumps({'ok': ok, 'names': sorted(names),\n"
+                    "                  'sigs': sorted(sigs), 'ver': ver,\n"
+                    "                  'app': list(g.validate_v2_app(key, d['apps'][key])),\n"
+                    "                  'forbidden': [g.is_forbidden_identity(v) for v in\n"
+                    "                                (d['source_info'].get('author'),\n"
+                    "                                 d['apps'][key].get('maintainer'),\n"
+                    "                                 d['apps'][key].get('distributor'))]}))\n"
+                    % (os.path.dirname(vendor), staged["fnpack.json"]))
+                done_staged = subprocess.run([sys.executable, "-c", probe_staged],
+                                             stdout=subprocess.PIPE,
+                                             stderr=subprocess.STDOUT,
+                                             env=dict(os.environ, GITHUB_TOKEN="dummy"),
+                                             timeout=120)
+                out_staged = done_staged.stdout.decode("utf-8", "replace").strip()
+                try:
+                    got_staged = json.loads(out_staged.splitlines()[-1])
+                except Exception:  # noqa: BLE001 - an unparseable probe is the finding
+                    got_staged = None
+                check("中心校验器接受**暂存**的那份源（validate_v2_app + 指纹）",
+                      got_staged is not None and got_staged["ok"] is True
+                      and got_staged["app"][0] is True
+                      and got_staged["names"] == [appname],
+                      out_staged[-200:])
+    # The centre recalls sources by searching GitHub, and a fork never beats a
+    # non-fork of the same name/signature (generate_sources.py: the overlap
+    # branch prefers the non-fork). So the staging copy is not evidence that we
+    # are listed, and the ordering of the two actions matters.
+    register("R32 上架顺序：先推主仓库，再看是否被 fork 同名源挤掉",
+             "credits-engine 的判据是「非血缘、创建晚者输」：若主仓库（fork=true）的 "
+             "fnpack.json 先被索引出来，后建的 ccrabit/FnDepot 反而可能被剔除。"
+             "我的判断：同意「先建新仓库、被剔再删主仓库那份」的次序，但有三个前提——"
+             "① 代码搜索索引的是默认分支，主仓库那份要先 push 才可能被召回；"
+             "② 两个搜索查询（filename:fnpack.json / +fork:true）实测都没含我们，"
+             "所以现在不存在既成事实；③ 真被剔时删的是主仓库根的 fnpack.json，"
+             "那会让本套件与 packager 的 _test_fndepot_source.py 的「根 fnpack.json 存在」"
+             "前提失效，删之前要先改那两处（R 编号续号时一并登记）")
 
     # -- ls-remote: the shapes a real remote answers with --------------------
     if not HAS_BASH or not HAS_GIT:
@@ -3821,6 +4154,72 @@ def e16_merge_audit():
     missing_up = [p for p in landed if not os.path.exists(os.path.join(ROOT, p))]
     check("上游的关键文件也都还在（合并没有把它们丢掉）", not missing_up,
           missing_up)
+    # The third merge (a88589e) was structural in dashboard.html - upstream split
+    # the single page into per-page `main-page` sections - so "the fork's pieces
+    # survived" has to be checked by *where* they live, not by substring luck.
+    try:
+        with open(os.path.join(ROOT, "wb_proxy.py"), encoding="utf-8") as fh:
+            proxy_src = fh.read()
+    except OSError:
+        proxy_src = ""
+    for token in ("_gateway_trusted", "GATEWAY_HEADER_USER", "inject_dashboard_context",
+                  "GatewayUnixHTTPServer", "_apply_base_path", "--unix-socket",
+                  "disable_nagle_algorithm", "import wb_export"):
+        check("飞牛层在 wb_proxy.py 里还在位：%s" % token, token in proxy_src)
+    page = dashboard_source()
+    if not page:
+        gate("看板里的飞牛层落在正确的页内", "读不到 dashboard.html")
+    else:
+        def _page_of(src, page_id):
+            """The section between `id="<page_id>"` and the next `id="page...`."""
+            start = src.find('id="%s"' % page_id)
+            if start < 0:
+                return ""
+            nxt = src.find('id="page', start + len(page_id) + 4)
+            return src[start:nxt if nxt > 0 else len(src)]
+        gateway_page = _page_of(page, "pageGateway")
+        accounts_page = _page_of(page, "pageAccounts")
+        check("上游的分页结构还在（#pageGateway / #pageAccounts 各一份）",
+              page.count('id="pageGateway"') == 1 and page.count('id="pageAccounts"') == 1,
+              (page.count('id="pageGateway"'), page.count('id="pageAccounts"')))
+        check("使用说明（#wbHelp）落在网关页里，没有漂到别的页",
+              bool(gateway_page) and 'id="wbHelp"' in gateway_page
+              and page.count('id="wbHelp"') == 1,
+              (page.count('id="wbHelp"'), bool(gateway_page)))
+        check("账号页工具栏里的 cockpit 入口各一份且都在账号页里",
+              page.count('id="btnExportCockpit"') == 1
+              and page.count('id="cockpitRealm"') == 1
+              and 'id="btnExportCockpit"' in accounts_page
+              and 'id="cockpitRealm"' in accounts_page,
+              (page.count('id="btnExportCockpit"'), page.count('id="cockpitRealm"')))
+        check("上游的账号分节锚点还在（#accountsSectionsAnchor）",
+              page.count('id="accountsSectionsAnchor"') == 1,
+              page.count('id="accountsSectionsAnchor"'))
+        check("两个 token 格式化函数都在（上游 fmtTok 与我方 fmtTokRemaining 不打架）",
+              "function fmtTok(" in page and "function fmtTokRemaining(" in page,
+              (page.count("function fmtTok("), page.count("function fmtTokRemaining(")))
+    # The release tag must name a real merge of upstream/main (structure, not SHA).
+    tag_commit = release_commit_for(RELEASE_VERSION)
+    if not tag_commit or not have_object(tag_commit):
+        gate("发布 tag fnos-%s 指着一个并入 upstream/main 的合并" % RELEASE_VERSION,
+             "本检出里没有 fnos-%s（浅克隆或未打 tag）" % RELEASE_VERSION)
+    else:
+        tag_parents = raw_parents(tag_commit)
+        check("发布 tag fnos-%s 指的是一个真正的合并（两个父）" % RELEASE_VERSION,
+              len(tag_parents) == 2, [p[:12] for p in tag_parents])
+        check("发布 tag fnos-%s 的合并标题写明并入 upstream/main 的 fork 合并"
+              % RELEASE_VERSION,
+              "Merge upstream/main" in merge_subject(tag_commit)
+              and "fnOS fork" in merge_subject(tag_commit),
+              merge_subject(tag_commit))
+        if len(tag_parents) == 2 and have_up:
+            second = git_text(["rev-parse", tag_parents[1]])[1]
+            check("发布 tag 所指合并的第二个父就是 upstream/main（%s）" % up_sha[:12],
+                  second == up_sha, (second[:12], up_sha[:12]))
+        register("本轮发布 tag 指向的合并",
+                 "%s -> %s；两父 %s"
+                 % ("fnos-%s" % RELEASE_VERSION, tag_commit[:12],
+                    [p[:12] for p in tag_parents]))
     # three-way conflict markers must not survive the merge anywhere (task-25 §1)
     for pattern, label in (("^<<<<<<< ", "冲突标记 <<<<<<<（左）"),
                            ("^>>>>>>> ", "冲突标记 >>>>>>>（右）"),
@@ -3845,50 +4244,32 @@ def e16_merge_audit():
     check("上游的 .github/workflows/release.yml 我们一个字没改（acceptance §5）",
           ".github/workflows/release.yml" not in files,
           [f for f in up_ci])
-    modified_upstream = []
-    mode_only = []
-    for name in up_ci:
-        if git_text(["cat-file", "-e", "upstream/main:%s" % name])[0] != 0:
-            continue  # a file upstream does not have is our addition
-        # compare the blob, not the diff: a chmod 755 shows up as a change in
-        # `git diff` while the bytes are identical
-        up_blob = git_text(["rev-parse", "upstream/main:%s" % name])[1]
-        head_blob = git_text(["rev-parse", "HEAD:%s" % name])[1]
-        if up_blob != head_blob:
-            modified_upstream.append(name)
-        elif up_blob:
-            mode_only.append(name)
-    # Two legitimate states, depending on whether the Phase G deletion is on HEAD
-    # yet: uncommitted (HEAD still carries the fork's workflows, and the only
-    # upstream workflow whose bytes we ever changed is tests.yml, the recorded
-    # fnos-* tag-namespace exception) or committed (nothing of ours is left, so no
-    # upstream workflow differs at all).
-    check("HEAD 上被改过内容的上游 workflow 只可能是 tests.yml（fnos-* 那一处有记录的例外）",
-          modified_upstream in ([], [".github/workflows/tests.yml"]), modified_upstream)
-    if mode_only:
-        register("R18 树里几个上游 workflow 带了可执行位（内容一字未改）",
-                 "%s 在上游是 100644、在我们树里是 100755（blob sha 相同，"
-                 "来源是 Phase E 的 55dfad2 / 9dff35f）；GitHub 不读这个位，"
-                 "但给上游提 PR 或做 diff 时是噪音，交付前 `chmod 644` 就能清掉"
-                 % mode_only)
-    else:
-        register("R18 已关闭（本轮实测）",
-                 "HEAD 与 upstream/main 的 workflow blob 与可执行位现在完全一致："
-                 "Phase F 那两条 755 差异（docker-publish.yml / release-checksums.yml）已消失")
-    rc, wf_diff = git_text(["diff", "--name-only", "upstream/main", "HEAD", "--",
-                            ".github/workflows"])
-    wf_changed = [ln for ln in wf_diff.splitlines() if ln.strip()]
-    ours_only = [name for name in wf_changed
-                 if git_text(["cat-file", "-e", "upstream/main:%s" % name])[0] != 0]
-    unexpected = [f for f in wf_changed if f not in ours_only
-                  and f != ".github/workflows/tests.yml"]
-    check("相对 upstream/main，.github/workflows/ 下每条差异要么是「只有本 fork 有的文件」，"
-          "要么是 tests.yml 那处记录的例外",
-          unexpected == [], wf_changed)
+    # Name-status (not a blob walk): a workflow we *deleted* has no `HEAD:<path>`
+    # at all, and `rev-parse` returning "" for it used to read as "we changed its
+    # bytes" - which is what made this audit red after Phase G committed.
+    rc, st = git_text(["diff", "--name-status", "upstream/main", "HEAD", "--",
+                       ".github/workflows"])
+    entries = [ln.split("\t") for ln in st.splitlines() if ln.strip()]
+    added = [e[1] for e in entries if e[0] == "A"]
+    modified_upstream = [e[1] for e in entries if e[0] == "M"]
+    deleted = [e[1] for e in entries if e[0] == "D"]
+    note(".github/workflows 相对 upstream/main 的变化",
+         {"A": added, "M": modified_upstream, "D": deleted})
+    check("Phase G 之后我们没有新增任何 workflow（没有 A）", added == [], added)
+    check("上游 workflow 的内容我们一个字没改（没有 M；tests.yml 那处历史例外"
+          "已随 Phase G 删除）", modified_upstream == [], modified_upstream)
+    check("相对上游被删掉的恰好是 Phase G 移除的 3 个上游 workflow（D）",
+          deleted == sorted(UPSTREAM_WORKFLOWS_DELETED), deleted)
+    left = sorted(os.listdir(os.path.join(ROOT, ".github", "workflows")))
+    check(".github/workflows/ 里剩下的只有上游的 release.yml", left == ["release.yml"], left)
+    register("R18 已关闭（第三次合并后实测）",
+             "HEAD 与 upstream/main 的 workflow blob 与可执行位完全一致：Phase F 那两条 "
+             "755 差异已消失；唯一差异是 Phase G 有意删掉的 3 个上游 workflow"
+             "（docker-publish.yml / release-checksums.yml / tests.yml），全部落在 D 里")
     register("合并后相对 upstream/main 的改动面",
              "%d 个文件（含我们的 fnOS 层、README、dashboard.html、wb_proxy.py 等）；"
-             "workflow 差异=%s（Phase G 的删除尚未进 HEAD 时就是这些）"
-             % (len(files), wf_changed))
+             ".github/workflows 差异=%s（Phase G 有意删除，无 A / 无 M）"
+             % (len(files), [e[0] + " " + e[1] for e in entries]))
 
 SECTIONS_FNS = (e1_suites, e2_gateway, e2_peer_matrix, e3_mount, e4_credit,
                 e5_package, e6_device, e7_hardening, e8_delivery,

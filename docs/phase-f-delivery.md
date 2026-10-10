@@ -26,7 +26,7 @@
 
 **历史指纹（均已被上面的覆盖，留档）**：Phase F 的本机构建 `577330 B` / `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98`；Phase F 由 CI 构建并首发的资产 `577842 B` / `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`（app.tgz md5 `806ce4e9ac0cda75485d34ed04657230`）。两者与设备的载荷逐文件相同。
 
-**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别**实测只有 7 项**：内容不同的 6 个 = `server/dashboard.html`（最大，两轮上游面板改造）、`server/wb_proxy.py`、`server/wb_accounts.py`、`server/wb_scheduler.py`、`server/wb_tasks.py`、`server/wb_settings.py`；另有 `server/fnpack.json` 只在旧包里（本包不再内嵌，见 `docs/phase-g-local-release.md` §6/§8）。其余 33 个载荷文件逐字节相同。同版本号覆盖安装会被应用中心接受（若被拒，按上面的卸载口径处理）。
+**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别**实测只有 7 项**：内容不同的 6 个 = `server/dashboard.html`（最大，两轮上游面板改造）、`server/wb_proxy.py`、`server/wb_accounts.py`、`server/wb_scheduler.py`、`server/wb_tasks.py`、`server/wb_settings.py`；另有 `server/fnpack.json` 只在旧包里（本包不再内嵌，见 `docs/phase-g-local-release.md` §6/§8）。其余 33 个载荷文件逐字节相同。同版本号能否覆盖安装**未在真机验证**（应用中心一般在「待装版本 ≥ 已装版本」时接受，本包与设备同为 1.6.19）；若被拒，就按上面的卸载口径处理。
 
 **升级后请重点看**：
 1. 应用中心点「打开」→ 是否**免密**直接进面板（这是本轮要修的毛病：以前飞牛会话老化后又会弹密码）。
