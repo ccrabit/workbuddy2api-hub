@@ -10,8 +10,13 @@
     "workbuddy2api": {
       "display_name": "WorkBuddy2API-Hub",
       "desc": "WorkBuddy 账号池网关：把多个 WorkBuddy/CodeBuddy 账号聚合成 OpenAI 兼容 API，在飞牛应用中心里通过统一网关免密打开，并带账号导入导出、用量与积分的 Web 看板。",
-      "platform": ["all"],
-      "categories": ["AI赋能", "系统工具"],
+      "platform": [
+        "all"
+      ],
+      "categories": [
+        "AI赋能",
+        "系统工具"
+      ],
       "icon_url": "./fndepot/ICON.PNG",
       "readme_url": "./fndepot/README.md",
       "bug_report_url": "https://github.com/ccrabit/workbuddy2api-hub/issues",
@@ -25,13 +30,13 @@
       "service_port": "8788",
       "releases": {
         "1.6.19": {
-          "changelog": "同步上游 v1.6.19：并入上游最新看板；保留飞牛统一网关免密入口、看板主题与移动端适配。",
-          "updated_at": "2026-10-10T22:03:36+08:00",
+          "changelog": "同步上游 v1.6.19 及其后 22 个提交（面板三页拆分、Buddy 加油站签到等）；飞牛侧保留统一网关免密入口、主题与移动端适配；本版起改为本地构建发布，包内不再内嵌 fnpack.json。",
+          "updated_at": "2026-10-11T00:19:39+08:00",
           "packages": {
             "all": {
               "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk",
-              "sha256": "3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c",
-              "size": 577842
+              "sha256": "ac11f7f6700902eeef8c9e3342d1d1e9ae3b16b0c257b3964b3488ead6e817c7",
+              "size": 591004
             }
           }
         }
