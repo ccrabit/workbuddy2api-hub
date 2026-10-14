@@ -38,9 +38,9 @@ GENERATOR_CANDIDATES = [
 
 EXPECTED_APP = "workbuddy2api"          # == fnos/manifest appname
 EXPECTED_DISPLAY = "WorkBuddy2API-Hub"
-EXPECTED_VERSION = "1.6.19"             # phase-f-plan §2.1
+EXPECTED_VERSION = "1.7.3"             # 当前发布版本（phase-f 版本政策：包版本 = 上游最新 release tag 三段号）
 EXPECTED_URL = ("https://github.com/ccrabit/workbuddy2api-hub/releases/download/"
-                "fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk")
+                "fnos-1.7.3/WorkBuddy2API-Hub_1.7.3_all.fpk")
 
 # The nine fixed categories (spec §4.2) and the allowed platform/arch values.
 CATEGORIES = ("影音娱乐", "系统工具", "编程开发", "AI赋能", "生活服务",
