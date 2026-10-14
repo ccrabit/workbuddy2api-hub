@@ -29,14 +29,14 @@
       "is_docker": false,
       "service_port": "8788",
       "releases": {
-        "1.6.19": {
-          "changelog": "同步上游 v1.6.19 及其后 79 个提交（面板三页拆分、账号页可独立成菜单与签到活跃看板、表头排序、剩余用量优先调度与新估算批次等）；飞牛侧保留统一网关免密入口、主题与移动端适配；本版起改为本地构建发布，包内不再内嵌 fnpack.json。",
-          "updated_at": "2026-10-11T00:40:00+08:00",
+        "1.7.3": {
+          "changelog": "同步上游 v1.7.3（SSE 按块读写与进程级共享 SSLContext、Codex 0.162+ 自由格式工具调用、面板窗口限高可调、设置页开放 header 超时、国际版每日打卡可选模型、便携包 LF 修复等）；飞牛侧保留统一网关免密入口、主题与移动端适配。",
+          "updated_at": "2026-10-14T12:45:00+08:00",
           "packages": {
             "all": {
-              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.6.19/WorkBuddy2API-Hub_1.6.19_all.fpk",
-              "sha256": "e65dcb844df7ede523e990c33e3e661e27d6c73e0a9770592d76e006d610505d",
-              "size": 626248
+              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.7.3/WorkBuddy2API-Hub_1.7.3_all.fpk",
+              "sha256": "31769424dc3157cedc837eb56c2f0a2d28ec06dafbbb3542e1e0435c760f634d",
+              "size": 740055
             }
           }
         }

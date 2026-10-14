@@ -243,13 +243,13 @@ def cmd_tag_create(args):
             "message": message,
             "object": args.sha,
             "type": "commit",
-            "tagger": {
-                "name": args.tagger_name,
-                "email": args.tagger_email,
-                "date": args.date,
-            }
-            if args.date
-            else None,
+            # GitHub rejects an explicit "tagger": null ("nil is not an
+            # object"); omit the key entirely when no --date was given.
+            **(
+                {"tagger": {"name": args.tagger_name, "email": args.tagger_email, "date": args.date}}
+                if args.date
+                else {}
+            ),
         },
     )
     if tag_object.get("tagger") is None:
