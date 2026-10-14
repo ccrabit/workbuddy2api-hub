@@ -174,7 +174,10 @@ def _proc_process_tree(proc_root="/proc"):
     must not have to know which platform filled it in.
     """
     try:
-        names = [n for n in os.listdir(proc_root) if n.isdigit()]
+        # sorted(): listdir order is filesystem luck, and the BFS below turns
+        # that order into the returned sequence — an unsorted walk made
+        # _descendants(11, table) flip between [22, 33, 11] and [33, 22, 11].
+        names = sorted(n for n in os.listdir(proc_root) if n.isdigit())
     except OSError:
         return None
     table = {}

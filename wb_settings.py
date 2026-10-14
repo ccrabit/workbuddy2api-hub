@@ -40,6 +40,14 @@ MAX_PRICING_REFRESH_MINUTES = 24 * 30 * 60
 DEFAULT_CREDITS_REFRESH_HOURS = 12.0
 MAX_CREDITS_REFRESH_HOURS = 24 * 30
 CREDITS_REFRESH_HOURS_KEY = "credits_refresh_hours"
+# Panel window height cap, in pixels: a dashboard window (section) taller than
+# this scrolls internally with its title row pinned, instead of stretching the
+# whole page. 0 turns the cap off. The default sits just above the log
+# terminal's own 620px so the terminal stays untouched until the user asks for
+# something smaller.
+SECTION_MAX_HEIGHT_KEY = "section_max_height"
+DEFAULT_SECTION_MAX_HEIGHT = 640
+MAX_SECTION_MAX_HEIGHT = 4000
 # Whether a model name may inherit its price from a suffix-stripped base
 # (deepseek-r1-0528-lkeap → deepseek-r1-0528). Missing key reads as on.
 PRICING_VARIANT_INHERIT_KEY = "pricing_variant_inherit"
@@ -100,6 +108,11 @@ UPDATE_CHECK_STATE_KEY = "update_check"
 # 权重越高）。缺失键读作关：估算本身是从撞线样本反推的，优先它是一次刻意的
 # 取舍（那些组合会明显多接流量），所以老安装保持原样的纯轮询。
 REMAINING_PRIORITY_ENABLED_KEY = "remaining_priority_enabled"
+
+# 出口级瞬时失败退避（issue #271）：传输类失败与 502/503/504 不再进账号级熔断
+# 计数，改记在出口上、退避降到秒级（见 wb_egress）。缺失键读作关：它改变的是
+# 派发路径上的失败归账与退避尺度，老安装保持原样（传输错误仍喂账号熔断）。
+EGRESS_BACKOFF_ENABLED_KEY = "egress_backoff_enabled"
 
 _lock = threading.RLock()
 
@@ -871,6 +884,47 @@ def set_credits_refresh_hours(accounts_dir, value):
     return hours
 
 
+def section_max_height(accounts_dir):
+    """Panel window height cap in pixels; 0 means no limit.
+
+    Anything that is not a whole number falls back to the default, so a
+    hand-edited settings.json cannot leave the dashboard with windows a pixel
+    tall; a value past MAX_SECTION_MAX_HEIGHT is clamped, not rejected. bool is
+    checked first on purpose: it is an int subclass, and True would otherwise
+    read as a 1px cap.
+    """
+    with _lock:
+        raw = load(accounts_dir).get(SECTION_MAX_HEIGHT_KEY)
+    if isinstance(raw, bool):
+        return DEFAULT_SECTION_MAX_HEIGHT
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is its own case: json.loads turns 1e400 into inf, and
+        # int(inf) raises it - one broken line must not 500 the settings view.
+        return DEFAULT_SECTION_MAX_HEIGHT
+    if value < 0:
+        return DEFAULT_SECTION_MAX_HEIGHT
+    return min(value, MAX_SECTION_MAX_HEIGHT)
+
+
+def set_section_max_height(accounts_dir, value):
+    """Persist the cap. Returns the stored value."""
+    if isinstance(value, bool):
+        number = DEFAULT_SECTION_MAX_HEIGHT
+    else:
+        try:
+            number = int(value)
+        except (TypeError, ValueError, OverflowError):
+            number = DEFAULT_SECTION_MAX_HEIGHT
+    number = max(0, min(MAX_SECTION_MAX_HEIGHT, number))
+    with _lock:
+        data = load(accounts_dir)
+        data[SECTION_MAX_HEIGHT_KEY] = number
+        save(accounts_dir, data)
+    return number
+
+
 def _clamp_refresh_minutes(value):
     """A month is well past "often enough"; the cap keeps a typo from parking
     the next refresh beyond any horizon the panel can show."""
@@ -1168,6 +1222,30 @@ def set_remaining_priority_enabled(accounts_dir, enabled):
     return enabled
 
 
+def egress_backoff_enabled(accounts_dir):
+    """Whether transient failures are accounted per egress instead of per account.
+
+    Off unless the operator turns it on. Turning it on changes how a transport
+    failure or a 502/503/504 is punished: it stops feeding the account breaker
+    (30 minutes, doubling to 6h) and instead grows a seconds-level backoff on the
+    outbound path the request actually used (see wb_egress). That is the fix for
+    issue #271 - a few seconds of link flakiness used to park healthy accounts
+    for half an hour - but it is a change to dispatch behaviour, so an install
+    that predates the switch keeps the old accounting.
+    """
+    return load(accounts_dir).get(EGRESS_BACKOFF_ENABLED_KEY) is True
+
+
+def set_egress_backoff_enabled(accounts_dir, enabled):
+    """Persist the egress-level backoff switch. Returns the stored boolean."""
+    enabled = bool(enabled)
+    with _lock:
+        data = load(accounts_dir)
+        data[EGRESS_BACKOFF_ENABLED_KEY] = enabled
+        save(accounts_dir, data)
+    return enabled
+
+
 def daily_chat_web(accounts_dir):
     """Whether the intl daily check-in also opens a web-channel conversation.
 
@@ -1190,6 +1268,32 @@ def set_daily_chat_web(accounts_dir, enabled):
         data["daily_chat_web"] = enabled
         save(accounts_dir, data)
     return enabled
+
+
+def daily_chat_model(accounts_dir):
+    """Which model the intl daily activity runs on; "" keeps the built-in one.
+
+    The activity is two throwaway conversations ("Hi") whose only job is to
+    register the day, so it has no reason to spend credits. The built-in
+    default is already a free catalogue model, and this lets a deployment move
+    the activity onto a different free model - useful when the default one is
+    the same model the real traffic hammers, so the daily run does not eat its
+    window quota. Empty means "unset": the caller falls back to the built-in id.
+    """
+    value = load(accounts_dir).get("daily_chat_model")
+    return str(value or "").strip()
+
+
+def set_daily_chat_model(accounts_dir, model):
+    """Persist the daily-activity model id. Returns the stored string."""
+    model = str(model or "").strip()
+    with _lock:
+        data = load(accounts_dir)
+        data["daily_chat_model"] = model
+        save(accounts_dir, data)
+    return model
+
+
 def local_web_tools(accounts_dir):
     """Whether the gateway runs web_search / web_fetch calls itself.
 

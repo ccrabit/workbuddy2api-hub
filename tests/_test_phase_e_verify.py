@@ -206,9 +206,12 @@ PUBLISHED_RELEASE_API = ("https://api.github.com/repos/ccrabit/workbuddy2api-hub
 FNDEPOT_SOURCE = os.path.join(ROOT, "fnpack.json")
 #: A staged copy of the FnDepot source (task-33), reviewed when it is present.
 FNDEPOT_SRC = os.environ.get("WB_FNDEPOT_SRC") or "/tmp/fndepot-src"
-#: The three upstream workflows Phase G deliberately deleted (no CI at all).
+#: The four upstream workflows Phase G deliberately deleted (no CI at all).
+#: revert-guard.yml arrived with upstream's v1.7.x and joined the list: it is a
+#: GitHub PR-gate, which is exactly what Phase G removed from this fork.
 UPSTREAM_WORKFLOWS_DELETED = (".github/workflows/docker-publish.yml",
                               ".github/workflows/release-checksums.yml",
+                              ".github/workflows/revert-guard.yml",
                               ".github/workflows/tests.yml")
 #: Suites that are red on **upstream/main itself** after the third merge (they
 #: are upstream's own, and red without a single fork-side change: R31). The e1
