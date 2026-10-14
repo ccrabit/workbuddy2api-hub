@@ -213,14 +213,14 @@ UPSTREAM_WORKFLOWS_DELETED = (".github/workflows/docker-publish.yml",
                               ".github/workflows/release-checksums.yml",
                               ".github/workflows/revert-guard.yml",
                               ".github/workflows/tests.yml")
-#: Suites that are red on **upstream/main itself** after the third merge (they
-#: are upstream's own, and red without a single fork-side change: R31). The e1
-#: gate pins the whole red set to these names, so a new red one - a real
-#: regression - turns it red instead of being absorbed by "0 failed".
-UPSTREAM_RED_SUITES = sorted(["_test_activity_history.js", "_test_model_cooldowns.js",
-                              "_test_page_nav.js", "_test_run_all_encoding.py",
-                              "_test_settings_load.js",
-                              "_test_settings_update_ui.js"])
+#: Suites that were red on **upstream/main itself** at the third merge (they
+#: are upstream's own, and red without a single fork-side change: R31). After
+#: the fourth merge (v1.7.3) the merged tree runs ALL of them green - the red
+#: set is empty here, and "upstream red" only describes upstream's own tree.
+#: The e1 gate still pins the whole red set to these names so a new red one -
+#: a real regression - turns it red instead of being absorbed by "0 failed";
+#: an empty set simply means any red at all is a regression.
+UPSTREAM_RED_SUITES = sorted([])
 
 
 def load_json_file(path):
@@ -1131,10 +1131,15 @@ def e1_suites():
              % len(UPSTREAM_RED_SUITES),
              "本检出里没有 upstream/main（浅克隆）")
     else:
-        rc, diff = git_text(["diff", "--name-only", "upstream/main", "HEAD", "--"]
-                            + ["tests/" + n for n in UPSTREAM_RED_SUITES])
-        check("R31：那 %d 个套件相对 upstream/main 一个字节都没被我们改过"
-              % len(UPSTREAM_RED_SUITES), not diff.strip(), diff.strip()[:300])
+        # git diff with an empty pathspec diffs EVERYTHING, so guard it: with
+        # no names left the claim is vacuously true (nothing in the roster).
+        if UPSTREAM_RED_SUITES:
+            rc, diff = git_text(["diff", "--name-only", "upstream/main", "HEAD", "--"]
+                                + ["tests/" + n for n in UPSTREAM_RED_SUITES])
+            check("R31：那 %d 个套件相对 upstream/main 一个字节都没被我们改过"
+                  % len(UPSTREAM_RED_SUITES), not diff.strip(), diff.strip()[:300])
+        else:
+            check("R31：红名册为空——没有任何套件相对 upstream/main 被钉住", True, "")
     pristine = os.environ.get("WB_UPSTREAM_PRISTINE") or "/tmp/up-pristine"
     if not os.path.isdir(pristine):
         gate("R31：那 %d 个套件在纯上游检出里也红" % len(UPSTREAM_RED_SUITES),

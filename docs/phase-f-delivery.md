@@ -1,4 +1,23 @@
-# Phase F 交付说明：WorkBuddy2API-Hub 1.6.19（飞牛包，已发布）
+# Phase F 交付说明：WorkBuddy2API-Hub 1.7.3（飞牛包，已发布）
+
+> 本轮用户要求（m00001）：「读取项目开发情况，然后同步上游更新至1.7.3版本」。
+> **Phase H 状态（2026-10-14，本轮）**：并入 `upstream/main` = `c7dad8f`（v1.7.3），合并提交 `a967a16`「Merge upstream/main (v1.7.3) into the fnOS fork」（父 `282cd22` + `c7dad8f`），tag **`fnos-1.7.3`** 重指到该合并提交；全程按 `docs/phase-g-local-release.md` 本地发布：run_all 全绿 → 本地构建 → verify-fpk 0 failed → tag（git push + API tag-create）→ Release（id `412339033`）上传两资产 → 回填根 `fnpack.json`。历史内容（Phase F/G 的 1.6.19 交付与根因分析）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
+
+## 1. 包与已发布资产（1.7.3，本轮）
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/WorkBuddy2API-Hub_1.7.3_all.fpk` |
+| 大小 | 740055 B |
+| sha256 | `31769424dc3157cedc837eb56c2f0a2d28ec06dafbbb3542e1e0435c760f634d` |
+| manifest checksum | `3c2262d6015672dbcf28cdc5650dc9d8`（= 包内 `app.tgz` 的 md5） |
+| 版本 / appname | `1.7.3` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
+| **已发布 Release 资产** | tag `fnos-1.7.3`（指向合并提交 `a967a16`）的 Release（id `412339033`）挂的就是上面这一个字节：**740055 B**、sha256 `31769424dc3157cedc837eb56c2f0a2d28ec06dafbbb3542e1e0435c760f634d`（本地构建 → 本地上传，「本地包 == 资产」逐字节成立）；根 `fnpack.json` 已按资产指纹回填（sha256/size 740055/updated_at 2026-10-14）。 |
+| 冲突解决 | 5 个文件：README.md（套件数 155 = 116 py + 39 js；Unreleased 保留我方条目 + 上游指针至 v1.7.3）、dashboard.html（fmtTok 与 fmtCompact 并存、creditPerM/fmtPerM 与表头排序并存、KPI 卡与 token 单元格采上游 fmtCompact 并保留精确值 title）、release/portable.txt（wb_egress.py + wb_export.py 并存）、tests/_test_release_engineering.py（docstring 保留 Phase G 文案 + RepoHygieneTests；补 import re）、wb_proxy.py（import 两者并存；peer_is_trusted 采上游 ipv4_mapped 规范化）。另：git rm 上游新增的 revert-guard.yml（Phase G 无 CI 政策）；gh-release.py tag-create 修复「tagger: null 被 GitHub 拒绝（HTTP 422）」。 |
+
+---
+
+# 以下为 Phase F/G 历史记录（1.6.19）
 
 > 本轮用户要求（m05838，逐字）：「上游项目更新了，并入最新的更新，同时GitHub自动并入并构建似乎没有生效，检查问题，查看fndepot仓库上架的要求，准备上架仓库，版本号同步和上游一致」
 > 交付纪律（**发布前**的当时事实）：只出本地测试包——没 push、没打 tag、没发 Release、设备一个字没动（等你测完再决定）。
