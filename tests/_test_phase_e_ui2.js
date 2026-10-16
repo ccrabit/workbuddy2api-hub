@@ -40,16 +40,16 @@ const bareHtml = html
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .replace(/^[ \t]*\/\/.*$/gm, '');
 // The accounts toolbar, as markup: from the first toolbar button through the
-// cockpit group that closes it. The upstream v1.6.19 toolbar is
-// 扫描桌面客户端 / 导入 / 导出 / <span class="toolbar-sep"> / 一键刷新积分,
-// and the cockpit pair sits right after 导出, so the slice runs from the scan
-// button to the separator that follows the cockpit button.
+// "account files" group the cockpit pair lives in. Upstream v1.7.10 dropped the
+// <span class="toolbar-sep"> separator (and its rule) and splits the toolbar
+// into .tb-group chips instead, so the marker for "the group that holds the
+// cockpit pair" is now the first button of the *next* group. The slice runs
+// from the scan button to that button, so the group boundary - the closing
+// </div> plus the next <div class="tb-group"> - is part of what is checked.
 const toolbar = (() => {
   const from = bareHtml.indexOf('id="btnScanDesktop"');
-  const to = bareHtml.indexOf('toolbar-sep', from);
-  // Up to and including the separator's opening tag, so the group boundary is
-  // part of what is checked.
-  return from >= 0 && to > from ? bareHtml.slice(from, to + 20) : '';
+  const to = bareHtml.indexOf('一键刷新积分', from);
+  return from >= 0 && to > from ? bareHtml.slice(from, to) : '';
 })();
 const cssRule = (sel) => {
   const i = style.indexOf(sel);

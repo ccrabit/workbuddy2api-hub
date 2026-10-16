@@ -1791,7 +1791,7 @@ def e7_hardening():
 PKG_MODULES = ["wb_pricing.py", "wb_atrest.py", "wb_modelsdev.py", "wb_prompt.py",
                "wb_ipintel.py", "wb_probes.py", "wb_catalog.py",
                "wb_fingerprint.py", "wb_identity.py", "wb_webagent.py",
-               "wb_webtools.py", "wb_proxy.py", "wb_accounts.py",
+               "wb_webtools.py", "wb_logstore.py", "wb_proxy.py", "wb_accounts.py",
                "dashboard.html", "wb_scheduler.py", "wb_settings.py",
                "wb_tasks.py", "wb_export.py"]
 

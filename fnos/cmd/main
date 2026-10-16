@@ -65,6 +65,12 @@ LOGFILE="${PKGVAR}/${APPNAME}.log"
 PIDFILE="${PKGVAR}/${APPNAME}.pid"
 ACCOUNTS_DIR="${PKGVAR}/accounts"
 USAGE_DIR="${PKGVAR}/usage"
+# Upstream v1.7.5 dumps the last good /v3/config per realm under
+# WB_PROXY_CATALOG_DIR (default: <server dir>/catalog, i.e. inside the installed
+# payload, which the app user cannot write). The dump is never read back
+# (catalog/README.txt: always safe to delete), so it belongs with the rest of
+# the mutable state under TRIM_PKGVAR, where an upgrade does not touch it.
+CATALOG_DIR="${PKGVAR}/catalog"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 
 # appcenter gives up on a slow start around 15s, so aim below that: a healthy
@@ -245,7 +251,7 @@ cmd_start() {
         return 1
     fi
 
-    mkdir -p "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" 2>/dev/null
+    mkdir -p "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" "$CATALOG_DIR" 2>/dev/null
     rotate_log
     cd "$SERVER_DIR" 2>/dev/null || true
 
@@ -254,6 +260,9 @@ cmd_start() {
     # are redirected into TRIM_PKGVAR so an upgrade never touches them.
     # --unix-socket/--base-path are what the App Center entry needs: the fnOS
     # gateway connects to the socket and forwards "/app/<appname>/..." to it.
+    # WB_PROXY_CATALOG_DIR points the v1.7.5+ catalog archive at TRIM_PKGVAR
+    # instead of the (read-only) payload the server otherwise defaults to.
+    WB_PROXY_CATALOG_DIR="$CATALOG_DIR" \
     nohup "$PYTHON" "$SERVER" \
         --host 0.0.0.0 --port "$PORT" --lan \
         --unix-socket "$GATEWAY_SOCKET" --base-path "$GATEWAY_PREFIX" \
@@ -324,10 +333,10 @@ cmd_install() {
     # files; this is the first place where a missing interpreter can be reported
     # with the app's own logic (and with a readable dialog message).
     cmd_python_check || return 1
-    mkdir -p "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" "$PKGETC" 2>/dev/null
+    mkdir -p "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" "$CATALOG_DIR" "$PKGETC" 2>/dev/null
     chmod +x "${APP_ROOT}/cmd/main" 2>/dev/null || true
     # accounts/*.json holds account credentials - keep them to the owner only.
-    chmod 700 "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" 2>/dev/null || true
+    chmod 700 "$PKGVAR" "$ACCOUNTS_DIR" "$USAGE_DIR" "$CATALOG_DIR" 2>/dev/null || true
     # appcenter creates the data directories as root, while the daemon runs as
     # the package user (config/privilege run-as=package). Hand them over when we
     # are allowed to; failing to is not fatal, the daemon then writes as root.

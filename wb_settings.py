@@ -114,6 +114,26 @@ REMAINING_PRIORITY_ENABLED_KEY = "remaining_priority_enabled"
 # 派发路径上的失败归账与退避尺度，老安装保持原样（传输错误仍喂账号熔断）。
 EGRESS_BACKOFF_ENABLED_KEY = "egress_backoff_enabled"
 
+# 日志落库：把运行日志追加写进 usage/logs.sqlite3，重启后仍能回看，方便事后
+# debug。缺失键读作关 —— 关着的时候日志只留在内存环形缓冲里，与上游一字不差；
+# 只有显式 true 才建库、落盘。
+LOG_DB_ENABLED_KEY = "log_db_enabled"
+# 三条互相独立的保留上限，各自「留空 = 这一维不设限」：
+#   * rows  —— 只留最新的 N 条（空 = 不限条数）
+#   * days  —— 只留最近 N 天（空 = 不限天数；**默认 7 天**）
+#   * bytes —— 库文件超过 N 字节就从最旧的删起，缩回 N 以内（空 = 不限大小）
+# 天数给了 7 天默认值，是因为「无限增长的日志库」才是要防的那件事；条数与
+# 字节数留空（不限），因为单独看任何一个都可能偏严或偏松，交给使用者按需填。
+LOG_DB_MAX_ROWS_KEY = "log_db_max_rows"
+LOG_DB_MAX_DAYS_KEY = "log_db_max_days"
+LOG_DB_MAX_BYTES_KEY = "log_db_max_bytes"
+DEFAULT_LOG_DB_MAX_DAYS = 7
+# 上限只用来挡手滑：手编 settings.json 写个天文数字不该把裁剪循环拖死，也不该
+# 让面板显示一个溢出成科学计数法的值。都远大于任何真实部署会用的量级。
+MAX_LOG_DB_MAX_ROWS = 100_000_000
+MAX_LOG_DB_MAX_DAYS = 36500
+MAX_LOG_DB_MAX_BYTES = 100 * 1024 ** 3
+
 _lock = threading.RLock()
 
 
@@ -348,12 +368,18 @@ def _clean_key_entry(entry):
     realm = str(entry.get("realm") or "").strip().lower()
     if realm not in REALMS:
         realm = ""
+    try:
+        concurrency = int(entry.get("concurrency_limit") or entry.get("max_concurrency") or 0)
+    except (TypeError, ValueError):
+        concurrency = 0
+    concurrency = max(0, concurrency)
     return {
         "id": str(entry.get("id") or secrets.token_hex(6)),
         "name": str(entry.get("name") or "").strip() or "未命名",
         "key": key,
         "realm": realm,
         "models": _clean_model_patterns(entry.get("models")),
+        "concurrency_limit": concurrency,
         "enabled": False if deleted_at else entry.get("enabled", True) is not False,
         "created_at": entry.get("created_at") or time.strftime("%Y/%m/%d %H:%M"),
         "deleted_at": deleted_at,
@@ -1122,6 +1148,56 @@ def set_upstream_config(accounts_dir, cfg):
     return clean
 
 
+USAGE_DEFAULTS = {
+    "hour_keep_hours": 48,
+    "day_keep_days": 32,
+}
+
+# 上限只是防手滑：面板输入框贴错位数会把 checkpoint 撑到几百 MB，而它每推进
+# 一点就要整份重写——路由器上 flash 写入慢且费寿命。两周的小时层、一年的日桶
+# 已经远超任何窗口够得到的范围。
+USAGE_LIMITS = {
+    "hour_keep_hours": 24 * 14,
+    "day_keep_days": 366,
+}
+
+def validate_usage_patch(raw):
+    """Strict validation for a panel-saved aggregate-retention patch."""
+    out = {}
+    for key, value in (raw or {}).items():
+        if key not in USAGE_DEFAULTS:
+            raise ValueError("unknown usage setting %r" % key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("%s must be a whole number" % key)
+        if value < 1:
+            raise ValueError("%s cannot be less than 1" % key)
+        if value > USAGE_LIMITS[key]:
+            raise ValueError("%s cannot be more than %d" % (key, USAGE_LIMITS[key]))
+        out[key] = value
+    return out
+
+def usage_config(accounts_dir):
+    """聚合保留窗口（小时层 / 日桶）。面板没设过就是内置默认值。"""
+    stored = load(accounts_dir).get("usage")
+    stored = stored if isinstance(stored, dict) else {}
+    out = {}
+    for key, default in USAGE_DEFAULTS.items():
+        value = stored.get(key, default)
+        if (isinstance(value, bool) or not isinstance(value, int)
+                or value < 1 or value > USAGE_LIMITS[key]):
+            value = default
+        out[key] = value
+    return out
+
+def set_usage_config(accounts_dir, patch):
+    """Persist a validated aggregate-retention patch."""
+    clean = validate_usage_patch(patch)
+    with _lock:
+        data = load(accounts_dir)
+        data["usage"] = deep_merge(data.get("usage"), clean)
+        save(accounts_dir, data)
+    return clean
+
 PROMPT_DEFAULTS = {
     "mode": "passthrough",
     "file": "",
@@ -1175,6 +1251,36 @@ def set_prompt_config(accounts_dir, cfg):
         data["prompt"] = clean
         save(accounts_dir, data)
     return clean
+
+
+def enable_anthropic_messages(accounts_dir):
+    """Whether Anthropic Messages compatibility layer is enabled via panel settings."""
+    return load(accounts_dir).get("enable_anthropic_messages") is True
+
+
+def set_enable_anthropic_messages(accounts_dir, enabled):
+    """Persist the Anthropic Messages toggle. Returns the stored boolean."""
+    enabled = bool(enabled)
+    with _lock:
+        data = load(accounts_dir)
+        data["enable_anthropic_messages"] = enabled
+        save(accounts_dir, data)
+    return enabled
+
+
+def free_model_credit_fallback(accounts_dir):
+    """Whether exhausted free models (deepseek-v4.1-flash) can fall back to credit siblings."""
+    return load(accounts_dir).get("free_model_credit_fallback") is True
+
+
+def set_free_model_credit_fallback(accounts_dir, enabled):
+    """Persist the free model credit fallback toggle. Returns the stored boolean."""
+    enabled = bool(enabled)
+    with _lock:
+        data = load(accounts_dir)
+        data["free_model_credit_fallback"] = enabled
+        save(accounts_dir, data)
+    return enabled
 
 
 def auto_switch_product(accounts_dir):
@@ -1246,6 +1352,142 @@ def set_egress_backoff_enabled(accounts_dir, enabled):
     return enabled
 
 
+def log_db_enabled(accounts_dir):
+    """Whether runtime logs are also appended to usage/logs.sqlite3.
+
+    Off unless the operator turns it on: with the switch off the log lives only
+    in the in-memory ring, exactly as it does upstream, and no database file is
+    created. Turning it on starts a durable copy so a crash, a restart or a
+    slow-moving incident can still be read back afterwards.
+    """
+    return load(accounts_dir).get(LOG_DB_ENABLED_KEY) is True
+
+
+def set_log_db_enabled(accounts_dir, enabled):
+    """Persist the log-database switch. Returns the stored boolean."""
+    enabled = bool(enabled)
+    with _lock:
+        data = load(accounts_dir)
+        data[LOG_DB_ENABLED_KEY] = enabled
+        save(accounts_dir, data)
+    return enabled
+
+
+def _positive_cap(raw, fallback, hard_max):
+    """One retention cap read back: a positive whole number, clamped.
+
+    Anything that is not a usable positive integer (a bool, text, 0, a negative,
+    a hand-edited 1e400) falls back instead of raising - a broken settings.json
+    must not take the log path down with it.
+    """
+    if isinstance(raw, bool):
+        return fallback
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    if value <= 0:
+        return fallback
+    return min(value, hard_max)
+
+
+def _clearable_cap(value, hard_max):
+    """One retention cap on its way to disk: blank or nonsense means "no cap".
+
+    The panel posts an empty string for a field the operator cleared, and 0 is
+    the same intent typed out. Both land as None (JSON null), which is what the
+    getters read back as "unlimited on this axis".
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if number <= 0:
+        return None
+    return min(number, hard_max)
+
+
+def log_db_max_rows(accounts_dir):
+    """Newest-N row cap for the log database; None means no row cap.
+
+    Absent key reads as None: a fresh install keeps every row until the days
+    cap trims it, which is what "rows left blank" asks for.
+    """
+    data = load(accounts_dir)
+    if LOG_DB_MAX_ROWS_KEY not in data:
+        return None
+    raw = data.get(LOG_DB_MAX_ROWS_KEY)
+    if raw is None:
+        return None
+    return _positive_cap(raw, None, MAX_LOG_DB_MAX_ROWS)
+
+
+def set_log_db_max_rows(accounts_dir, value):
+    """Persist the row cap (blank clears it). Returns the stored value."""
+    stored = _clearable_cap(value, MAX_LOG_DB_MAX_ROWS)
+    with _lock:
+        data = load(accounts_dir)
+        data[LOG_DB_MAX_ROWS_KEY] = stored
+        save(accounts_dir, data)
+    return stored
+
+
+def log_db_max_days(accounts_dir):
+    """Age cap for the log database, in days; None means no age cap.
+
+    Unlike the other two, an absent key reads as the 7-day default: an install
+    that has never touched the setting still gets a bounded database. Clearing
+    the field on purpose stores None and turns the cap off.
+    """
+    data = load(accounts_dir)
+    if LOG_DB_MAX_DAYS_KEY not in data:
+        return DEFAULT_LOG_DB_MAX_DAYS
+    raw = data.get(LOG_DB_MAX_DAYS_KEY)
+    if raw is None:
+        return None
+    return _positive_cap(raw, DEFAULT_LOG_DB_MAX_DAYS, MAX_LOG_DB_MAX_DAYS)
+
+
+def set_log_db_max_days(accounts_dir, value):
+    """Persist the age cap (blank clears it). Returns the stored value."""
+    stored = _clearable_cap(value, MAX_LOG_DB_MAX_DAYS)
+    with _lock:
+        data = load(accounts_dir)
+        data[LOG_DB_MAX_DAYS_KEY] = stored
+        save(accounts_dir, data)
+    return stored
+
+
+def log_db_max_bytes(accounts_dir):
+    """File-size cap for the log database, in bytes; None means no size cap.
+
+    Absent key reads as None, like the row cap: the days default is what keeps
+    a fresh install bounded, and the size cap is there for a deployment that
+    wants a hard ceiling on the file itself.
+    """
+    data = load(accounts_dir)
+    if LOG_DB_MAX_BYTES_KEY not in data:
+        return None
+    raw = data.get(LOG_DB_MAX_BYTES_KEY)
+    if raw is None:
+        return None
+    return _positive_cap(raw, None, MAX_LOG_DB_MAX_BYTES)
+
+
+def set_log_db_max_bytes(accounts_dir, value):
+    """Persist the size cap (blank clears it). Returns the stored value."""
+    stored = _clearable_cap(value, MAX_LOG_DB_MAX_BYTES)
+    with _lock:
+        data = load(accounts_dir)
+        data[LOG_DB_MAX_BYTES_KEY] = stored
+        save(accounts_dir, data)
+    return stored
+
+
 def daily_chat_web(accounts_dir):
     """Whether the intl daily check-in also opens a web-channel conversation.
 
@@ -1292,6 +1534,108 @@ def set_daily_chat_model(accounts_dir, model):
         data["daily_chat_model"] = model
         save(accounts_dir, data)
     return model
+
+
+#: 网页通道一轮等多久（秒）的默认值。与 wb_accounts.WEB_TURN_TIMEOUT 同值：
+#: 没配过的部署保持既有行为，改过的部署按自己配的来。
+DAILY_CHAT_WEB_TIMEOUT_DEFAULT = 120
+#: 上限只是防手滑。每轮等待时间翻倍，配成几百秒会让单账号最坏情况跑到小时级。
+DAILY_CHAT_WEB_TIMEOUT_MAX = 3600
+#: 网页通道总共试几次（含第一轮）的默认值，与 wb_accounts.WEB_TURN_ATTEMPTS 同值。
+DAILY_CHAT_WEB_ATTEMPTS_DEFAULT = 3
+#: 上限同样只是防手滑：最坏等待是 base×(2^次数−1) 秒，5 次已经接近一小时。
+DAILY_CHAT_WEB_ATTEMPTS_MAX = 5
+
+
+def daily_chat_web_retry(accounts_dir):
+    """Whether a failed web-channel turn is tried again.
+
+    On unless the operator turns it off. The usual failure is a session that is
+    still ``working`` when the first wait runs out - slow, not broken - and the
+    daily activity is the only thing that earns the 30/50 credits, so giving up
+    on the first timeout silently loses the day. Off restores the old
+    single-attempt behaviour.
+    """
+    value = load(accounts_dir).get("daily_chat_web_retry")
+    return True if value is None else value is True
+
+
+def set_daily_chat_web_retry(accounts_dir, enabled):
+    """Persist the web-channel retry toggle. Returns the stored boolean."""
+    enabled = bool(enabled)
+    with _lock:
+        data = load(accounts_dir)
+        data["daily_chat_web_retry"] = enabled
+        save(accounts_dir, data)
+    return enabled
+
+
+def daily_chat_web_attempts(accounts_dir, default=None):
+    """How many times the web channel is tried in total, the first one included.
+
+    ``default`` is what an unset install gets, so a caller with its own
+    built-in default keeps it. Out-of-range or non-integer values fall back to
+    it too, so a hand-edited settings.json cannot park the sweep on one
+    account.
+    """
+    if default is None:
+        default = DAILY_CHAT_WEB_ATTEMPTS_DEFAULT
+    value = load(accounts_dir).get("daily_chat_web_attempts")
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or value < 1 or value > DAILY_CHAT_WEB_ATTEMPTS_MAX):
+        return default
+    return value
+
+
+def set_daily_chat_web_attempts(accounts_dir, attempts):
+    """Persist the total number of tries. Returns the stored whole number."""
+    if isinstance(attempts, bool) or not isinstance(attempts, int):
+        raise ValueError("daily_chat_web_attempts must be a whole number")
+    if attempts < 1:
+        raise ValueError("daily_chat_web_attempts cannot be less than 1")
+    if attempts > DAILY_CHAT_WEB_ATTEMPTS_MAX:
+        raise ValueError("daily_chat_web_attempts cannot be more than %d"
+                         % DAILY_CHAT_WEB_ATTEMPTS_MAX)
+    with _lock:
+        data = load(accounts_dir)
+        data["daily_chat_web_attempts"] = attempts
+        save(accounts_dir, data)
+    return attempts
+
+
+def daily_chat_web_timeout(accounts_dir, default=None):
+    """Seconds to wait for the first web-channel turn; later tries double it.
+
+    ``default`` is what an unset install gets, so a caller that has its own
+    built-in default (the env-overridable ``WB_WEB_TURN_TIMEOUT``) keeps it
+    instead of being silently reset to 120 by this setting's existence.
+    Anything that is not a whole number in range also falls back to it, so a
+    hand-edited settings.json cannot make the scheduler hang on a huge value
+    or trip over a string.
+    """
+    if default is None:
+        default = DAILY_CHAT_WEB_TIMEOUT_DEFAULT
+    value = load(accounts_dir).get("daily_chat_web_timeout")
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or value < 1 or value > DAILY_CHAT_WEB_TIMEOUT_MAX):
+        return default
+    return value
+
+
+def set_daily_chat_web_timeout(accounts_dir, seconds):
+    """Persist the per-attempt wait. Returns the stored whole number of seconds."""
+    if isinstance(seconds, bool) or not isinstance(seconds, int):
+        raise ValueError("daily_chat_web_timeout must be a whole number of seconds")
+    if seconds < 1:
+        raise ValueError("daily_chat_web_timeout cannot be less than 1")
+    if seconds > DAILY_CHAT_WEB_TIMEOUT_MAX:
+        raise ValueError("daily_chat_web_timeout cannot be more than %d"
+                         % DAILY_CHAT_WEB_TIMEOUT_MAX)
+    with _lock:
+        data = load(accounts_dir)
+        data["daily_chat_web_timeout"] = seconds
+        save(accounts_dir, data)
+    return seconds
 
 
 def local_web_tools(accounts_dir):

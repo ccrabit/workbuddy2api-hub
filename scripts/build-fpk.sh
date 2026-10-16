@@ -227,6 +227,7 @@ build_payload() {
         --exclude='./docs' \
         --exclude='./accounts' \
         --exclude='./usage' \
+        --exclude='./catalog' \
         --exclude='./dist' \
         --exclude='./build' \
         --exclude='./fnos' \
@@ -268,7 +269,7 @@ build_payload() {
     for required in wb_proxy.py wb_export.py wb_accounts.py dashboard.html LICENSE \
                     wb_pricing.py wb_atrest.py wb_modelsdev.py wb_prompt.py \
                     wb_ipintel.py wb_probes.py wb_catalog.py wb_fingerprint.py \
-                    wb_identity.py wb_webagent.py wb_webtools.py \
+                    wb_identity.py wb_webagent.py wb_webtools.py wb_logstore.py \
                     wb_scheduler.py wb_settings.py wb_tasks.py; do
         [ -f "${PAYLOAD_DIR}/server/${required}" ] \
             || die "payload is missing server/${required} - did upstream rename it?"
@@ -276,7 +277,12 @@ build_payload() {
     [ -f "${PAYLOAD_DIR}/server/pricing/pricing.json" ] \
         || die "payload is missing server/pricing/ - the pricing store ships with the server"
     local forbidden
-    for forbidden in accounts usage tests docs; do
+    # catalog/ is the upstream runtime dump of the last successful /v3/config
+    # (catalog/README.txt: never read back, always safe to delete) - it follows
+    # WB_PROXY_CATALOG_DIR on the device, so a copy in the package is both
+    # pointless and, because the root tar reads the working tree, a leak of
+    # whatever the build machine happened to have cached.
+    for forbidden in accounts usage catalog tests docs; do
         if [ -e "${PAYLOAD_DIR}/server/${forbidden}" ]; then
             die "payload must not contain ${forbidden}/ (credentials, or machine-only material)"
         fi
