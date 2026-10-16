@@ -1,19 +1,23 @@
-# Phase F 交付说明：WorkBuddy2API-Hub 1.7.3（飞牛包，已发布）
+# Phase F 交付说明：WorkBuddy2API-Hub 1.7.10（飞牛包，已发布）
 
-> 本轮用户要求（m00001）：「读取项目开发情况，然后同步上游更新至1.7.3版本」。
-> **Phase H 状态（2026-10-14，本轮）**：并入 `upstream/main` = `c7dad8f`（v1.7.3），合并提交 `a967a16`「Merge upstream/main (v1.7.3) into the fnOS fork」（父 `282cd22` + `c7dad8f`），tag **`fnos-1.7.3`** 重指到该合并提交；全程按 `docs/phase-g-local-release.md` 本地发布：run_all 全绿 → 本地构建 → verify-fpk 0 failed → tag（git push + API tag-create）→ Release（id `412339033`）上传两资产 → 回填根 `fnpack.json`。历史内容（Phase F/G 的 1.6.19 交付与根因分析）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
+> 本轮用户要求（m00670，逐字）：「同步上游更新至最新版」。
+> **Phase I 状态（2026-10-16，本轮）**：并入 `upstream/main` = `7e5c38d`（v1.7.10，上游 `release: v1.7.10`），合并提交 `3970ed3`「Merge upstream/main (v1.7.10) into the fnOS fork」（父 `d32dac8` + `7e5c38d`），tag **`fnos-1.7.10`** 指向该合并提交；发布仍按 `docs/phase-g-local-release.md` 的本地流程（本仓库没有 CI）：本地构建 → `verify-fpk` 70 passed / 0 failed（未打 tag 态）→ tag（git push）→ Release 上传两资产 → 回填根 `fnpack.json` → `run_all --jobs 4` 全绿。
+> **设备现状（本轮开始前就已是这个状态）**：设备当前装的是 1.7.3 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.3"`，且设备 `server/**` 与 `dist/WorkBuddy2API-Hub_1.7.3_all.fpk` 的载荷逐字节相同（装载时间 2026-10-14 13:37，早于本轮）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
+> 历史内容（Phase F/G 的 1.6.19 交付与根因分析、Phase H 的 1.7.3）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
-## 1. 包与已发布资产（1.7.3，本轮）
+## 1. 包与已发布资产（1.7.10，本轮）
 
 | 项 | 值 |
 |---|---|
-| 文件 | `dist/WorkBuddy2API-Hub_1.7.3_all.fpk` |
-| 大小 | 740055 B |
-| sha256 | `31769424dc3157cedc837eb56c2f0a2d28ec06dafbbb3542e1e0435c760f634d` |
-| manifest checksum | `3c2262d6015672dbcf28cdc5650dc9d8`（= 包内 `app.tgz` 的 md5） |
-| 版本 / appname | `1.7.3` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
-| **已发布 Release 资产** | tag `fnos-1.7.3`（指向合并提交 `a967a16`）的 Release（id `412339033`）挂的就是上面这一个字节：**740055 B**、sha256 `31769424dc3157cedc837eb56c2f0a2d28ec06dafbbb3542e1e0435c760f634d`（本地构建 → 本地上传，「本地包 == 资产」逐字节成立）；根 `fnpack.json` 已按资产指纹回填（sha256/size 740055/updated_at 2026-10-14）。 |
-| 冲突解决 | 5 个文件：README.md（套件数 155 = 116 py + 39 js；Unreleased 保留我方条目 + 上游指针至 v1.7.3）、dashboard.html（fmtTok 与 fmtCompact 并存、creditPerM/fmtPerM 与表头排序并存、KPI 卡与 token 单元格采上游 fmtCompact 并保留精确值 title）、release/portable.txt（wb_egress.py + wb_export.py 并存）、tests/_test_release_engineering.py（docstring 保留 Phase G 文案 + RepoHygieneTests；补 import re）、wb_proxy.py（import 两者并存；peer_is_trusted 采上游 ipv4_mapped 规范化）。另：git rm 上游新增的 revert-guard.yml（Phase G 无 CI 政策）；gh-release.py tag-create 修复「tagger: null 被 GitHub 拒绝（HTTP 422）」。 |
+| 文件 | `dist/WorkBuddy2API-Hub_1.7.10_all.fpk` |
+| 大小 | 800307 B |
+| sha256 | `7d8cc1d800f4482e4f573587c5cbbe69ee4c61b988fc710317833f96562d4809` |
+| manifest checksum | `4ce9d4ccc06bef178fa5af1726551c33`（= 包内 `app.tgz` 的 md5） |
+| 载荷 | **43 个文件**（1.7.3 是 42 个；本版新增上游 v1.7.4 的 `server/wb_logstore.py`），`.pyc` 与 `__pycache__` **0 命中**；`catalog/`（v1.7.5 起的模型目录存档目录）只在树内、打包时已 `--exclude`；根 `fnpack.json` **不入包**（自指清单，见 `docs/phase-g-local-release.md` §6/§8） |
+| 版本 / appname | `1.7.10` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
+| 显示名 | `WorkBuddy2API-Hub` |
+| **已发布 Release 资产** | tag `fnos-1.7.10`（指向合并提交 `3970ed3`）的 Release 挂的就是上面这一个字节：**800307 B**、sha256 `7d8cc1d800f4482e4f573587c5cbbe69ee4c61b988fc710317833f96562d4809`（本地构建 → 本地上传，「本地包 == 资产」逐字节成立）；根 `fnpack.json` 已按资产指纹回填（sha256 + size 800307 + updated_at 2026-10-16）。 |
+| 冲突解决 | **2 个文件**。README.md：套件数重算为 166 = 123 py + 43 js；Unreleased 段保留我方 Phase G/H 条目、新增 Phase I 条目，并取上游指向 `docs/CHANGELOG.md` 的指针（该文件现覆盖 v1.4.5 ~ v1.7.10）。dashboard.html：我方移动端兜底/使用说明/WP-E6 那套 CSS 与上游 `#pageAnalytics` 的 Bento 重设计并存；cockpit 的 realm 选择与导出按钮留在「账号文件」那个 `.tb-group` 里——上游用 `.tb-group` 取代了 `.toolbar-sep`，所以我方那行分隔 `span` 已删。**飞牛侧 3 处适配**：`scripts/build-fpk.sh`（打包新的 `wb_logstore.py`、把 `catalog/` 排除并列入 forbidden）、`fnos/cmd/main`（`WB_PROXY_CATALOG_DIR` 指向 `${PKGVAR}/catalog`，否则 v1.7.5 起的目录存档落到只读载荷上静默失败）、`tests/`（PKG_MODULES 加 `wb_logstore.py`；`_test_phase_e_ui2.js` 的工具栏切片终点随上游去掉 `.toolbar-sep` 而改为下一组第一个按钮）。上游 v1.7.4 ~ v1.7.10 的逐版本要点见 `docs/CHANGELOG.md`。 |
 
 ---
 
@@ -22,7 +26,7 @@
 > 本轮用户要求（m05838，逐字）：「上游项目更新了，并入最新的更新，同时GitHub自动并入并构建似乎没有生效，检查问题，查看fndepot仓库上架的要求，准备上架仓库，版本号同步和上游一致」
 > 交付纪律（**发布前**的当时事实）：只出本地测试包——没 push、没打 tag、没发 Release、设备一个字没动（等你测完再决定）。
 > **发布后状态（2026-10-10，你选了「确认，按完整顺序执行」之后）**：已 push `main`、已打并推送 annotated tag **`fnos-1.6.19`**、已由 CI 构建并发 Release（资产见 §1）、`fnpack.json` 已按**资产**指纹回填并推送。
-> 设备状态请你以 §6 为准：**设备当前装的是 1.6.19**，是**你自己**用我在发布前交付的那份本地包装上去的；我方对设备自始至终只做只读核查（没有 install/upgrade/uninstall）。
+> 设备状态请以 §6 为准：**那一轮设备装的是 1.6.19**，是**你自己**用我在发布前交付的那份本地包装上去的；我方对设备自始至终只做只读核查（没有 install/upgrade/uninstall）。
 
 ## 1. 包与已发布资产
 
@@ -45,7 +49,7 @@
 
 **历史指纹（均已被上面的覆盖，留档）**：Phase F 的本机构建 `577330 B` / `71edade7833191f189ade8d1ca1938faa12db9d0cd90ec316c3596a86c11ac98`；Phase F 由 CI 构建并首发的资产 `577842 B` / `3d341706c6fec4f7620ad75bba49fd3347b1b7c32c41d51cd8a4238c52f8a34c`（app.tgz md5 `806ce4e9ac0cda75485d34ed04657230`）。两者与设备的载荷逐文件相同。
 
-**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当前装的是 1.6.19 ⇒ 数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别**实测只有 7 项**：内容不同的 6 个 = `server/dashboard.html`（最大，两轮上游面板改造）、`server/wb_proxy.py`、`server/wb_accounts.py`、`server/wb_scheduler.py`、`server/wb_tasks.py`、`server/wb_settings.py`；另有 `server/fnpack.json` 只在旧包里（本包不再内嵌，见 `docs/phase-g-local-release.md` §6/§8）。其余 33 个载荷文件逐字节相同。同版本号能否覆盖安装**未在真机验证**（应用中心一般在「待装版本 ≥ 已装版本」时接受，本包与设备同为 1.6.19）；若被拒，就按上面的卸载口径处理。
+**装法**：应用中心 →「手动安装」→ 选这个 fpk。设备当时装的是 1.6.19 ⇒ 当时数字上可以原地升级/覆盖安装，**不需要卸载**（卸载会带走 `/vol1/@appdata/workbuddy2api` 里的账号/用量，除非先把 `wizard/uninstall` 挪开）。**注意**：设备上那份是 Phase F 的旧资产（载荷 40 个文件），与本包的差别**实测只有 7 项**：内容不同的 6 个 = `server/dashboard.html`（最大，两轮上游面板改造）、`server/wb_proxy.py`、`server/wb_accounts.py`、`server/wb_scheduler.py`、`server/wb_tasks.py`、`server/wb_settings.py`；另有 `server/fnpack.json` 只在旧包里（本包不再内嵌，见 `docs/phase-g-local-release.md` §6/§8）。其余 33 个载荷文件逐字节相同。同版本号能否覆盖安装**未在真机验证**（应用中心一般在「待装版本 ≥ 已装版本」时接受，本包与设备同为 1.6.19）；若被拒，就按上面的卸载口径处理。
 
 **升级后请重点看**：
 1. 应用中心点「打开」→ 是否**免密**直接进面板（这是本轮要修的毛病：以前飞牛会话老化后又会弹密码）。
