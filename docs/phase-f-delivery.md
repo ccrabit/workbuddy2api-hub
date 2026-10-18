@@ -1,27 +1,24 @@
-# Phase F 交付说明：WorkBuddy2API-Hub 1.7.10（飞牛包，已发布）
+# Phase F 交付说明：WorkBuddy2API-Hub 1.7.13（飞牛包）
 
-> 本轮用户要求（m00670，逐字）：「同步上游更新至最新版」。
-> **Phase I 状态（2026-10-16，本轮）**：并入 `upstream/main` = `7e5c38d`（v1.7.10，上游 `release: v1.7.10`），合并提交 `3970ed3`「Merge upstream/main (v1.7.10) into the fnOS fork」（父 `d32dac8` + `7e5c38d`），tag **`fnos-1.7.10`** 指向该合并提交（= 构建用的那个提交）；发布按 `docs/phase-g-local-release.md` 的本地流程（本仓库没有 CI）：本地构建 → 本地校验 → tag → Release 上传两资产 → 回填根 `fnpack.json` → `run_all --jobs 4` 全绿。
-> **已发布（本轮实测）**：tag 与 `main` 都在 `ccrabit/workbuddy2api-hub` 上（`refs/heads/main` = `288c553`，`refs/tags/fnos-1.7.10` = tag 对象 `d4a1060c`）；Release **414988176**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.7.10>）非草稿，两个资产 `state = uploaded`（800307 B / 99 B）；从 `api.github.com` 的资产端点下载回本地，与 `dist/WorkBuddy2API-Hub_1.7.10_all.fpk` **逐字节相同**（sha256 `7d8cc1d8…`），也等于旁置 `.sha256`、根 `fnpack.json` 与 `/tmp/fndepot-src/fnpack.json` 里登记的那一份。回填提交 `138f82f`、发布正文提交 `288c553` 紧随合并提交之后，都在 `main` 上。
-> **发布后实测**：`python3 tests/run_all.py --jobs 4` = **166 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=369 FAIL=0 SKIP=2）；`bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.7.10_all.fpk` = **70 passed / 0 failed**（1 条 SKIP，原因见下一条）。
-> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：按 runbook，tag 指向**构建用的那个提交** `3970ed3`，所以 `git checkout fnos-1.7.10` 得到的是**构建态**——那棵树里的 `fnpack.json` 还 advertise `1.7.3`，也没有 `docs/phase-i-release-body.md`（`verify-fpk.sh` 那 1 条 SKIP 就是「tag 不在 HEAD 上」的表现，因为回填提交在合并提交之后）。已发布的元数据在 `main` 上（`138f82f` 只留 `1.7.10` 单键、`288c553` 是 Release 正文）。对使用方无影响：应用内更新检查与 FnDepot 都按 **tag 名 + Release 资产** 取值，而 `main` 上的 `fnpack.json` 已与资产一致。若下一轮希望「tag 的树」也是发布态，顺序应改成：构建 → 生成 `.sha256` → 回填 `fnpack.json` 并提交 → **再**打 tag（即 runbook §5 与 §8 互换）。
-> **FnDepot 源已更新（同一轮，用户确认后执行）**：`ccrabit/FnDepot` 根 `fnpack.json` 从 `1.6.19` 直接推进到 `1.7.10` 单键（提交 `f2bfd51`「WorkBuddy2API-Hub 1.7.10 应用源」，`download_url` → Release `fnos-1.7.10`、800307 B / sha256 `7d8cc1d8…`、`updated_at` `2026-10-16T21:18:00+08:00`）；线上内容与暂存源 `/tmp/fndepot-src` 逐字节相同，并通过中心仓库校验器（`tests/_test_fndepot_source.py` = PASS=77 FAIL=0）。发布后清单第 7 条复验：`download_url` 实测 HTTP 200，下到的文件 sha256 与源上登记值一致。设备仍是 1.7.3，本轮对设备**只做只读核查**。
-> **设备现状（本轮开始前就已是这个状态）**：设备当前装的是 1.7.3 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.3"`，且设备 `server/**` 与 `dist/WorkBuddy2API-Hub_1.7.3_all.fpk` 的载荷逐字节相同（装载时间 2026-10-14 13:37，早于本轮）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
-> 历史内容（Phase F/G 的 1.6.19 交付与根因分析、Phase H 的 1.7.3）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
+> 本轮用户要求（m01205，逐字）：「同步上游更新至最新版」。
+> **Phase J 状态（2026-10-18，本轮）**：并入 `upstream/main` = `fe30fa0`（`release: v1.7.13` 之后又有 44 个提交，其中 16 个是 merge/revert），合并提交 **`aaa030f`**「Merge upstream/main (v1.7.13) into the fnOS fork」（父 `6618195` + `fe30fa0`）；合并基 `7e5c38d`（v1.7.10）→ `fe30fa0`：**63 个提交、69 个文件、+9626/-492**，覆盖 release **v1.7.11 / v1.7.12 / v1.7.13**。发布 tag **`fnos-1.7.13`** 指向该合并提交（= 构建用的那个提交）；发布按 `docs/phase-g-local-release.md` 的本地流程（本仓库没有 CI）：本地构建 → 本地校验 → tag → Release 上传两资产 → 回填根 `fnpack.json` → `run_all --jobs 4` 全绿。
+> **版本口径**：包版本取上游最新 release tag 的三段号 = `1.7.13`；因为合并目标是 `upstream/main`（不是 tag），这棵树同时含 v1.7.13 之后尚未发版的 44 个上游提交（撞线样本区块 #253、`/u/<ref>/v1/...` 按账号定址 #455、`GET /v1/balance-summary`、`WB_PRESERVE_REQUEST_CONTRACT`、工具 schema 递归规整（11129/11101）、排程时段设置 #456、`tool_result` 图片保真 #452、403/11140 不换号连坐 #448 等）。
+> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：按 runbook，tag 指向**构建用的那个提交** `aaa030f`，所以 `git checkout fnos-1.7.13` 得到的是**构建态**——那棵树里的 `fnpack.json` 还 advertise `1.7.10`（回填提交在合并提交之后；`verify-fpk.sh` 那 1 条 SKIP 就是「tag 不在 HEAD 上」的表现）。已发布的元数据在 `main` 上。对使用方无影响：应用内更新检查与 FnDepot 都按 **tag 名 + Release 资产** 取值。
+> **设备现状**：设备当前装的是 1.7.10 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.10"`（用户自行安装，早于本轮）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
+> 历史内容（Phase F/G 的 1.6.19 交付与根因分析、Phase H 的 1.7.3、Phase I 的 1.7.10）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
-## 1. 包与已发布资产（1.7.10，本轮）
+## 1. 包与已发布资产（1.7.13，本轮）
 
 | 项 | 值 |
 |---|---|
-| 文件 | `dist/WorkBuddy2API-Hub_1.7.10_all.fpk` |
-| 大小 | 800307 B |
-| sha256 | `7d8cc1d800f4482e4f573587c5cbbe69ee4c61b988fc710317833f96562d4809` |
-| manifest checksum | `4ce9d4ccc06bef178fa5af1726551c33`（= 包内 `app.tgz` 的 md5） |
-| 载荷 | **43 个文件**（1.7.3 是 42 个；本版新增上游 v1.7.4 的 `server/wb_logstore.py`），`.pyc` 与 `__pycache__` **0 命中**；`catalog/`（v1.7.5 起的模型目录存档目录）只在树内、打包时已 `--exclude`；根 `fnpack.json` **不入包**（自指清单，见 `docs/phase-g-local-release.md` §6/§8） |
-| 版本 / appname | `1.7.10` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
+| 文件 | `dist/WorkBuddy2API-Hub_1.7.13_all.fpk` |
+| 大小 | 872207 B |
+| sha256 | `7fd2bd2dbb141944dc41db2df1974093344799c9eca758c1c273d535b2e334f8` |
+| manifest checksum | `2f09ba938066ea65d4665ea60fdd7daf`（= 包内 `app.tgz` 的 md5） |
+| 载荷 | **45 个文件 + 16 个目录**（1.7.10 是 43 个文件：本版新增上游 `server/wb_quota_scan.py`、`server/wb_window_probe.py`、`server/wb_update_request.py`、`server/console_tail.py`；同时 `find_err.js` 与 `_fetch_pricing.py` 被上游 #398 搬进 `tools/` 而不再进包），`.pyc` 与 `__pycache__` **0 命中**；`tools/`、`ops/`、`catalog/`、`tests/`、`docs/`、`accounts/`、`usage/` 打包时一律 `--exclude`；根 `fnpack.json` 不入包（自指清单） |
+| 版本 / appname | `1.7.13` / `workbuddy2api`（**appname 故意不改**：数据目录、网关前缀、已装应用的身份都挂在它上面） |
 | 显示名 | `WorkBuddy2API-Hub` |
-| **已发布 Release 资产** | tag `fnos-1.7.10`（指向合并提交 `3970ed3`）的 Release 挂的就是上面这一个字节：**800307 B**、sha256 `7d8cc1d800f4482e4f573587c5cbbe69ee4c61b988fc710317833f96562d4809`（本地构建 → 本地上传，「本地包 == 资产」逐字节成立）；根 `fnpack.json` 已按资产指纹回填（sha256 + size 800307 + updated_at 2026-10-16）。 |
-| 冲突解决 | **2 个文件**。README.md：套件数重算为 166 = 123 py + 43 js；Unreleased 段保留我方 Phase G/H 条目、新增 Phase I 条目，并取上游指向 `docs/CHANGELOG.md` 的指针（该文件现覆盖 v1.4.5 ~ v1.7.10）。dashboard.html：我方移动端兜底/使用说明/WP-E6 那套 CSS 与上游 `#pageAnalytics` 的 Bento 重设计并存；cockpit 的 realm 选择与导出按钮留在「账号文件」那个 `.tb-group` 里——上游用 `.tb-group` 取代了 `.toolbar-sep`，所以我方那行分隔 `span` 已删。**飞牛侧 3 处适配**：`scripts/build-fpk.sh`（打包新的 `wb_logstore.py`、把 `catalog/` 排除并列入 forbidden）、`fnos/cmd/main`（`WB_PROXY_CATALOG_DIR` 指向 `${PKGVAR}/catalog`，否则 v1.7.5 起的目录存档落到只读载荷上静默失败）、`tests/`（PKG_MODULES 加 `wb_logstore.py`；`_test_phase_e_ui2.js` 的工具栏切片终点随上游去掉 `.toolbar-sep` 而改为下一组第一个按钮）。上游 v1.7.4 ~ v1.7.10 的逐版本要点见 `docs/CHANGELOG.md`。 |
+| 冲突解决 | **3 个文件**。README.md：套件数按合并后的树重算为 **179 = 134 py + 45 js**；Unreleased 段保留我方 Phase G/H/I 条目、新增 Phase J 条目，指针改为 `v1.4.5 ~ v1.7.13`。dashboard.html：`postJSON` 同时保留上游「服务已关闭直接报错」短路与飞牛的 `wbUrl()` 网关前缀。release/portable_runtime.py：必需文件表取并集（上游新增 `pythonw.exe`、`Lib/stat.py`、`Lib/platform.py`、`Lib/calendar.py`，飞牛仍要 `Lib/socketserver.py`、`Lib/struct.py`）。**合并后修掉的两处上游带进来的绝对路径**（飞牛挂在 `/app/workbuddy2api` 下会 404）：`dashboard.html` 的眼睛按钮 `window.open('/dashboard?tab=logs')` → `wbUrl(...)`、关闭服务后的存活复核 `fetch('/health')` → `wbUrl('/health')`；`tests/_test_gateway_ui.js` 的 fetch 调用点数随之 5 → 6，上游 `tests/_test_console_shutdown.js` 的 `window.open('/dashboard?tab=logs')` 字面断言放宽为「允许外面套一层 `wbUrl()`」（断言本意是「新窗口打开日志页、不经服务端进程」）。**飞牛侧 3 处适配**：`scripts/build-fpk.sh`（载荷守卫名单补三个新模块，漏一个就是装完启动即 ImportError；tar 排除把已失效的 `./_fixbats.py` 换成整目录 `./tools` + `./ops`）、`tests/_test_phase_e_verify.py`（`PKG_MODULES` 同步；e12 的「payload 模块都还在」允许 `tools/` 归档位置）、`.github/workflows/release.yml` 的 mode 回到上游的 100644（内容与上游逐字节一致）。新增运行时状态全部落 `accounts/`（`quota_scan.json`、`model_windows.json`），fnOS 侧不需要新目录；`WB_UPDATE_INSTALL_ENABLED` 在飞牛上保持不设（没有 systemd path unit，面板按钮本来就会禁用）。 |
 
 ---
 

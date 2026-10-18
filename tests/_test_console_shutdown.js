@@ -19,7 +19,11 @@ const html = dashboardHtml();
 assert.ok(/id="btnConsoleToggle"/.test(html), '顶栏要有日志窗口按钮');
 assert.ok(/title="在新窗口打开运行日志"/.test(html),
   '按钮文案要说明它是打开窗口，不是开关一个进程');
-assert.ok(/window\.open\('\/dashboard\?tab=logs'/.test(html),
+// 飞牛层把页面挂在 /app/workbuddy2api 下，绝对路径在这里会 404，所以本 fork 的
+// 写法是 window.open(wbUrl('/dashboard?tab=logs'))。断言的本意是「新窗口打开运行
+// 日志页、不经过服务端进程」，两处前缀包装不改变这一点（_test_gateway_ui.js 钉
+// 住「页面里每个导航都走 wbUrl()」）。
+assert.ok(/window\.open\((?:wbUrl\()?'\/dashboard\?tab=logs'/.test(html),
   '眼睛按钮要直接 window.open 运行日志页');
 assert.ok(!/postJSON\('\/console\/toggle'/.test(html),
   '页面不应再请求 /console/toggle');
