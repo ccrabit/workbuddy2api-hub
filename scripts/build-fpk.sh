@@ -244,7 +244,8 @@ build_payload() {
         --exclude='./.dockerignore' \
         --exclude='./.gitignore' \
         --exclude='./fnpack.json' \
-        --exclude='./_fixbats.py' \
+        --exclude='./tools' \
+        --exclude='./ops' \
         . | tar -C "${PAYLOAD_DIR}/server" -xf -
 
     # The desktop entry appcenter lists for the app comes from ui/config *inside
@@ -270,7 +271,8 @@ build_payload() {
                     wb_pricing.py wb_atrest.py wb_modelsdev.py wb_prompt.py \
                     wb_ipintel.py wb_probes.py wb_catalog.py wb_fingerprint.py \
                     wb_identity.py wb_webagent.py wb_webtools.py wb_logstore.py \
-                    wb_scheduler.py wb_settings.py wb_tasks.py; do
+                    wb_scheduler.py wb_settings.py wb_tasks.py \
+                    wb_quota_scan.py wb_window_probe.py wb_update_request.py; do
         [ -f "${PAYLOAD_DIR}/server/${required}" ] \
             || die "payload is missing server/${required} - did upstream rename it?"
     done

@@ -1793,7 +1793,8 @@ PKG_MODULES = ["wb_pricing.py", "wb_atrest.py", "wb_modelsdev.py", "wb_prompt.py
                "wb_fingerprint.py", "wb_identity.py", "wb_webagent.py",
                "wb_webtools.py", "wb_logstore.py", "wb_proxy.py", "wb_accounts.py",
                "dashboard.html", "wb_scheduler.py", "wb_settings.py",
-               "wb_tasks.py", "wb_export.py"]
+               "wb_tasks.py", "wb_export.py", "wb_quota_scan.py",
+               "wb_window_probe.py", "wb_update_request.py"]
 
 
 def e5_package():
@@ -3042,7 +3043,16 @@ def _release_parts(fp, dest):
 def _repo_path_for_payload(rel):
     """payload 布局 ↔ 仓库布局（e5 用的同一张映射表）。"""
     if rel.startswith("server/"):
-        return os.path.join(ROOT, rel[len("server/"):])
+        name = rel[len("server/"):]
+        path = os.path.join(ROOT, name)
+        if not os.path.exists(path):
+            # 上游 #398 把根目录的维护脚本归档进 tools/（R100，内容零改动），
+            # 旧包 payload 里它们仍躺在 server/ 根下。文件被搬进 tools/ 不算
+            # 「源文件已删除」——真删了才会两个位置都找不到。
+            archived = os.path.join(ROOT, "tools", name)
+            if os.path.exists(archived):
+                return archived
+        return path
     if rel == "ui/config":
         return os.path.join(ROOT, "fnos/ui/config")
     if rel == "ui/images/64.png":

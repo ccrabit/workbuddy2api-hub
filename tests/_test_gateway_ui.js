@@ -152,7 +152,9 @@ async function captureLogs(fn) {
 
   await check('every fetch in the page goes through wbUrl()', () => {
     const sites = [...html.matchAll(/\bfetch\(([^)]*)/g)].map(m => m[1].trim());
-    eq(sites.length, 5, 'fetch call sites');
+    // 上游 v1.7.13 (#426) 的「关闭服务后用 /health 复核」新增了第 6 个调用点，
+    // 它同样必须走前缀包装（飞牛挂在 /app/workbuddy2api 下，裸 /health 会 404）。
+    eq(sites.length, 6, 'fetch call sites');
     for (const arg of sites) {
       ok(arg.startsWith('wbUrl('), 'a fetch bypasses the mount prefix: fetch(' + arg);
     }
