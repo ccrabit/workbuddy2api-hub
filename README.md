@@ -135,7 +135,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 179 个套件：134 个 Python + 45 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 180 个套件：135 个 Python + 45 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
@@ -317,6 +317,18 @@ python wb_agents.py restore --client codex                 # 随时字节级还�
 - 设置环境变量 `WB_MAX_PAYLOAD_BYTES=33554432`（单位为字节）；
 - 此环境变量仅在进程启动时读取一次，修改后重启 `wb-proxy` 即可生效。
 
+### 13. 流式响应空闲心跳（`WB_STREAM_KEEPALIVE_SECONDS`）
+
+网关的流式响应（`/v1/chat/completions`、`/v1/responses`、`/v1/messages`）只在**上游吐字节**时才往客户端写。上游长思考、排队或卡住时，链路上任何「按多久没收到字节判活」的设备都会把连接掐掉 —— nginx 的 `proxy_read_timeout` 默认就是 60 秒，Lucky / 路由器 / Cloudflare 隧道同理 —— 客户端看到的是「回答到一半断线」，而服务端日志里只有一次 `client_aborted`。
+
+本版起，三个流式出口在空闲时补一行 SSE 注释 `: keepalive`（注释行任何客户端都会忽略，不改协议，也不影响任何 SDK 的解析）：
+
+- 默认 **10 秒**；一直在出字的流里**一次都不写**，所以既不增加延迟、也不会污染内容；
+- `WB_STREAM_KEEPALIVE_SECONDS=0` 关闭（确认链路没有空闲超时，或要抓包看原始帧时用）；
+- 上限 300 秒；空值 / 非法值回落到默认 10 秒；进程启动时读取一次，改完重启 `wb-proxy` 生效。
+
+这套心跳是**产品侧**的修法：不用改 Lucky / nginx / 隧道配置，也不会因为换一条链路就复发。
+
 ---
 
 ### 11. 后台模型重定向（`WB_BACKGROUND_MODEL_NAMES` / `WB_BACKGROUND_MODEL_TARGET`）
@@ -433,6 +445,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 ### Unreleased
 
+- **流式响应补空闲心跳，修「回答到一半断线」**：三个流式出口（`chat.completions` / `responses` / `messages`）此前只在上游吐字节时才写客户端，上游长思考或排队时一个字节都不写，于是任何按「多久没收到字节」判活的中间设备（nginx 的 `proxy_read_timeout` 默认 60 秒、Lucky 反代、路由器、Cloudflare 隧道）都会单方面掐掉连接 —— 客户端看到断流，服务端日志只有一次 `client_aborted`。现在写出口统一换成 `StreamKeepalive`：一把锁保证心跳线程与主线程不会把两条事件绞在一起，并在**距上次写出超过 `WB_STREAM_KEEPALIVE_SECONDS`（默认 10 秒，0 关闭，上限 300）**时补一行 SSE 注释 `: keepalive`；一直在出字的流里一次都不写，零开销。实测同一条链路（Lucky 反代 60.07 秒空闲 FIN）在补心跳后不再被判死。新增 `tests/_test_stream_keepalive.py`（16 项）。
 - **发布改为「本地构建、本地上传」，GitHub 上不再有任何自动运行（Phase G）**：删掉本仓库全部自建 workflow（`sync-upstream.yml`、`build-fpk.yml`、`release-checksums.yml`、`docker-publish.yml`、`tests.yml`），只保留上游的 `.github/workflows/release.yml`（它只在 `v*` tag 上触发，我们的发布 tag 是 `fnos-X.Y.Z`，所以永不运行；删它反而会让下次并入上游再冲突）。新增 `scripts/gh-release.py`（纯标准库，走 REST API 打 tag / 传 Release 资产 / 改发布正文 / 算 sha256；token 从 `$WB_GH_TOKEN` 或 `/root/.gh-token` 读，绝不进仓库）与一页可照抄的 runbook [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)。同时清理本地构建缓存（`build/`、所有 `__pycache__/`、`*.pyc`/`*.pyo`、`.pytest_cache/`、`suite-logs/`，工作区 24M → 21M）并在 `.gitignore` 补上 `.pytest_cache/`。版本号规则不变：包版本 = 上游最新 release tag 的三段号，发布 tag = `fnos-X.Y.Z`。
 - **飞牛 fnOS 这一层：并入上游 v1.6.18–v1.6.19 及 v1.6.19 之后的 34 个提交、版本号与上游对齐、发布 tag 改 `fnos-X.Y.Z`**（本仓库改动，上游没有对应 tag）：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库发布 tag 从 `v<版本>.<序号>` 改为 `fnos-X.Y.Z`——上游新增的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发。`sync-upstream.yml` 因此不再把上游 tag 镜像进本仓库，并把 cron 加到三条（`17 3` / `23 9` / `41 15`，GitHub 的 schedule 常年晚约 7 小时），冲突时除失败 + summary 外再推一个 `sync-conflict/<UTC 日期>` 分支（带冲突标记，省得人重做合并）。飞牛层重贴后还修掉两处真缺陷：上游给 `Handler` 新加的 `disable_nagle_algorithm` 在 AF_UNIX 上会抛 `Errno 95`，网关路径单独派生了一个关掉它的 handler（否则每个网关请求都在 `setup()` 死掉）；看板直连 `GET /` 的响应体要求与文件逐字节一致，因此缺省直连不再注入 `window.__WB_BASE__`/`__WB_VIA_GATEWAY__`（挂载态照旧注入，且 ETag 增加了一个覆盖网关上下文的校验分量，否则第二个 NAS 用户会拿到 304 + 别人的页面）。看板另修掉一个同名函数覆盖（上游新的 `fmtTok` 会静默盖掉我们的精确版，全站 token 显示退化成 `8.3K`）。上架飞牛第三方源（FnDepot）的材料见 `fnpack.json`。
 

@@ -7,7 +7,7 @@
 > **FnDepot 源已更新（同一轮）**：`ccrabit/FnDepot` 根 `fnpack.json` 从 `1.7.10` 推进到 `1.7.13` 单键（提交 `08b3e13`「WorkBuddy2API-Hub 1.7.13 应用源」，2383 B，`download_url` → Release `fnos-1.7.13`、872207 B / sha256 `7fd2bd2d…`、`updated_at 2026-10-18T19:00:13+08:00`）；线上内容与暂存源逐字节相同，中心仓库校验器通过（`tests/_test_fndepot_source.py` = PASS=77 FAIL=0 SKIP=0 NOTES=3）；`download_url` 实测 HTTP 200 / 872207 B / sha256 一致。该仓库需要用带 `repo` scope 的 classic token（`/root/.gh-token-classic`），细粒度 `/root/.gh-token` 只授权了本仓库。
 > **版本口径**：包版本取上游最新 release tag 的三段号 = `1.7.13`；因为合并目标是 `upstream/main`（不是 tag），这棵树同时含 v1.7.13 之后尚未发版的 44 个上游提交（撞线样本区块 #253、`/u/<ref>/v1/...` 按账号定址 #455、`GET /v1/balance-summary`、`WB_PRESERVE_REQUEST_CONTRACT`、工具 schema 递归规整（11129/11101）、排程时段设置 #456、`tool_result` 图片保真 #452、403/11140 不换号连坐 #448 等）。
 > **一个已知特性（tag 的树 ≠ 已发布的元数据）**：按 runbook，tag 指向**构建用的那个提交** `aaa030f`，所以 `git checkout fnos-1.7.13` 得到的是**构建态**——那棵树里的 `fnpack.json` 还 advertise `1.7.10`（回填提交在合并提交之后；`verify-fpk.sh` 那 1 条 SKIP 就是「tag 不在 HEAD 上」的表现）。已发布的元数据在 `main` 上。对使用方无影响：应用内更新检查与 FnDepot 都按 **tag 名 + Release 资产** 取值。
-> **设备现状**：设备当前装的是 1.7.10 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.10"`（用户自行安装，早于本轮）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
+> **设备现状**：设备当前装的是 1.7.13 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.13"`，线上响应头同值（`Server: wb-proxy/1.7.13 Python/3.12.4`）。这次升级是用户自己从 **FnDepot 客户端**点的（源 `https://github.com/ccrabit/FnDepot` → Release `fnos-1.7.13`），也就是说我们上架的源已经真实跑通了「发现 → 更新 → 装机」这条链。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
 > 历史内容（Phase F/G 的 1.6.19 交付与根因分析、Phase H 的 1.7.3、Phase I 的 1.7.10）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
 ## 1. 包与已发布资产（1.7.13，本轮）

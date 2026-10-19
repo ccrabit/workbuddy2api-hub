@@ -14203,6 +14203,103 @@ def estimate_tokens(text):
 # 摊成「一块一次」，同时不会让首字节延迟变差（见 iter_sse_lines）。
 SSE_READ_BLOCK = 64 * 1024
 
+# 上游憋着不说话时，往客户端补心跳的间隔（秒）。
+# nginx 的 proxy_read_timeout 默认就是 60 秒，Lucky/路由器/Cloudflare 隧道也都
+# 按「多久没字节」判活；而上游长思考或排队时，本代理一个字节都不写，于是中间
+# 设备单方面把流掐断，客户端看到的就是「回答到一半断线」。SSE 的注释行（以 ':'
+# 开头）任何客户端都会忽略，拿它当心跳不改协议、不影响任何 SDK。
+# 0（或负数）关掉心跳：WB_STREAM_KEEPALIVE_SECONDS=0。
+STREAM_KEEPALIVE_DEFAULT = 10.0
+
+
+def stream_keepalive_seconds():
+    raw = os.environ.get("WB_STREAM_KEEPALIVE_SECONDS")
+    if raw is None or not raw.strip():
+        return STREAM_KEEPALIVE_DEFAULT
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return STREAM_KEEPALIVE_DEFAULT
+    if value <= 0:
+        return 0.0
+    return min(value, 300.0)
+
+
+class StreamKeepalive:
+    """流式响应的写出口，顺便在空闲时补 SSE 心跳。
+
+    所有写给客户端的字节都走 write()：一把锁保证心跳线程和主线程不会把两条
+    事件绞在一起，同时记下最后一次真实写出的时间。后台线程只在「距上次写出
+    已经超过 interval」时补一行 `: keepalive`，正常一直在出字的流里它一次都
+    不写，开销是每 interval/2 一次时间比较。
+    """
+
+    FRAME = b": keepalive\n\n"
+
+    def __init__(self, wfile, interval=None):
+        self.wfile = wfile
+        self.interval = (stream_keepalive_seconds() if interval is None
+                         else max(0.0, float(interval)))
+        self.lock = threading.Lock()
+        self.last = time.time()
+        self.bytes_written = 0
+        self.keepalives = 0
+        self.closed = False
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self.interval > 0 and self._thread is None:
+            self._thread = threading.Thread(
+                target=self._run, name="sse-keepalive", daemon=True)
+            self._thread.start()
+        return self
+
+    def write(self, data):
+        if not data:
+            return
+        with self.lock:
+            if self.closed:
+                return
+            self.wfile.write(data)
+            self.wfile.flush()
+            self.last = time.time()
+            self.bytes_written += len(data)
+
+    def _run(self):
+        step = min(self.interval, 1.0)
+        while not self._stop.wait(step):
+            with self.lock:
+                if self.closed:
+                    return
+                if time.time() - self.last < self.interval:
+                    continue
+                try:
+                    self.wfile.write(self.FRAME)
+                    self.wfile.flush()
+                except Exception:
+                    # 客户端已经走了；主线程那边下一次写会拿到同一个断pipe。
+                    self.closed = True
+                    return
+                self.last = time.time()
+                self.keepalives += 1
+
+    def stop(self):
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        with self.lock:
+            self.closed = True
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.stop()
+        return False
+
+
 def iter_sse_lines(source, block_size=SSE_READ_BLOCK, before_read=None):
     """按块读取流式响应并逐行产出，把逐行 read 的 syscall 开销摊掉。
 
@@ -20145,6 +20242,7 @@ class Handler(BaseHTTPRequestHandler):
         if cors_origin_allowed(self.path):
             self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
+        keepalive = StreamKeepalive(self.wfile).start()
         holder = {"usage": None, "custom_names": custom_names,
                   "request_meta": request_meta,
                   "namespace_map": namespace_map,
@@ -20165,8 +20263,7 @@ class Handler(BaseHTTPRequestHandler):
                 for frame in stream_responses_events(upstream, model, holder):
                     if first_ms is None:
                         first_ms = int((time.time() - t_start) * 1000)
-                    self.wfile.write(clean_responses_frame(frame))
-                    self.wfile.flush()
+                    keepalive.write(clean_responses_frame(frame))
                 # 每一轮的 token 都是真的花掉的，记帐要加总
                 total_usage = sum_usage(total_usage, holder.get("usage"))
                 internal = holder.get("internal_calls") or []
@@ -20206,6 +20303,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         finally:
+            keepalive.stop()
             # 代跑多轮时 upstream 会被换掉，外层的 with 只认得最开始那一条，
             # 最后一条要在这里收掉。
             try:
@@ -20402,14 +20500,14 @@ class Handler(BaseHTTPRequestHandler):
         if cors_origin_allowed(self.path):
             self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
+        keepalive = StreamKeepalive(self.wfile).start()
         holder = {"usage": None}
         first_ms = None
         try:
             for frame in stream_messages_events(upstream, model, holder):
                 if first_ms is None:
                     first_ms = int((time.time() - t_start) * 1000)
-                self.wfile.write(frame)
-                self.wfile.flush()
+                keepalive.write(frame)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             wall = int((time.time() - t_start) * 1000)
             record_upstream_usage(upstream, model, holder.get("usage"), stream=True, elapsed_ms=wall,
@@ -20426,13 +20524,13 @@ class Handler(BaseHTTPRequestHandler):
                          ttft_ms=first_ms, fp=fp, outcome="upstream_aborted",
                          key=self._key_id())
             try:
-                self.wfile.write(anthropic_sse_frame("error", {
+                keepalive.write(anthropic_sse_frame("error", {
                     "error": {"type": "api_error", "message": str(exc)}}))
-                self.wfile.flush()
             except Exception:
                 pass
             return
         finally:
+            keepalive.stop()
             try:
                 upstream.close()
             except Exception:
@@ -20743,11 +20841,12 @@ class Handler(BaseHTTPRequestHandler):
             # 攒到「下一个可能阻塞的读之前」再写，不改变任何延迟：块边界就是
             # socket 里当前已经有的全部字节（见 iter_sse_lines 的 before_read）。
             out_buf = []
+            # 上游安静超过 interval 秒时补心跳，免得中间设备按「没字节」判死。
+            keepalive = StreamKeepalive(self.wfile).start()
 
             def flush_out():
                 if out_buf:
-                    self.wfile.write(b"".join(out_buf))
-                    self.wfile.flush()
+                    keepalive.write(b"".join(out_buf))
                     del out_buf[:]
 
             def write_chunk(payload):
@@ -20838,6 +20937,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 return
+            finally:
+                keepalive.stop()
             flush_out()
             if not emitted:
                 err = json.dumps({"error": {"message": "empty upstream stream", "type": "server_error"}})
