@@ -51,8 +51,51 @@ WEB_TURN_TIMEOUT = int(os.environ.get("WB_WEB_TURN_TIMEOUT") or "120")
 WEB_TURN_ATTEMPTS = 3
 
 
+class TLSVerifyError(RuntimeError):
+    """The upstream certificate chain is not trusted by this process."""
+
+
+TLS_VERIFY_HINT = (
+    "TLS 证书校验失败：上游证书链里有本机不信任的证书。常见于公司代理、"
+    "Clash/Surge 等 HTTPS 解密，或 macOS 上 Python 没读到系统钥匙串里的根证书。"
+    "把签发该证书的根证书导出为 PEM，设置环境变量 "
+    "WB_CA_BUNDLE=/path/to/ca.pem 后重启网关；也可以设置 SSL_CERT_FILE。"
+)
+
+
+def is_tls_verify_error(exc):
+    """True for certificate/hostname verification failures.
+
+    These are configuration errors, not transient network faults: retrying the
+    same request produces the same result and hides the real cause behind a
+    502. The check looks at URLError.reason as well, because urllib wraps the
+    original SSLCertVerificationError there.
+    """
+    reason = getattr(exc, "reason", None)
+    text = "%s %s %s" % (type(exc).__name__, exc, "" if reason is None else reason)
+    lower = text.lower()
+    return any(marker in lower for marker in (
+        "certificate_verify_failed",
+        "certificate verify failed",
+        "self-signed certificate",
+        "self signed certificate",
+        "unable to get local issuer certificate",
+        "unable to get issuer certificate",
+        "certificate has expired",
+        "hostname mismatch",
+    ))
+
+
+def tls_verify_hint(exc=None):
+    if exc is None:
+        return TLS_VERIFY_HINT
+    return "%s 原始错误：%s" % (TLS_VERIFY_HINT, exc)
+
+
 def _retryable(exc):
     """Transient network faults worth another attempt (TLS resets, timeouts, 5xx)."""
+    if is_tls_verify_error(exc):
+        return False
     if isinstance(exc, ssl.SSLError):
         return True
     if isinstance(exc, urllib.error.HTTPError):
@@ -177,6 +220,8 @@ def http_json(url, data=None, method=None, headers=None, timeout=30,
             if log:
                 log("network retry %d/%d after %s" % (attempt, attempts, exc))
             time.sleep(backoff * attempt)
+    if last is not None and is_tls_verify_error(last):
+        raise TLSVerifyError(tls_verify_hint(last)) from last
     raise last
 
 REALM_CONFIGS = {
@@ -196,7 +241,9 @@ REALM_CONFIGS = {
     },
     "cn": {
         "name": "国内版 (China)",
-        "chat_upstream": "https://copilot.tencent.com",
+        # 默认 https://copilot.tencent.com；WB_CN_CHAT_UPSTREAM 可覆盖（见 wb_identity.CN_CHAT_BASE）。
+        # domain 不随之改：它是 X-Domain 的兜底值，请求优先用账号自己的 domain。
+        "chat_upstream": wb_identity.CN_CHAT_BASE,
         "billing_upstream": "https://www.codebuddy.cn",
         "origin": "https://www.codebuddy.cn",
         "domain": "copilot.tencent.com",
@@ -1387,6 +1434,8 @@ class Account(object):
             session_key=session_key,
             turn_request_id=turn_request_id,
             model=model,
+            private_data=(wb_settings.identity_private_data(
+                os.path.dirname(self.path)) if self.path else "auto"),
         )
         if self.is_cli_identity():
             # 官方 CLI 的 chat 请求由 OpenAI Node SDK 发出：浏览器头一个都没有

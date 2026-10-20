@@ -272,7 +272,8 @@ build_payload() {
                     wb_ipintel.py wb_probes.py wb_catalog.py wb_fingerprint.py \
                     wb_identity.py wb_webagent.py wb_webtools.py wb_logstore.py \
                     wb_scheduler.py wb_settings.py wb_tasks.py \
-                    wb_quota_scan.py wb_window_probe.py wb_update_request.py; do
+                    wb_quota_scan.py wb_window_probe.py wb_update_request.py \
+                    wb_entitlements.py; do
         [ -f "${PAYLOAD_DIR}/server/${required}" ] \
             || die "payload is missing server/${required} - did upstream rename it?"
     done

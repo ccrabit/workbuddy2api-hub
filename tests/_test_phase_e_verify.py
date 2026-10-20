@@ -1794,6 +1794,7 @@ PKG_MODULES = ["wb_pricing.py", "wb_atrest.py", "wb_modelsdev.py", "wb_prompt.py
                "wb_webtools.py", "wb_logstore.py", "wb_proxy.py", "wb_accounts.py",
                "dashboard.html", "wb_scheduler.py", "wb_settings.py",
                "wb_tasks.py", "wb_export.py", "wb_quota_scan.py",
+               "wb_entitlements.py",
                "wb_window_probe.py", "wb_update_request.py"]
 
 
