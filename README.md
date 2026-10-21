@@ -1,7 +1,7 @@
 # WorkBuddy2API-Hub — 国际版、国内版多账号网关中枢
 
 <p align="center">
-  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.7.17-2496ED?style=flat-square" alt="Version 1.7.17"></a>
+  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.7.24-2496ED?style=flat-square" alt="Version 1.7.24"></a>
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square" alt="Python">
   <img src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square" alt="OpenAI API">
   <img src="https://img.shields.io/badge/Dual_Realm-Intl_&_CN-0DBD8B?style=flat-square" alt="Dual Realm">
@@ -33,7 +33,7 @@
 
 ### 1. 本机运行
 
-**Windows** 双击 **`start-wb-proxy.bat`**，保持窗口运行；**macOS** 双击 **`start-wb-proxy.command`**（首次被 Gatekeeper 拦截时右键 →「打开」确认一次），或在终端执行 `./start-wb-proxy.sh [端口]`（默认 8788）。
+**Windows** 双击 **`start-wb-proxy.bat`**：默认静默启动（`pythonw` 后台运行 + 独立日志窗口，关掉日志窗口不会停服务，用面板电源按钮或 `restart-wb-proxy.bat` 停止）；想用「前台控制台 + 关窗即停」，双击 **`start-wb-proxy-visible.bat`**。**macOS** 双击 **`start-wb-proxy.command`**（首次被 Gatekeeper 拦截时右键 →「打开」确认一次），或在终端执行 `./start-wb-proxy.sh [端口]`（默认 8788）。
 
 启动后：**API 地址** `http://127.0.0.1:8788/v1`，**Web 看板** `http://127.0.0.1:8788/`。首次启动还没有账号，打开看板点「+ 添加账号 (OAuth)」完成授权即自动入库。
 
@@ -49,7 +49,7 @@
 
 ### 3. 局域网共享
 
-- **Windows** 双击 `start-wb-proxy-lan.bat`；**macOS** 双击 `start-wb-proxy-lan.command`，或 `./start-wb-proxy-lan.sh [端口] [Key]`；
+- **Windows** 双击 `start-wb-proxy-lan.bat`（静默）或 `start-wb-proxy-lan-visible.bat`（前台窗口，关窗即停）；**macOS** 双击 `start-wb-proxy-lan.command`，或 `./start-wb-proxy-lan.sh [端口] [Key]`；
 - **Base URL** `http://<本机局域网IP>:8788/v1`；带密钥直达面板 `http://<IP>:8788/?key=生成的Key`；
 - **API Key**：首次启动生成高强度随机 Key，写入 `accounts/settings.json` 并打印在终端，重启复用；也可用第二个参数指定自己的 Key；
 - **macOS 防火墙**：首次监听端口时选「允许」；macOS 15+ 还要在「系统设置 → 隐私与安全性 → 本地网络」允许终端，`./allow-firewall.command` 可查看状态并加白。
@@ -115,6 +115,14 @@ services:
 
 更新：面板里点「拉取最新镜像并重启」，或 `docker compose pull && docker compose up -d`。
 
+**无 systemd 部署的面板一键更新**：容器 / LXC / 便携版没有 systemd 时，面板默认不能安装更新。部署方可以注册一个外部执行者：
+
+1. 让网关能写请求：挂载一个目录（例如 `/run/workbuddy2api-hub-updater`），设置 `WB_UPDATE_INSTALL_ENABLED=1`、`WB_UPDATE_REQUEST_DIR=<目录>`，并设置 `WB_UPDATE_EXECUTOR=external`（或在该目录放一个 `executor.json`）。
+2. 执行者监听 `<目录>/request.json`，读取 `tag` / `version` / `pid` / `port` / `root`，执行下载 → 校验 `SHA256SUMS` → 备份 → 停进程 → 替换 → 等 supervisor 拉起 → 探针 `/health`；失败回滚。参考实现：`wb_update_external.py --request-dir <目录>`（需要 supervisor 在网关退出后自动拉起）。
+3. 执行者写 `<目录>/status.json`，`state` 使用 `queued` / `downloading` / `verifying` / `backing_up` / `stopping` / `applying` / `restarting` / `succeeded` / `rolled_back` / `failed`，面板沿用现有状态机。
+
+约束：`accounts/`、`usage/` 不参与替换；执行者必须有应用目录写权限；网关只写请求，不碰自己的代码。
+
 **方式三：Watchtower 自动静默更新**
 
 ```bash
@@ -145,7 +153,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 199 个套件：148 个 Python + 51 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 216 个套件：162 个 Python + 54 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
@@ -479,19 +487,16 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 ### Unreleased
 
+- **飞牛 fnOS 这一层：并入上游 v1.7.18–v1.7.24（Phase L）**：合并基从 `af706fc`（v1.7.17）推进到 `205d8b6`（`release: v1.7.24`，该 tag 就指向上游 `main` 的头部，所以这一棵树没有「未发版提交」），共 **58 个提交、56 个文件、+6313/-489**，覆盖 v1.7.18 / v1.7.19 / v1.7.20 / v1.7.21 / v1.7.22 / v1.7.23 / v1.7.24 七个 release。上游这一批的主线从「断流」转到「可运维」：国际版每日活跃的时段（`schedule.daily_chat`，1–24 个 `HH:MM`）、并发（`daily_chat_web_concurrency`，默认 1）、线性重试（`base × N`，默认 120/240/360 秒）、当日去重、模型回退与随机提示词全部可配；API Key 可限制到账号白名单（`/u/<ref>` 定址到名单外 403）；`/v1/models` 可只列当前池子里真能服务的模型；`reasoning_effort` 被映射到模型目录声明的档位；全局提示词、出站身份版本号都能在面板里改；账号新增独立的 `tasksEnabled`（`enabled` 只管取号，签到/任务按它有选择）；流式断流不再伪造 `[DONE]`，改发标准 error 帧（`upstream_stream_error`）并关连接；热力图按本地日刷新。`v1.7.23` / `v1.7.24` 又把「一键更新」从 systemd 扩到便携版与非 systemd 部署，长出五个新顶层模块：`wb_tiers.py`（模型档位与可用性，`/v3/config` 的 `modelTiers`，PRO ONLY 模型只在池里有付费账号时出现）、`wb_webprompts.py`（内置 300 条随机提示词）、`wb_update_portable.py` 与 `wb_update_apply.py`（便携包自更新核心与包内 helper）、`wb_update_external.py`（非 systemd 部署的外部执行者参考实现），另有根目录 `start-wb-proxy-visible.bat` / `-lan-visible.bat`。`wb_proxy.py` 顶层 import 了 `wb_tiers` 与 `wb_webprompts`、`wb_update_request` 顶层 import 了 `wb_update_portable`，所以打包守卫名单与 `tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 这五项全部补上（漏一个是装完启动即 ImportError）。**飞牛侧一处关键判断**：面板「安装更新」按钮的 `install_enabled()` 现在是 `_systemd_enabled() or external_enabled() or `wb_update_portable.available()``，在飞牛上三条都不成立（没有 systemd unit、没有 `WB_UPDATE_INSTALL_ENABLED=1` 与 `WB_UPDATE_EXECUTOR`、载荷里也没有便携包的 `release-manifest.json`），因此按钮保持关闭，不会去下「便携 zip」覆盖 fpk 装的只读载荷；升级飞牛包仍走应用中心或 FnDepot。新增的运行时状态都在 `accounts/`（`tasksEnabled` 写进账号 JSON），fnOS 侧不需要新目录。合并侧冲突只有 `README.md` 一个文件（套件数、Unreleased 段、指针行），`dashboard.html` / `wb_proxy.py` / `wb_accounts.py` / `release/portable.txt` / `release/portable_runtime.py` 全部自动合并。
 - **飞牛 fnOS 这一层：并入上游 v1.7.14–v1.7.17（Phase K）**：合并基从 `fe30fa0`（v1.7.13）推进到 `af706fc`（`release: v1.7.17`），共 **76 个提交、59 个文件、+6758/-489**，覆盖 v1.7.14 / v1.7.15 / v1.7.16 / v1.7.17 四个 release。上游这一批把「断流」当成主线来治：`#522` 在**首字节之前**断流时同账号同出口重开一次（`emitted=False` 才重试、复用已经发出的响应头），出口维度的成功记账从「拿到响应头」挪到「流读完」（断流记 transient、重试成功不抵消、干净的流才清零）；流式 usage 改到末尾空 choices 帧、合成 chunk 用动态唯一 id，严格客户端不再因为带 choices 的 usage 帧提前结束。新增顶层模块 `wb_entitlements.py`（`11158` 「免费账号不可用」的运行时标注，状态落 `accounts/model_entitlements.json`，`wb_proxy.py` 顶层 import）与 19 个套件；另有 `11134/11102/11150/11158/11129` 这类模型级错误不再熔断整池（`#499`）、`/v1/models` 可按 Key 的模型限制过滤、一键部署区分 `WB_DEPLOY_MODE=local|lan|public`（`#512`）、OpenRouter 估价支持模型级校准系数（`#514`）、成长任务支持手动领取（`#507`）、面板改密结果以服务端为准（`#523`）、`X-Private-Data` 可配（`#516`）、DSH 一键配置改写 profile 补丁层并放宽限流重试，以及一批移动端看板布局修复。合并侧 3 个冲突：README（套件数按合并后的树重算为 **199 = 148 Python + 51 JS**；Unreleased 段保留本仓库五条并补上本条，已进 `docs/CHANGELOG.md` 的上游重复条目删掉、只留 `#523` 等三条 CHANGELOG 未收录的）、`release/portable.txt`（`wb_entitlements.py` 与我们的 `wb_export.py` 都留，按字母序）、`wb_proxy.py`（`_chat_stream_response` 里我们的 `StreamKeepalive` 与上游的出口记账块并存 —— 心跳在 `out_buf` 之上，记账按「读完」结算，两者互不覆盖）。打包侧跟上：`scripts/build-fpk.sh` 的载荷守卫名单与 `tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 都补 `wb_entitlements.py`（漏它就是装完启动即 ImportError）；新增的运行时状态都落在 `accounts/`，fnOS 侧不需要新目录。
 - **流式响应补空闲心跳，修「回答到一半断线」**：三个流式出口（`chat.completions` / `responses` / `messages`）此前只在上游吐字节时才写客户端，上游长思考或排队时一个字节都不写，于是任何按「多久没收到字节」判活的中间设备（nginx 的 `proxy_read_timeout` 默认 60 秒、Lucky 反代、路由器、Cloudflare 隧道）都会单方面掐掉连接 —— 客户端看到断流，服务端日志只有一次 `client_aborted`。现在写出口统一换成 `StreamKeepalive`：一把锁保证心跳线程与主线程不会把两条事件绞在一起，并在**距上次写出超过 `WB_STREAM_KEEPALIVE_SECONDS`（默认 10 秒，0 关闭，上限 300）**时补一行 SSE 注释 `: keepalive`；一直在出字的流里一次都不写，零开销。实测同一条链路（Lucky 反代 60.07 秒空闲 FIN）在补心跳后不再被判死。新增 `tests/_test_stream_keepalive.py`（16 项）。
 - **发布改为「本地构建、本地上传」，GitHub 上不再有任何自动运行（Phase G）**：删掉本仓库全部自建 workflow（`sync-upstream.yml`、`build-fpk.yml`、`release-checksums.yml`、`docker-publish.yml`、`tests.yml`），只保留上游的 `.github/workflows/release.yml`（它只在 `v*` tag 上触发，我们的发布 tag 是 `fnos-X.Y.Z`，所以永不运行；删它反而会让下次并入上游再冲突）。新增 `scripts/gh-release.py`（纯标准库，走 REST API 打 tag / 传 Release 资产 / 改发布正文 / 算 sha256；token 从 `$WB_GH_TOKEN` 或 `/root/.gh-token` 读，绝不进仓库）与一页可照抄的 runbook [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)。同时清理本地构建缓存（`build/`、所有 `__pycache__/`、`*.pyc`/`*.pyo`、`.pytest_cache/`、`suite-logs/`，工作区 24M → 21M）并在 `.gitignore` 补上 `.pytest_cache/`。版本号规则不变：包版本 = 上游最新 release tag 的三段号，发布 tag = `fnos-X.Y.Z`。
 - **飞牛 fnOS 这一层：并入上游 v1.6.18–v1.6.19 及 v1.6.19 之后的 34 个提交、版本号与上游对齐、发布 tag 改 `fnos-X.Y.Z`**（本仓库改动，上游没有对应 tag）：包版本就是上游最新 release tag 的三段号（`v1.6.19` → `1.6.19`），本仓库发布 tag 从 `v<版本>.<序号>` 改为 `fnos-X.Y.Z`——上游新增的 `.github/workflows/release.yml` 以 `push: tags: ["v*"]` 触发并创建 Draft Release，继续用 `v*` 会双触发。`sync-upstream.yml` 因此不再把上游 tag 镜像进本仓库，并把 cron 加到三条（`17 3` / `23 9` / `41 15`，GitHub 的 schedule 常年晚约 7 小时），冲突时除失败 + summary 外再推一个 `sync-conflict/<UTC 日期>` 分支（带冲突标记，省得人重做合并）。飞牛层重贴后还修掉两处真缺陷：上游给 `Handler` 新加的 `disable_nagle_algorithm` 在 AF_UNIX 上会抛 `Errno 95`，网关路径单独派生了一个关掉它的 handler（否则每个网关请求都在 `setup()` 死掉）；看板直连 `GET /` 的响应体要求与文件逐字节一致，因此缺省直连不再注入 `window.__WB_BASE__`/`__WB_VIA_GATEWAY__`（挂载态照旧注入，且 ETag 增加了一个覆盖网关上下文的校验分量，否则第二个 NAS 用户会拿到 304 + 别人的页面）。看板另修掉一个同名函数覆盖（上游新的 `fmtTok` 会静默盖掉我们的精确版，全站 token 显示退化成 `8.3K`）。上架飞牛第三方源（FnDepot）的材料见 `fnpack.json`。
 - **飞牛 fnOS 这一层：并入上游 v1.7.4–v1.7.10（58 个提交）并合上三个打包缺口（Phase I）**：包版本推进到 `1.7.10`，发布 tag 仍按 `fnos-X.Y.Z` 走（本轮 `fnos-1.7.10`）。上游这一批新增了可选 SQLite 日志落库模块 `wb_logstore.py`（`wb_proxy.py` 已 `import wb_logstore`）与运行时转储目录 `catalog/`，而我们的打包侧此前都不知道它们：`scripts/build-fpk.sh` 的载荷守卫名单补上 `wb_logstore.py`（漏掉就等于把「启动即 ImportError」的失败模式放空），tar 排除列表补 `./catalog`（`catalog/README.txt` 明说这是运行时转储、删除永远安全，但打包是从工作树 tar，构建机上残留的 `product-config-<realm>.json` 会被打进包）；设备侧给 `fnos/cmd/main` 的启动命令加 `WB_PROXY_CATALOG_DIR="${PKGVAR}/catalog"`，否则默认落在只读的 payload 目录、上游 v1.7.5 起的「原始目录存档」在 NAS 上静默失效。日志库落在 `${PKGVAR}/usage/logs.sqlite3`，现有 launcher 已 `mkdir -p` 且 `chmod 700`，无需改动。
 - **飞牛 fnOS 这一层：并入上游 v1.7.11–v1.7.13 及 v1.7.13 之后的 44 个提交（Phase J）**：合并基从 `7e5c38d`（v1.7.10）推进到 `fe30fa0`，共 63 个提交、69 个文件、+9626/-492；包版本按版本号规则取上游最新 release tag 的三段号 → `1.7.13`，发布 tag `fnos-1.7.13`（该 tag 指向的合并提交因此包含 v1.7.13 之后仍未发版的那 20 个上游提交，与上游 `main` 对齐）。上游这一批长出四个新顶层文件与一个运维目录：`wb_quota_scan.py`（模型额度定时主动查询，状态落 `accounts/quota_scan.json`）、`wb_window_probe.py`（配额窗口探针，状态落 `accounts/model_windows.json`）、`wb_update_request.py`（阿里云 systemd 更新服务的面板侧请求桥，`wb_proxy.py` 顶层 `import`，缺它网关启动即 ImportError）、`console_tail.py`（便携包日志窗口）；`ops/aliyun/` 是 root 级 updater 单元，根目录维护脚本按上游 #398 归档进 `tools/`。打包侧随之跟上：`scripts/build-fpk.sh` 的载荷守卫名单补 `wb_quota_scan.py` / `wb_window_probe.py` / `wb_update_request.py`（漏一个就是「装完启动即死」），tar 排除列表把已失效的单文件 `./_fixbats.py` 换成整目录 `./tools` + `./ops`（上游把脚本搬进 `tools/` 后旧规则不再命中，且新目录不该进包），`tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 同步这三项；面板侧 `postJSON` 同时保留上游的「服务已关闭直接报错」与飞牛的 `wbUrl()` 网关前缀，`release/portable_runtime.py` 的必需文件表取并集（上游新增 `Lib/stat.py`、`Lib/platform.py`，飞牛仍要 `Lib/socketserver.py`、`Lib/struct.py`）。新增运行时状态全部落在 `accounts/`（本来就 `mkdir -p` + `chmod 700`），fnOS 侧不需要新目录，`WB_PROXY_CATALOG_DIR` 的修复照旧生效。
-- **面板改密结果以服务端为准**（#523）：`/panel/password` 现在返回 `using_default_password`，设置页不再按输入框内容猜「已自定义」；改密成功会在日志里写一行 `panel : password changed`，便于确认改的是不是当前实例。改密的存储/校验补了 5 项单测（默认密码、覆盖、盐变化、改回 admin）。
-- 修复上游瞬时故障重试：精确识别 Windows `10053/10054/10060`（`10061` 连接被拒仍按原规则记账冷却 60 秒），避免把连接重置误报为本机断网；账号池轮转不再消耗实际请求次数，短暂超时、连接重置或 DNS/路由故障恢复后可在原有次数上限内继续请求。证书校验、固定账号及失败归账规则保持原有约束。 / Fix transient upstream retries: classify Windows transport errors by exact OS code and preserve real request attempts across account-pool rotations, allowing recovery within the existing retry budget without changing TLS verification, pinned-account or failure-accounting rules.
-- **流式对话的 usage 按 OpenAI 契约放到末尾空 choices 帧**：`stream_options.include_usage` 要求 usage 出现在 finish 帧之后、`[DONE]` 之前的 `choices: []` 尾帧，而上游把它挂在仍然带 choices 的 chunk 上，`finish_reason` 随后单独到达。原样透传时，按 chunk 契约校验的客户端与按流记账的下游网关会把这段 usage 当成有歧义的中间帧丢掉——实测某网关该渠道 247/310 次流式请求没有落 usage 行，prompt / completion 与缓存命中数一起消失。现在代理把上游 usage 从原帧里摘掉，在 finish 帧之后用 `choices: []` 尾帧一次性发出（缓存别名照旧规范化），`usage.jsonl` 的统计口径不变。新增 `tests/_test_chat_stream_usage_frame.py`（16 项，帧顺序、唯一 usage 帧、cached_tokens 与 usage 行）。
-- **日志通道不再能打死请求**：`log()` 原先裸写 `sys.stderr`，而 `send_response()` 会先触发访问日志——启动用的终端被回收、stderr 的读端消失后，每条需要记日志的请求都会在**响应头发出之前**抛异常断开，只剩 `/health`、`/realm`、`/panel/status` 这几个静默白名单端点照常 200（看起来"服务健在"，实际 `/v1/*` 全部不可用）。现在写失败一律吞掉，日志坏了最多少一行。
-- **静默启动会告知"已有实例在运行"**：pythonw 的 stdout/stderr 指向空设备，"已有一个反代在 8788 端口运行，无需重复启动"这句话用户永远看不到，双击只表现为"启动失败"。启动脚本改为先在本窗口用 `wb_proxy.py --probe-only` 跑同一段探测（退出码 0=已有实例／端口被别的服务占用，3=端口空闲可启动），已有实例时把原因打印出来并停住等按键；`start-wb-proxy.bat` 与 `start-wb-proxy-lan.bat` 都已接入。
 
-已发布版本的完整记录（v1.4.5 ~ v1.7.17，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
+已发布版本的完整记录（v1.4.5 ~ v1.7.24，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
+
 ## 七、致谢与引用声明 (Credits & References)
 
 协议兼容、风控规避与任务链路设计过程中，参考并吸纳了以下开源项目的经验与逆向成果：
