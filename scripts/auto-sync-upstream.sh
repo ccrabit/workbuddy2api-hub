@@ -94,6 +94,17 @@ if git rev-parse -q --verify "refs/tags/fnos-$VERSION" >/dev/null; then
     fi
 fi
 
+# a half-finished attempt from yesterday must not be steamrolled
+if [ -n "$(git status --porcelain)" ] && [ "$CHECK" = 0 ]; then
+    git status --short | head -10 | sed 's/^/    /'
+    report ""
+    report "## Needs a human: the working tree is dirty"
+    report ""
+    report "Left over from an earlier run — inspect, commit or \`git checkout .\` first."
+    say "working tree is dirty; refusing to merge on top of it"
+    exit 3
+fi
+
 # 4 ------------------------------------------------------------------- merge
 BASE="$(git merge-base HEAD upstream/main)"
 say "merge base is ${BASE:0:8}"
