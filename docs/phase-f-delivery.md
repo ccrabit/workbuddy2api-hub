@@ -1,11 +1,14 @@
 # Phase F 交付说明：WorkBuddy2API-Hub 1.7.29（飞牛包）
 
+> **自动化记录（2026-10-22 21:46，cron 任务 `wb-auto-sync` 写入）**：并入 `upstream/main` = `af37786`；包版本 1.7.29，发布 tag `fnos-1.7.29`；设备当前装的是 1.7.29。这一段的措辞由脚本生成，人工复核看 `logs/auto-sync/` 里对应那次的报告。
+
+
 > 本轮用户要求（m03275，逐字）：「同步上游更新至最新版；顺便准备一个自动任务，明天定时同步上游更新，并且自动更新到本机安装的版本」。
 > **Phase M 状态（2026-10-22，本轮）**：并入 `upstream/main` = **`af37786`**（`release: v1.7.29`，即上游 `main` 头部），合并提交 **`b9757ba`**「Merge upstream/main (v1.7.29) into the fnOS fork」（父 `d29132f` + `af37786`）；合并基 `205d8b6`（v1.7.24）→ `af37786`：**31 个提交、27 个文件、+4166/-165**，覆盖 **v1.7.25 / v1.7.26 / v1.7.27 / v1.7.28 / v1.7.29**。tag **`fnos-1.7.29`** 指向该合并提交。
 > **版本口径**：包版本取上游最新 release tag 的三段号 = `1.7.29`。上游这一批是「面板与更新的收尾」：手机端四处布局修复、启动时补一次更新检查、便携更新保留 unix 权限位、保留历史版本备份并支持面板「版本回退」（`request.json` 增 `action: install|rollback`）、镜像部署按 `profile: "app"` 只替换应用层、账号档位改读计费摘要（`tier`）、11-128 继续收口（assistant 历史也清洗、`DeepSeek Harness` 缩成 `DeepSeek`）、跨出口回退默认关闭、账号表排序成组、uid 不再被脱敏改写、API Key 白名单与并发上限落盘。
 > **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向**构建用的那个提交** `b9757ba`，所以 `git checkout fnos-1.7.29` 那棵树里的 `fnpack.json` 还 advertise `1.7.24`（回填提交在合并提交之后；`verify-fpk.sh` 那条 SKIP 就是「tag 不在 HEAD 上」）。已发布的元数据在 `main` 上。
 > **面板「安装更新」在飞牛上仍关闭**：`install_enabled()` 的三条判据（systemd unit / `WB_UPDATE_INSTALL_ENABLED=1` + 外部执行者 / 便携包 `release-manifest.json`）在飞牛上都不成立；升级走应用中心或 FnDepot。
-> **设备现状**：设备当前装的是 1.7.24 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.24"`，这次升级是用户自己从 FnDepot 客户端点的。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
+> **设备现状**：设备当前装的是 1.7.29 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.24"`，这次升级是用户自己从 FnDepot 客户端点的。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
 > 历史内容（Phase F/G/H/I/J/K/L）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
 ## 1. 包与已发布资产（1.7.29，本轮）

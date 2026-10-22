@@ -267,14 +267,15 @@ build_payload() {
     # caught up with is a package that starts and then dies on ImportError, so
     # the list is asserted rather than trusted to the root tar.
     local required
-    for required in wb_proxy.py wb_export.py wb_accounts.py dashboard.html LICENSE \
-                    wb_pricing.py wb_atrest.py wb_modelsdev.py wb_prompt.py \
-                    wb_ipintel.py wb_probes.py wb_catalog.py wb_fingerprint.py \
-                    wb_identity.py wb_webagent.py wb_webtools.py wb_logstore.py \
-                    wb_scheduler.py wb_settings.py wb_tasks.py \
-                    wb_quota_scan.py wb_window_probe.py wb_update_request.py \
-                    wb_entitlements.py wb_tiers.py wb_webprompts.py \
-                    wb_update_portable.py wb_update_apply.py wb_update_external.py; do
+    for required in wb_proxy.py wb_export.py wb_accounts.py dashboard.html \
+                    LICENSE wb_pricing.py wb_atrest.py wb_modelsdev.py \
+                    wb_prompt.py wb_ipintel.py wb_probes.py wb_catalog.py \
+                    wb_fingerprint.py wb_identity.py wb_webagent.py wb_webtools.py \
+                    wb_logstore.py wb_scheduler.py wb_settings.py wb_tasks.py \
+                    wb_quota_scan.py wb_window_probe.py wb_update_request.py wb_entitlements.py \
+                    wb_tiers.py wb_webprompts.py wb_update_portable.py wb_update_apply.py \
+                    wb_update_external.py wb_activity.py wb_egress.py wb_updates.py \
+                    wb_upstream_pool.py ; do
         [ -f "${PAYLOAD_DIR}/server/${required}" ] \
             || die "payload is missing server/${required} - did upstream rename it?"
     done
