@@ -45,7 +45,8 @@ import release_tools as tools  # noqa: E402
 # matrix (and tests.yml with it), so this tuple is now the record of what the
 # deleted workflow required - the parser contract below is still unit-tested.
 EXPECTED_LEGS = (
-    "ubuntu-latest / python 3.9",
+    # Pinned because ubuntu-latest moved to 26.04, which has no 3.9 build.
+    "ubuntu-24.04 / python 3.9",
     "ubuntu-latest / python 3.12",
     "windows-latest / python 3.12",
 )
@@ -468,6 +469,14 @@ class PortableZipTests(unittest.TestCase):
             self.assertEqual(manifest["runtime"]["prefix"], "python/")
             self.assertEqual(manifest["runtime"]["python"], portable_runtime.RUNTIME_VERSION)
             self.assertGreater(manifest["runtime"]["files"], 0)
+            # #573: an image / rootfs deployment only owns the app layer; the
+            # launchers and the bundled pricing snapshot are portable-only.
+            app = manifest["profiles"]["app"]
+            self.assertIn("wb_proxy.py", app)
+            self.assertIn("dashboard.html", app)
+            self.assertNotIn("pricing/pricing.json", app)
+            self.assertNotIn("start-wb-proxy.bat", app)
+            self.assertTrue(set(app) <= set(files))
 
     def test_the_launchers_look_where_the_runtime_is(self):
         # The packaged path and the path the launcher probes have to agree, or
@@ -582,7 +591,11 @@ class MatrixLegsTests(unittest.TestCase):
         include:
           # The README advertises Python 3.9+, so the floor is exercised on
           # Linux; the primary platform (Windows) runs the current release.
-          - os: ubuntu-latest
+          # The 3.9 leg moved to ubuntu-24.04 because ubuntu-latest went to
+          # 26.04, which has no 3.9 build - EXPECTED_LEGS pins the new label,
+          # so this legacy snapshot has to name it too (upstream v1.7.29 bumped
+          # one without the other and their own tree went red).
+          - os: ubuntu-24.04
             python: "3.9"
           - os: ubuntu-latest
             python: "3.12"
