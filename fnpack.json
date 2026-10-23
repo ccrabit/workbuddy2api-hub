@@ -29,14 +29,14 @@
       "is_docker": false,
       "service_port": "8788",
       "releases": {
-        "1.7.29": {
-          "changelog": "并入上游 v1.7.29（自动任务）：上游自上一个已发布版本以来的全部改动，飞牛层（统一网关免密入口、面板主题与移动端适配、流式空闲心跳、可写模型目录存档、打包排除口径）保持原样。",
-          "updated_at": "2026-10-22T21:46:11+08:00",
+        "1.7.30": {
+          "changelog": "并入上游 v1.7.30（自动任务）：上游自上一个已发布版本以来的全部改动，飞牛层（统一网关免密入口、面板主题与移动端适配、流式空闲心跳、可写模型目录存档、打包排除口径）保持原样。",
+          "updated_at": "2026-10-23T09:05:47+08:00",
           "packages": {
             "all": {
-              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.7.29/WorkBuddy2API-Hub_1.7.29_all.fpk",
-              "sha256": "cbad6b2376b0c430e3646eca54dfcbfcabbeef7443158e0826289aa1d0c65929",
-              "size": 976767
+              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.7.30/WorkBuddy2API-Hub_1.7.30_all.fpk",
+              "sha256": "77901158d6acef1e88efe2f45693cc54354662e301b3428310ef17074f2a9ab6",
+              "size": 1011173
             }
           }
         }
