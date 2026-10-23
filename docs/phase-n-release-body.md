@@ -18,7 +18,7 @@
 
 | 文件 | 字节数 | sha256 |
 | --- | --- | --- |
-| `WorkBuddy2API-Hub_1.7.30_all.fpk` | `1011173` | `77901158d6acef1e88efe2f45693cc54354662e301b3428310ef17074f2a9ab6` |
+| `WorkBuddy2API-Hub_1.7.30_all.fpk` | `1009289` | `a9eb968bba72c85d8e09bf153a63be7516d024bc79d2e16d2a2c806970cb9c56` |
 | `WorkBuddy2API-Hub_1.7.30_all.fpk.sha256` | `99` | — |
 
 校验：`sha256sum -c WorkBuddy2API-Hub_1.7.30_all.fpk.sha256`
@@ -75,9 +75,9 @@
 - `python3 tests/run_all.py --jobs 4`：`234 passed, 0 failed, 0 skipped`
 - `bash scripts/verify-fpk.sh dist/WorkBuddy2API-Hub_1.7.30_all.fpk`：`70 passed, 0 failed`
   （1 条 SKIP 属正常：`fnos-<版本>` tag 打在合并提交上，而回填提交在其之后）
-- 载荷：51 个文件 + 16 个目录，manifest checksum `58784a7e78875964dda6d4071d5f8df5`
+- 载荷：51 个文件 + 15 个目录，manifest checksum `ac6c676d5c6aa44fb5eb1892a4f4d663`
 - 装机：`cmd/main install` → `cmd/main start` → `/health` 由 `wb-proxy/1.7.29` 变为
-  `wb-proxy/1.7.30`（失败会自动回滚到备份的 1.7.29 并保留数据目录）
+  `wb-proxy/1.7.30`（实测 1 秒内就绪；失败会自动回滚到备份并保留数据目录）
 - 附件 sha256 与仓库根 `fnpack.json` 里登记的 `1.7.30` 条目一致
 
 ## 已知限制
