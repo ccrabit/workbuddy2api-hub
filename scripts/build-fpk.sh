@@ -272,10 +272,10 @@ build_payload() {
                     wb_prompt.py wb_ipintel.py wb_probes.py wb_catalog.py \
                     wb_fingerprint.py wb_identity.py wb_webagent.py wb_webtools.py \
                     wb_logstore.py wb_scheduler.py wb_settings.py wb_tasks.py \
-                    wb_quota_scan.py wb_window_probe.py wb_update_request.py wb_entitlements.py \
-                    wb_tiers.py wb_webprompts.py wb_update_portable.py wb_update_apply.py \
-                    wb_update_external.py wb_activity.py wb_egress.py wb_updates.py \
-                    wb_upstream_pool.py ; do
+                    wb_quota_scan.py wb_window_probe.py wb_update_request.py wb_tiers.py \
+                    wb_webprompts.py wb_update_portable.py wb_update_apply.py wb_update_external.py \
+                    wb_activity.py wb_egress.py wb_updates.py wb_upstream_pool.py \
+                    console_tail.py ; do
         [ -f "${PAYLOAD_DIR}/server/${required}" ] \
             || die "payload is missing server/${required} - did upstream rename it?"
     done

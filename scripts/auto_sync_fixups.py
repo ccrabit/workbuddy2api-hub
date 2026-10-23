@@ -128,9 +128,13 @@ def fix_guards(base, upstream, dry):
     head, sep, tail = text.partition("for required in ")
     body, sep2, rest = tail.partition("; do")
     have = set(body.replace("\\", " ").split())
+    gone = sorted(t for t in have
+                  if t.endswith(".py") and not os.path.exists(os.path.join(REPO, t)))
+    have -= set(gone)
     missing = [m for m in new if m not in have]
     if True:
-        stripped = [t for t in body.replace("\\", " ").split() if t]
+        stripped = [t for t in body.replace("\\", " ").split()
+                    if t and t not in gone]
         stripped += missing
         width = 4
         rows, row = [], []
@@ -154,10 +158,14 @@ def fix_guards(base, upstream, dry):
     m = re.search(r"PKG_MODULES = \[(.*?)\]", text, re.S)
     if not m:
         sys.exit("PKG_MODULES not found")
-    have = set(re.findall(r'"([^"]+)"', m.group(1)))
+    pkg_all = re.findall(r'"([^"]+)"', m.group(1))
+    pkg_gone = {t for t in pkg_all
+                if t.endswith(".py") and not os.path.exists(os.path.join(REPO, t))}
+    have = set(pkg_all) - pkg_gone
     missing = [x for x in new if x not in have]
-    if missing:
-        items = re.findall(r'"([^"]+)"', m.group(1)) + missing
+    if True:
+        items = [t for t in pkg_all if t not in pkg_gone]
+        items += missing
         lines, row = [], []
         for tok in items:
             row.append('"%s"' % tok)

@@ -38,6 +38,17 @@ APPNAME="${WB_APP_NAME:-workbuddy2api}"
 APPCENTER="${WB_APPCENTER:-/vol1/@appcenter/$APPNAME}"
 APPDIR="${WB_APPDIR:-/var/apps/$APPNAME}"
 HEALTH_URL="${WB_HEALTH_URL:-http://127.0.0.1:8788/health}"
+# The launcher derives every path from TRIM_APPNAME (cmd/main: `APPNAME="${TRIM_APPNAME:-
+# workbuddy2api}"`). Run by hand from inside another fnOS app's shell, the inherited
+# TRIM_* point at *that* app — the 2026-10-23 manual run tried to start
+# /vol1/@appcenter/deepseek.harness/server/wb_proxy.py and left the gateway stopped.
+# Pin the identity here so cron and a hand run behave the same.
+export TRIM_APPNAME=workbuddy2api
+export TRIM_APPDEST=/var/apps/workbuddy2api/target
+export TRIM_PKGVAR=/vol1/@appdata/workbuddy2api
+export TRIM_PKGETC=/vol1/@appconf/workbuddy2api
+export TRIM_PKGMETA=/vol1/@appmeta/workbuddy2api
+export TRIM_PKGTEMP=/vol1/@apptemp/workbuddy2api
 INSTALL=1
 PUBLISH=1
 CHECK=0
