@@ -9,10 +9,7 @@
 覆盖安装即可，数据目录 `/vol1/@appdata/workbuddy2api`（账号、用量、设置）不变。
 
 发布不经 CI：包用 `scripts/build-fpk.sh` 构建、用 `scripts/gh-release.py` 上传，
-**本 Release 的附件与本机 `dist/` 里的文件逐字节相同**。本轮起这个流程由
-`scripts/auto-sync-upstream.sh`（cron `wb-auto-sync`，每天 04:17）无人值守跑：
-无冲突的版本会被自动合并、构建、装机并发版；有冲突就停在 `exit 3` 并留报告，
-由人接手——这一版就是「停在冲突、人工解决后发布」的第一次。
+**本 Release 的附件与本机 `dist/` 里的文件逐字节相同**。
 
 ## 文件与校验
 
@@ -67,8 +64,7 @@
   出不来），再走本层的「网关模式下把闸门整个摘掉并提示从应用中心重开」——飞牛网关
   已经替我们对端做了认证，老标签页不该突然弹出没人设过的密码框。
 - 统一网关免密入口（`--unix-socket` + `--base-path`）、流式空闲心跳
-  （`WB_STREAM_KEEPALIVE_SECONDS`，默认 10 秒）、可写 `catalog/` 目录、以及
-  `scripts/auto-sync-upstream.sh` 的无人值守发布链路都在。
+  （`WB_STREAM_KEEPALIVE_SECONDS`，默认 10 秒）、以及可写 `catalog/` 目录都在。
 
 ## 验证数字
 

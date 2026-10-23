@@ -1,23 +1,12 @@
-# Phase F 交付说明：WorkBuddy2API-Hub 1.7.29（飞牛包）
+# Phase F 交付说明：WorkBuddy2API-Hub 1.7.30（飞牛包）
 
-> **自动化记录（2026-10-23 09:09，cron 任务 `wb-auto-sync` 写入）**：并入 `upstream/main` = `84dbc99`；包版本 1.7.30，发布 tag `fnos-1.7.30`；设备当前装的是 1.7.30。这一段的措辞由脚本生成，人工复核看 `logs/auto-sync/` 里对应那次的报告。
-
-
-> **自动化记录（2026-10-23 09:05，cron 任务 `wb-auto-sync` 写入）**：并入 `upstream/main` = `84dbc99`；包版本 1.7.30，发布 tag `fnos-1.7.30`；设备当前装的是 1.7.30。这一段的措辞由脚本生成，人工复核看 `logs/auto-sync/` 里对应那次的报告。
-
-
-> **自动化记录（2026-10-22 21:46，cron 任务 `wb-auto-sync` 写入）**：并入 `upstream/main` = `af37786`；包版本 1.7.29，发布 tag `fnos-1.7.29`；设备当时装的是 1.7.29。这一段的措辞由脚本生成，人工复核看 `logs/auto-sync/` 里对应那次的报告。
-
-
-> 本轮用户要求（m03275，逐字）：「同步上游更新至最新版；顺便准备一个自动任务，明天定时同步上游更新，并且自动更新到本机安装的版本」。
-> **Phase M 状态（2026-10-22，本轮）**：并入 `upstream/main` = **`af37786`**（`release: v1.7.29`，即上游 `main` 头部），合并提交 **`b9757ba`**「Merge upstream/main (v1.7.29) into the fnOS fork」（父 `d29132f` + `af37786`）；合并基 `205d8b6`（v1.7.24）→ `af37786`：**31 个提交、27 个文件、+4166/-165**，覆盖 **v1.7.25 / v1.7.26 / v1.7.27 / v1.7.28 / v1.7.29**。tag **`fnos-1.7.29`** 指向该合并提交。
-> **版本口径**：包版本取上游最新 release tag 的三段号 = `1.7.29`。上游这一批是「面板与更新的收尾」：手机端四处布局修复、启动时补一次更新检查、便携更新保留 unix 权限位、保留历史版本备份并支持面板「版本回退」（`request.json` 增 `action: install|rollback`）、镜像部署按 `profile: "app"` 只替换应用层、账号档位改读计费摘要（`tier`）、11-128 继续收口（assistant 历史也清洗、`DeepSeek Harness` 缩成 `DeepSeek`）、跨出口回退默认关闭、账号表排序成组、uid 不再被脱敏改写、API Key 白名单与并发上限落盘。
-> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向**构建用的那个提交** `b9757ba`，所以 `git checkout fnos-1.7.29` 那棵树里的 `fnpack.json` 还 advertise `1.7.24`（回填提交在合并提交之后；`verify-fpk.sh` 那条 SKIP 就是「tag 不在 HEAD 上」）。已发布的元数据在 `main` 上。
-> **面板「安装更新」在飞牛上仍关闭**：`install_enabled()` 的三条判据（systemd unit / `WB_UPDATE_INSTALL_ENABLED=1` + 外部执行者 / 便携包 `release-manifest.json`）在飞牛上都不成立；升级走应用中心或 FnDepot。
+> 本轮（2026-10-23）：并入上游 `upstream/main` = `84dbc99`（`release: v1.7.30`），合并基 `af37786`（v1.7.29）→ **34 个提交、32 个文件、+4954 −427**；合并提交 `3b76ffe`，发布 tag **`fnos-1.7.30`** 指向该合并提交。发布走本地流程（本仓库没有 CI）：构建 → `verify-fpk.sh` → 装机 → `run_all` → 上传两资产 → 回填 `fnpack.json`。
+> **版本口径**：包版本取上游最新 release tag 的三段号 = `1.7.30`。上游这一批 15 笔社区改动的主线是「判定别判错、面板别闪」：`#594` 调度器日志与区域风控闸门改取正在运行的 `wb_proxy`、`#596` 签到业务失败不再记成功、`#598` 一键签到按 `tasksEnabled` 选号、`#600` 保活提前量改 48 小时、`#601` 下拉框自绘、`#605` 建会话失败补退避、`#606` 面板闸门 fail-closed、`#607` 一次流式只带一个 chunk id、`#608` 排空 POST 空 body、`#609` Pro Only 改由目录 `modelTiers` 驱动（因此上游删掉了 `wb_entitlements.py`，本包的载荷与守卫名单同步去掉）；完整条目见 `docs/CHANGELOG.md`。
+> **上游同步的本地自动化已移除（2026-10-23，按用户要求）**：`wb-auto-sync` 那一套（cron 条目、`scripts/auto-sync-upstream.sh`、`scripts/auto_sync_fixups.py`、`tests/_test_auto_sync.py`、`docs/phase-n-automation.md`）整体删除，之后的上游同步由人工按 `docs/phase-g-local-release.md` 的 runbook 执行。
 > **已发布（本轮实测）**：`refs/heads/main` = `992afb0`，`refs/tags/fnos-1.7.30` = tag 对象 `7eec7d1f`（peel 后 = 合并提交 `3b76ffe`）；Release **421352956**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.7.30>）非草稿，两个资产 `uploaded`（1009289 B / 99 B）。从发布页下载回来与 `dist/WorkBuddy2API-Hub_1.7.30_all.fpk` **逐字节相同**（sha256 `a9eb968b…`）。FnDepot 源提交 `601143c`「WorkBuddy2API-Hub 1.7.30 应用源」，线上内容与暂存源逐字节相同，`download_url` 实测 HTTP 200 / 1009289 B / sha256 一致。
-> **自动化记录（首次实跑 → 人工接手）**：cron `wb-auto-sync` 在 04:17 拉到 v1.7.30 后按设计停在 `exit 3`（4 个冲突），本轮由人工解决后发布。这一轮顺手补掉自动任务自己的三个缺口：① `scripts/build-fpk.sh` 没有排除 `./logs`，于是自动任务写在 `logs/auto-sync/` 的运行日志会变成 `server/logs/**` 进载荷（既污染发布件，也让「载荷与 tag 的树逐字节一致」永远红）；② `scripts/auto_sync_fixups.py` 不写交付说明 §1 的指纹，而 e15 有三道门直读那些数字 —— 不写就永远绿不了，自动任务也就永远发不出去；③ 软链 `last.log` 在跨卷时报 `Invalid cross-device link`，改成先删再建。另外把 `TRIM_APPNAME`/`TRIM_APPDEST`/`TRIM_PKGVAR` 等固定进脚本：从别的 fnOS 应用的 shell 里手工跑时，继承来的 `TRIM_APPNAME`（实测是 `deepseek.harness`）会把启动器指向那个应用的路径。
 > **设备现状**：设备当前装的是 1.7.30 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.24"`，这次升级是用户自己从 FnDepot 客户端点的。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
-> 历史内容（Phase F/G/H/I/J/K/L）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
+> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向构建用的那个提交 `3b76ffe`，那棵树里的 `fnpack.json` 仍 advertise `1.7.29`；已发布元数据在 `main` 上。
+> 历史内容（Phase F/G/H/I/J/K/L/M）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
 ## 1. 包与已发布资产（1.7.30，本轮）
 
