@@ -230,6 +230,40 @@ def fix_release_metadata(v, fpk, dry):
     return size, sha
 
 
+def fix_delivery_assets(v, fpk, dry):
+    """Rewrite the *current* §1 block (package name / size / sha256 / checksum).
+
+    Without this a cron run can never reach a green suite: three e15 gates read
+    those numbers straight out of this file, and they describe the asset that was
+    just built.
+    """
+    import hashlib
+    import tarfile
+    import tempfile
+    size = os.path.getsize(fpk)
+    sha = hashlib.sha256(open(fpk, "rb").read()).hexdigest()
+    with tempfile.TemporaryDirectory() as tmp:
+        with tarfile.open(fpk) as tf:
+            tf.extractall(tmp)
+        sums = hashlib.md5(open(os.path.join(tmp, "app.tgz"), "rb").read()).hexdigest()
+    path = os.path.join(REPO, "docs", "phase-f-delivery.md")
+    text = read(path)
+    before = text
+    text = re.sub(r"^## 1\. 包与已发布资产（[^，\n]+，本轮）",
+                  "## 1. 包与已发布资产（%s，本轮）" % v, text, count=1, flags=re.M)
+    text = re.sub(r"\| 文件 \| `dist/WorkBuddy2API-Hub_[^`]+_all\.fpk` \|",
+                  "| 文件 | `dist/WorkBuddy2API-Hub_%s_all.fpk` |" % v, text, count=1)
+    text = re.sub(r"\| 大小 \| [0-9]+ B \|",
+                  "| 大小 | %d B |" % size, text, count=1)
+    text = re.sub(r"\| sha256 \| `[0-9a-f]{64}` \|",
+                  "| sha256 | `%s` |" % sha, text, count=1)
+    text = re.sub(r"\| manifest checksum \| `[0-9a-f]{32}`",
+                  "| manifest checksum | `%s`" % sums, text, count=1)
+    if write(path, text, dry):
+        note("交付说明 §1 指纹 → %d B / %s…" % (size, sha[:8]))
+    return size, sha
+
+
 def fix_delivery_doc(v, upstream, device_version, dry):
     path = os.path.join(REPO, "docs", "phase-f-delivery.md")
     text = read(path)
@@ -272,6 +306,7 @@ def main():
     fix_workflows(args.dry_run)
     if args.fpk:
         fix_release_metadata(v, args.fpk, args.dry_run)
+        fix_delivery_assets(v, args.fpk, args.dry_run)
     if args.device_version:
         fix_delivery_doc(v, args.upstream, args.device_version, args.dry_run)
 

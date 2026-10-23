@@ -229,6 +229,7 @@ build_payload() {
         --exclude='./usage' \
         --exclude='./catalog' \
         --exclude='./dist' \
+        --exclude='./logs' \
         --exclude='./build' \
         --exclude='./fnos' \
         --exclude='./scripts' \

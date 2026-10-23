@@ -31,12 +31,12 @@
       "releases": {
         "1.7.30": {
           "changelog": "并入上游 v1.7.30（自动任务）：上游自上一个已发布版本以来的全部改动，飞牛层（统一网关免密入口、面板主题与移动端适配、流式空闲心跳、可写模型目录存档、打包排除口径）保持原样。",
-          "updated_at": "2026-10-23T09:05:47+08:00",
+          "updated_at": "2026-10-23T09:09:42+08:00",
           "packages": {
             "all": {
               "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.7.30/WorkBuddy2API-Hub_1.7.30_all.fpk",
-              "sha256": "77901158d6acef1e88efe2f45693cc54354662e301b3428310ef17074f2a9ab6",
-              "size": 1011173
+              "sha256": "a9eb968bba72c85d8e09bf153a63be7516d024bc79d2e16d2a2c806970cb9c56",
+              "size": 1009289
             }
           }
         }

@@ -66,7 +66,10 @@ mkdir -p "$LOG_DIR"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LOG="$LOG_DIR/$RUN_ID.log"
 REPORT="$LOG_DIR/$RUN_ID.md"
-ln -sfn "$(basename "$LOG")" "$LOG_DIR/last.log"
+# `ln -sfn` 在这里会报 "Invalid cross-device link"（目标已是指向别处的软链，
+# 这个卷上不能用 rename 顶替），先删再建；软链失败不影响本次运行。
+rm -f "$LOG_DIR/last.log"
+ln -s "$(basename "$LOG")" "$LOG_DIR/last.log" 2>/dev/null || true
 exec > >(tee -a "$LOG") 2>&1
 
 say()  { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*"; }

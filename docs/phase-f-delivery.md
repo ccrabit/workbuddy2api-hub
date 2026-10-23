@@ -1,5 +1,8 @@
 # Phase F 交付说明：WorkBuddy2API-Hub 1.7.29（飞牛包）
 
+> **自动化记录（2026-10-23 09:09，cron 任务 `wb-auto-sync` 写入）**：并入 `upstream/main` = `84dbc99`；包版本 1.7.30，发布 tag `fnos-1.7.30`；设备当前装的是 1.7.30。这一段的措辞由脚本生成，人工复核看 `logs/auto-sync/` 里对应那次的报告。
+
+
 > **自动化记录（2026-10-23 09:05，cron 任务 `wb-auto-sync` 写入）**：并入 `upstream/main` = `84dbc99`；包版本 1.7.30，发布 tag `fnos-1.7.30`；设备当前装的是 1.7.30。这一段的措辞由脚本生成，人工复核看 `logs/auto-sync/` 里对应那次的报告。
 
 
@@ -14,14 +17,14 @@
 > **设备现状**：设备当前装的是 1.7.30 —— `/vol1/@appcenter/workbuddy2api/server/wb_proxy.py` 里 `server_version = "wb-proxy/1.7.24"`，这次升级是用户自己从 FnDepot 客户端点的。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
 > 历史内容（Phase F/G/H/I/J/K/L）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
-## 1. 包与已发布资产（1.7.29，本轮）
+## 1. 包与已发布资产（1.7.30，本轮）
 
 | 项 | 值 |
 |---|---|
-| 文件 | `dist/WorkBuddy2API-Hub_1.7.29_all.fpk` |
-| 大小 | 976767 B |
-| sha256 | `cbad6b2376b0c430e3646eca54dfcbfcabbeef7443158e0826289aa1d0c65929` |
-| manifest checksum | `f0f5c32d61a95bb911c3b614ce4719f7`（= 包内 `app.tgz` 的 md5） |
+| 文件 | `dist/WorkBuddy2API-Hub_1.7.30_all.fpk` |
+| 大小 | 1009289 B |
+| sha256 | `a9eb968bba72c85d8e09bf153a63be7516d024bc79d2e16d2a2c806970cb9c56` |
+| manifest checksum | `ac6c676d5c6aa44fb5eb1892a4f4d663`（= 包内 `app.tgz` 的 md5） |
 | 载荷 | **51 个文件 + 16 个目录**（与 1.7.24 同规模：本轮上游没有新增顶层模块） |
 | 版本 / appname | `1.7.29` / `workbuddy2api`（appname 故意不改） |
 | 冲突解决 | **4 个**。`README.md`（套件数按合并后的树重算为 **221 = 166 Python + 55 JS**；Unreleased 段保留本仓库七条并补 Phase M 条目，指针改为 `v1.4.5 ~ v1.7.29`）；`dashboard.html`（窄屏样式：上游新的 `@media (max-width: 860px)` 统计条重排与本层 `@media (max-width:640px)` 兜底按断点从宽到窄排列，两块都留）；`tests/_test_run_all_contracts.py`（取上游 `sorted(..., key=int)`）；`.github/workflows/tests.yml`（上游又加回来，按 Phase G 政策继续删除）。**顺手修掉上游一处自相矛盾**：`tests/_test_release_assets.py` 的 `EXPECTED_LEGS` 把 3.9 那条改成 `ubuntu-24.04`（`ubuntu-latest` 升到 26.04 后没有 3.9），但同一文件的 `LEGACY_MATRIX` 夹具仍写 `ubuntu-latest`，上游自己那棵树是红的；已把夹具对齐并注明原因。 |
