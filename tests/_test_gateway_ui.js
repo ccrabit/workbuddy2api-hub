@@ -144,7 +144,11 @@ async function captureLogs(fn) {
   /* ---------------------------------------------------------------- static */
   await check('the page ships no prefix of its own - the server injects it', () => {
     eq(/<base[\s>]/i.test(bareHtml), false, 'the page must not carry its own <base>');
-    eq(/window\.__WB_[A-Z_]+__\s*=(?!=)/.test(bareHtml), false, 'the page must not write the injected globals');
+    // 服务端注入的是 mount 前缀与「是否经网关」这两个开关（见 wb_proxy 的 __WB_BASE__
+    // / __WB_VIA_GATEWAY__ 替换）。页面自己的 window.__WB_THEME_STYLES__（上游
+    // 477ba36 加的调色表）不算注入，允许页面自己赋值。
+    eq(/window\.__WB_(?:BASE|VIA_GATEWAY)__\s*=(?!=)/.test(bareHtml), false,
+      'the page must not write the injected globals');
     ok(/window\.__WB_BASE__/.test(code), 'the page reads the injected mount prefix');
     ok(/window\.__WB_VIA_GATEWAY__/.test(code), 'the page reads whether it is behind the gateway');
     eq(/\/app\/[a-z0-9_.-]+/.test(bareHtml), false, 'no mount path is hardcoded in the page');

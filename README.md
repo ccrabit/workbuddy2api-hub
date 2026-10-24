@@ -1,12 +1,33 @@
 # WorkBuddy2API-Hub — 国际版、国内版多账号网关中枢
 
+> [!IMPORTANT]
+> **项目进入低频维护（2026-10-23） / Low-frequency maintenance**
+>
+> 大幅降低更新频率与 Issue / PR 处理速度。请先阅读风险说明，再决定是否继续使用。
+>
+> Updates and responses to issues / pull requests will be significantly reduced. Read the risk notice below before continuing.
+
+> [!WARNING]
+> **WorkBuddy 上游正在收紧对非官方客户端的识别与拦截。**
+>
+> - **封禁**：2026-10-23 下午起，非官方客户端的识别与拦截明显收紧。
+> - **维护者**：近期工作压力增大，无法保证及时更新与响应。
+> - **可用性**：上游可能随时进一步收紧，导致本项目不可用。
+> - **账号风险**：使用非官方客户端造成的风控、限流或封禁，由使用者自行承担。
+>
+> **Upstream enforcement** tightened detection and blocking of unofficial clients from the afternoon of 2026-10-23. The maintainer is under increased workload and cannot guarantee timely updates or replies. The upstream may tighten further at any time; rate limits, account restrictions or bans caused by using an unofficial client are the user's responsibility.
+
+本项目仅用于协议学习、研究与个人自用。请优先使用官方客户端，不要使用主账号，不要共享账号，也不要用于商业转售。
+
+This project is for protocol research and personal use only. Prefer the official client, do not use your primary account, and do not resell or share access.
+
 <p align="center">
-  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.7.30-2496ED?style=flat-square" alt="Version 1.7.30"></a>
+  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.7.33-2496ED?style=flat-square" alt="Version 1.7.33"></a>
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square" alt="Python">
   <img src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square" alt="OpenAI API">
   <img src="https://img.shields.io/badge/Dual_Realm-Intl_&_CN-0DBD8B?style=flat-square" alt="Dual Realm">
   <img src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/Vibe_Coding-100%25-ff69b4?style=flat-square" alt="Vibe Coding">
+  <img src="https://img.shields.io/badge/Maintenance-Low--frequency-c96f3d?style=flat-square" alt="Low-frequency maintenance">
 </p>
 
 把腾讯 **[www.workbuddy.ai](https://www.workbuddy.ai)**（国际版）与 **[codebuddy.cn](https://www.codebuddy.cn)**（国内版）的原生服务封装成标准 OpenAI 兼容接口（Chat Completions / Responses），并提供默认关闭的实验性 Anthropic Messages 适配；同时补齐多账号调度与运维能力：
@@ -155,7 +176,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 233 个套件：174 个 Python + 59 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 235 个套件：174 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
@@ -352,9 +373,9 @@ python wb_agents.py restore --client codex                 # 随时字节级还�
 
 本版起，三个流式出口在空闲时补一行 SSE 注释 `: keepalive`（注释行任何客户端都会忽略，不改协议，也不影响任何 SDK 的解析）：
 
-- 默认 **10 秒**；一直在出字的流里**一次都不写**，所以既不增加延迟、也不会污染内容；
+- 默认 **15 秒**（上游 `SSE_HEARTBEAT_SECONDS`，v1.7.33 起就是这条实现）；一直在出字的流里**一次都不写**，所以既不增加延迟、也不会污染内容；
 - `WB_STREAM_KEEPALIVE_SECONDS=0` 关闭（确认链路没有空闲超时，或要抓包看原始帧时用）；
-- 上限 300 秒；空值 / 非法值回落到默认 10 秒；进程启动时读取一次，改完重启 `wb-proxy` 生效。
+- 上限 300 秒；空值 / 非法值回落到默认 15 秒；每次建流时读取，改完重启 `wb-proxy` 生效。
 
 这套心跳是**产品侧**的修法：不用改 Lucky / nginx / 隧道配置，也不会因为换一条链路就复发。
 
@@ -487,7 +508,11 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 <!-- 发版时：把下面的 Unreleased 段落整理成新版本号（## vX.Y.Z），整体移入 docs/CHANGELOG.md 顶部 -->
 
-### Unreleased
+- **飞牛 fnOS 这一层：并入上游 v1.7.30–v1.7.33（Phase O）**：合并基从 `af37786`（v1.7.29）推进到 `47775c5`（`release: v1.7.33`，该 tag 就是上游 `main` 的头），共 **15 个提交、26 个文件、+3005/-1336**，覆盖 v1.7.31 / v1.7.32 / v1.7.33 三个 release。上游这一批的主线是「网页活跃的收尾与流式心跳转正」：每日活跃重构为「一个预算 + 一个候选序列」（`#632`），失败收尾登记保留并迁移旧配置（`#638`），登记表与被放弃的线程都加上界（内存不再随失败次数增长），网页会话收尾不再依赖卡住的那条线程；模型级 429 冷却窗口重启后能恢复、成功请求会解除凭证失效标记；`responses` 补发工具调用首段参数增量；面板校正调色对比度并提示 HTTP 入口；网关恢复模型别名并**自己补上了流式 SSE 心跳**（`#578`，`SSEHeartbeat`，默认 15 秒）。心跳这块因此由「本仓库独有」变成「上游实现 + 本仓库的旋钮」：删掉本层那份 `StreamKeepalive`，改用上游的 `SSEHeartbeat`（`with heartbeat:` 收尾、三个流式出口一致），只把 `WB_STREAM_KEEPALIVE_SECONDS` 保留成覆盖默认值的旋钮（0 关闭、上限 300 秒），并给上游的 `tests/_test_stream_keepalive.py` 追加了一节旋钮断言。合并侧 3 个冲突：`README.md`（套件数按合并后的树重算为 **235 = 174 Python + 61 JS**；上游侧那 11 行历史套件数全部作废；指针改为 `v1.4.5 ~ v1.7.33`）、`tests/_test_stream_keepalive.py`（add/add —— 两边都新增了同名文件，取上游那份当基线 + 追加本层的旋钮用例）、`wb_proxy.py`（6 段全是 `keepalive` ↔ `heartbeat`，一律取上游结构，并删掉本层残留的两处重复构造）。打包侧本轮**无需新增模块**（上游这 15 个提交没有新顶层文件），`tools/`/`ops/`/`catalog/`/`logs/` 的排除与守卫名单照旧。
+- **v1.7.33 已于 2026-10-23 发布**：本版集成 #630、#632、#635、#638，并自本版起进入低频维护。完整变更与验证记录见 **[docs/CHANGELOG.md](docs/CHANGELOG.md#v173)**；下一版的改动继续写在本段。
+
+- **修正 CN 专属模型判定，并给 OpenCode 写入真实上下文上限**（#618 / #625）：`minimax-` 曾被当成整个模型家族的 CN 专属前缀，于是国际版也提供的 `minimax-m3.1-flash` 被本地 400 拦下。现在只保留确定的 CN 独占项（`deepseek-v4-pro*` 与显式 `minimax-m3`），同族其他模型按出口实际目录判断。OpenCode 一键配置此前只写空的模型条目，客户端只能回落到自己的 200k 默认值；现在把网关目录中的 `context_window` / `max_output` 写进 `limit.context` / `limit.output`，没有规格的条目仍保持空对象。新增回归覆盖。 / Narrow the China-only model gate and give OpenCode the real context limit (#618 / #625): `minimax-` used to mark the whole family as CN-exclusive, so the globally served `minimax-m3.1-flash` was refused locally with a 400. Only the confirmed China-only entries remain (`deepseek-v4-pro*` and the explicit `minimax-m3`); other members of the family follow the actual catalogue of the selected exit. OpenCode's one-click config used to write empty model entries, so it fell back to its own 200k default; the gateway's catalogue `context_window` / `max_output` now go into `limit.context` / `limit.output`, while entries without specs stay empty objects. Regression coverage added.
+- **流式回复在真实静默期发送 SSE 心跳**（#578）：上游思考期间可能长时间一个字节都不发，而客户端会把静默误判为断流；只在每次阻塞读之前检查心跳，恰好无法覆盖它。Chat、Responses 与 Anthropic Messages 三条流式路径现在共用后台 `SSEHeartbeat`：每 15 秒无写入就发送合法的 `: keepalive` 注释帧，与业务帧共用锁，保证不会截断 JSON；响应正常时不会多插帧，流结束后线程立即停止。新增 `tests/_test_stream_keepalive.py`（9 项，含读线程阻塞期间仍收到心跳与并发写入完整性），并复跑流式 id、usage 帧、断流错误帧与重试套件。 / Keep SSE streams alive through real upstream silence (#578): while the model is thinking the upstream may send nothing for longer than the client's idle window, and checking a heartbeat only before the next blocking read cannot cover that gap. Chat, Responses and Anthropic Messages now share a background `SSEHeartbeat`: after 15 idle seconds it writes a valid `: keepalive` comment frame under the same lock as application writes, so JSON frames cannot be split; responsive streams gain no extra frames and the thread stops as soon as the stream ends. Added `tests/_test_stream_keepalive.py` (9 checks, including heartbeat delivery while the reader is blocked and write integrity under contention), and re-ran the stream id, usage-frame, abort-frame and retry suites.
 
 - **飞牛 fnOS 这一层：并入上游 v1.7.25–v1.7.29（Phase M）**：合并基从 `205d8b6`（v1.7.24）推进到 `af37786`（`release: v1.7.29`，该 tag 就是上游 `main` 的头部），共 **31 个提交、27 个文件、+4166/-165**，覆盖 v1.7.25 / v1.7.26 / v1.7.27 / v1.7.28 / v1.7.29 五个 release。上游这一批的主线是「面板与更新的收尾」：手机端四处布局修复（工具栏打卡按钮靠右 `#585`、用量副行每项一行与图表底边对齐 `#586`、账号卡出口与权重同行 `#587`、窄屏「积分消耗」独占一行 `#588`）；启动时补一次更新检查 `#589`（`startup=True` 绕过 24 小时窗口，仍受每小时预算 6 次约束，账本随 `update_check` 落盘）；便携更新保留 zip 里的 unix 权限位 `#582`；保留历史版本备份并支持面板「版本回退」`#571`（`updates/backup-<目标版本>/`，份数 0–3 默认 1，`request.json` 增 `action: install|rollback`，回退后校验 `Server: wb-proxy/<版本>`，失败自动恢复到回退前）；镜像/rootfs 部署的 `request.json` 带 `profile: "app"`，只替换应用层（`#573`）；账号档位改读计费摘要（`#505`，`IsPaidUser`/`SubscriptionPackageName` 落成账号上的 `tier`，失败不写结论，24 小时 TTL）；11-128 继续收口 —— assistant 历史也清洗并把散文里的 `DeepSeek Harness` 缩成 `DeepSeek`（`#574`）、DSH GUI 描述段的句尾语序（`#579`）；跨出口回退「国际版限流 → 国内版」默认关闭（`#564`）；账号表排序按「主行 + 紧跟的 `tr.cool-row` 续行」成组（`#568`）；uid 不再被手机号脱敏改写（`#581`，`179-97517476` 曾被当成号码，面板因此回 `no such account`）；API Key 的账号白名单与并发上限能落盘了（`#592`）。合并侧 4 个冲突：`README.md`（套件数按合并后的树重算为 **221 = 166 Python + 55 JS**；Unreleased 段保留本仓库六条并补上本条，已进 `docs/CHANGELOG.md` 的上游条目全部删掉、指针改为 `v1.4.5 ~ v1.7.29`）、`dashboard.html`（窄屏样式表：上游新的 `@media (max-width: 860px)` 统计条重排与本层的 `@media (max-width:640px)` 兜底按断点从宽到窄排列，两块都留）、`tests/_test_run_all_contracts.py` （取上游版 —— `sorted(..., key=int)` 比本层原来的 `sorted()` 更精确，同一个 listdir 顺序问题）、`.github/workflows/tests.yml`（上游又加回来了，按 Phase G 的「本仓库不留任何自建 CI」继续删除，只保留上游的 `release.yml`）。打包侧本轮**无需新增模块**（上游这批没有新顶层文件），`tools/`/`ops/`/`catalog/` 的排除与五个更新模块的守卫名单照旧；面板「安装更新」在飞牛上继续关闭（`install_enabled()` 的三条判据都不成立）。
 - **飞牛 fnOS 这一层：并入上游 v1.7.18–v1.7.24（Phase L）**：合并基从 `af706fc`（v1.7.17）推进到 `205d8b6`（`release: v1.7.24`，该 tag 就指向上游 `main` 的头部，所以这一棵树没有「未发版提交」），共 **58 个提交、56 个文件、+6313/-489**，覆盖 v1.7.18 / v1.7.19 / v1.7.20 / v1.7.21 / v1.7.22 / v1.7.23 / v1.7.24 七个 release。上游这一批的主线从「断流」转到「可运维」：国际版每日活跃的时段（`schedule.daily_chat`，1–24 个 `HH:MM`）、并发（`daily_chat_web_concurrency`，默认 1）、线性重试（`base × N`，默认 120/240/360 秒）、当日去重、模型回退与随机提示词全部可配；API Key 可限制到账号白名单（`/u/<ref>` 定址到名单外 403）；`/v1/models` 可只列当前池子里真能服务的模型；`reasoning_effort` 被映射到模型目录声明的档位；全局提示词、出站身份版本号都能在面板里改；账号新增独立的 `tasksEnabled`（`enabled` 只管取号，签到/任务按它有选择）；流式断流不再伪造 `[DONE]`，改发标准 error 帧（`upstream_stream_error`）并关连接；热力图按本地日刷新。`v1.7.23` / `v1.7.24` 又把「一键更新」从 systemd 扩到便携版与非 systemd 部署，长出五个新顶层模块：`wb_tiers.py`（模型档位与可用性，`/v3/config` 的 `modelTiers`，PRO ONLY 模型只在池里有付费账号时出现）、`wb_webprompts.py`（内置 300 条随机提示词）、`wb_update_portable.py` 与 `wb_update_apply.py`（便携包自更新核心与包内 helper）、`wb_update_external.py`（非 systemd 部署的外部执行者参考实现），另有根目录 `start-wb-proxy-visible.bat` / `-lan-visible.bat`。`wb_proxy.py` 顶层 import 了 `wb_tiers` 与 `wb_webprompts`、`wb_update_request` 顶层 import 了 `wb_update_portable`，所以打包守卫名单与 `tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 这五项全部补上（漏一个是装完启动即 ImportError）。**飞牛侧一处关键判断**：面板「安装更新」按钮的 `install_enabled()` 现在是 `_systemd_enabled() or external_enabled() or `wb_update_portable.available()``，在飞牛上三条都不成立（没有 systemd unit、没有 `WB_UPDATE_INSTALL_ENABLED=1` 与 `WB_UPDATE_EXECUTOR`、载荷里也没有便携包的 `release-manifest.json`），因此按钮保持关闭，不会去下「便携 zip」覆盖 fpk 装的只读载荷；升级飞牛包仍走应用中心或 FnDepot。新增的运行时状态都在 `accounts/`（`tasksEnabled` 写进账号 JSON），fnOS 侧不需要新目录。合并侧冲突只有 `README.md` 一个文件（套件数、Unreleased 段、指针行），`dashboard.html` / `wb_proxy.py` / `wb_accounts.py` / `release/portable.txt` / `release/portable_runtime.py` 全部自动合并。
@@ -499,7 +524,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 - **飞牛 fnOS 这一层：并入上游 v1.7.11–v1.7.13 及 v1.7.13 之后的 44 个提交（Phase J）**：合并基从 `7e5c38d`（v1.7.10）推进到 `fe30fa0`，共 63 个提交、69 个文件、+9626/-492；包版本按版本号规则取上游最新 release tag 的三段号 → `1.7.13`，发布 tag `fnos-1.7.13`（该 tag 指向的合并提交因此包含 v1.7.13 之后仍未发版的那 20 个上游提交，与上游 `main` 对齐）。上游这一批长出四个新顶层文件与一个运维目录：`wb_quota_scan.py`（模型额度定时主动查询，状态落 `accounts/quota_scan.json`）、`wb_window_probe.py`（配额窗口探针，状态落 `accounts/model_windows.json`）、`wb_update_request.py`（阿里云 systemd 更新服务的面板侧请求桥，`wb_proxy.py` 顶层 `import`，缺它网关启动即 ImportError）、`console_tail.py`（便携包日志窗口）；`ops/aliyun/` 是 root 级 updater 单元，根目录维护脚本按上游 #398 归档进 `tools/`。打包侧随之跟上：`scripts/build-fpk.sh` 的载荷守卫名单补 `wb_quota_scan.py` / `wb_window_probe.py` / `wb_update_request.py`（漏一个就是「装完启动即死」），tar 排除列表把已失效的单文件 `./_fixbats.py` 换成整目录 `./tools` + `./ops`（上游把脚本搬进 `tools/` 后旧规则不再命中，且新目录不该进包），`tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 同步这三项；面板侧 `postJSON` 同时保留上游的「服务已关闭直接报错」与飞牛的 `wbUrl()` 网关前缀，`release/portable_runtime.py` 的必需文件表取并集（上游新增 `Lib/stat.py`、`Lib/platform.py`，飞牛仍要 `Lib/socketserver.py`、`Lib/struct.py`）。新增运行时状态全部落在 `accounts/`（本来就 `mkdir -p` + `chmod 700`），fnOS 侧不需要新目录，`WB_PROXY_CATALOG_DIR` 的修复照旧生效。 已发布版本的完整记录（v1.4.5 ~ v1.7.30，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
 - **飞牛 fnOS 这一层：并入上游 v1.7.30（Phase N）**：合并基从 `af37786`（v1.7.29）推进到 `84dbc99`（`release: v1.7.30`，该 tag 就是上游 `main` 的头部），共 **34 个提交、32 个文件、+4954/-427**。上游这一批 15 笔社区改动的主线是「判定与面板」：调度器日志与区域风控闸门改取正在运行的 `wb_proxy`（#594，`python wb_proxy.py` 下 `import wb_proxy` 会再加载一份副本，副本的 `LOG_STORE` 是 None、暂停状态也是另一份）；签到不再把 `200 + code 10001` 的失败回执记成成功（#596）；一键签到按 `tasksEnabled` 选号（#598）；Token 保活提前量改成 48 小时（#600，旧值 2 小时远小于 24 小时巡检间隔）；下拉框自绘（#601）；每日活跃建会话失败后按 `phase` 补退避（#605）；面板闸门 fail-closed 修首帧闪烁与 `?pwd=` 卡死（#606）；一次流式回复只带一个 chunk id（#607）；面板 POST 的空 body 会被排空（#608，修同连接下一个请求 501）；**Pro Only 标注改由目录 `modelTiers` 驱动（#609）——上游因此删掉了 `wb_entitlements.py` 与其套件**；Codex 远程压缩 v2（#610）；账号级并发上限与会话粘滞键（#612，默认关）；静态 API Key 账号（#620）；账号行显示会员档位胶囊（#621）；每日活跃网页会话跑完即释放（#623，修 10105）。合并侧 4 个冲突：`README.md`、`dashboard.html`（上游的「先摘 `html.wb-panel-session`」与飞牛的「网关模式摘掉闸门并提示重开」两段都留：先摘类，再按网关模式提前返回）、`release/portable.txt` 与 `wb_proxy.py`（`wb_entitlements.py` 已被上游删除，这里跟着删掉 import 与清单项，只保留本层的 `wb_export.py`）。打包侧同步：`scripts/build-fpk.sh` 守卫名单与 `tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 去掉 `wb_entitlements.py`。
 
-已发布版本的完整记录（v1.4.5 ~ v1.7.30，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
+已发布版本的完整记录（v1.4.5 ~ v1.7.33，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
 
 
 ## 七、致谢与引用声明 (Credits & References)
