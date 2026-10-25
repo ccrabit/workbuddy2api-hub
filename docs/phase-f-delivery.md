@@ -1,28 +1,49 @@
-# Phase F 交付说明：WorkBuddy2API-Hub 1.8.0（飞牛包）
+# Phase F 交付说明：WorkBuddy2API-Hub 1.8.0（飞牛包，看板样式已修）
 
-> 本轮（2026-10-25）：并入上游 `upstream/main` = `4f7ae6f`（`release: v1.8.0`，该 tag 就是上游 `main` 的头），合并基 `47775c5`（v1.7.33）→ **5 个提交、16 个文件、+823 −60**，全部是修 bug；合并提交 `62af384`，发布 tag **`fnos-1.8.0`** 指向该合并提交。发布走本地流程（本仓库没有 CI）：构建 → `verify-fpk.sh` → `run_all` → 上传两资产 → 回填 `fnpack.json` → 推送 `ccrabit/FnDepot`。**本轮没有动设备**。
-> **版本口径**：包版本取上游最新 release tag 的三段号 = `1.8.0`（上游从 `1.7.33` 直接跳到 `1.8.0`，没有 `1.7.34`）。这一批改动：`#647` 国际版沙箱证书失败时降级到活跃上报（不再整批失败）、`#644` `stderr` 日志通道不再阻塞请求线程（日志写不动时不会拖住整条请求）、`#643` 桌面 chat 的可选协议一致性、`#640` 更新检查超时放宽到 10 秒。
-> **流式心跳的归属（上一轮已移交）**：上游 v1.7.33（`#578`）自己实现了 `SSEHeartbeat`，本仓库那份 `StreamKeepalive` 已在 Phase O 删除；本层只保留 `WB_STREAM_KEEPALIVE_SECONDS` 覆盖默认 15 秒（0 关闭、上限 300 秒）。本轮 `wb_proxy.py` 与上游自动合并成功，没有再出现重复实现。
-> **上游同步的本地自动化已移除（2026-10-23，按用户要求）**：`wb-auto-sync` 那一套（cron 条目、`scripts/auto-sync-upstream.sh`、`scripts/auto_sync_fixups.py`、`tests/_test_auto_sync.py`、`docs/phase-n-automation.md`）整体删除，之后的上游同步由人工按 `docs/phase-g-local-release.md` 的 runbook 执行。
-> **已发布（本轮实测）**：`refs/heads/main` = `1ec9e57`，`refs/tags/fnos-1.8.0` = tag 对象 `0497741f`（peel 后 = 合并提交 `62af384`）；Release **423127766**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.8.0>）非草稿、正文非模板（2887 字符），两个资产 `uploaded`（**1024941 B / 98 B**，sidecar 自身 sha256 `7af20f20…`）。从 `api.github.com` 的资产端点下载回本地与 `dist/WorkBuddy2API-Hub_1.8.0_all.fpk` **逐字节相同**（sha256 `cc19a71f…`）。
-> **发布后实测**：`run_all --jobs 4` = **236 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=390 FAIL=0 SKIP=2）；`verify-fpk.sh` = 70 passed / 0 failed。
-> **FnDepot 源已更新（同一轮）**：`ccrabit/FnDepot` 提交 `345342f`「WorkBuddy2API-Hub 1.8.0 应用源」，线上 `fnpack.json` 与仓库根那份逐字节相同、单键 `1.8.0`、`updated_at 2026-10-25T11:33:35+08:00`；`download_url` 实测 HTTP 200 / 1024941 B / sha256 一致；`tests/_test_fndepot_source.py` PASS=77 FAIL=0 NOTES=3。该仓库仍需 `/root/.gh-token-classic`（细粒度 token 没有它的写权限）。
-> **设备现状**：设备当前装的是 1.7.33 —— 用户自己从 FnDepot 客户端点的升级（manifest `version = 1.7.33`、`checksum = ce408dc0…`）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
-> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向构建用的那个提交 `62af384`，那棵树里的 `fnpack.json` 仍 advertise `1.7.33`；已发布元数据在 `main` 上。
-> 历史内容（Phase F/G/H/I/J/K/L/M/N/O）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
+> 本轮：并入上游 `upstream/main` = `4f7ae6f`（`release: v1.8.0`，tag 就是上游 `main` 的头），
+> 合并基 `47775c5`（v1.7.33）→ **5 个提交、16 个文件、+823 −60**，全部是修 bug；合并提交
+> `62af384`。随后用户在 1.7.33 上反馈「数据看板显示不全」，定位到**本仓库自 1.7.30 起带进来的
+> 样式缺陷**并修掉，所以 `1.8.0` 这个包**重打包了一次**（同一版本号、新字节，Phase G 先例）。
+> 发布走本地流程：构建 → `verify-fpk.sh` → `run_all` → 上传两资产 → 回填 `fnpack.json` → 推送
+> `ccrabit/FnDepot`。**本轮没有动设备**。
+>
+> **看板缺陷与修法**：上游 v1.7.30 在统计条上新增的 `@media (max-width: 860px)` 与本层同位置的
+> 移动端兜底规则合并时少了一个收尾的 `}`，于是它把**后面全部规则**（整个 `#pageAnalytics` 看板
+> 设计、`.wb-help` 使用说明）都吞进了「窄屏才生效」的分支——浏览器不报错，只是宽屏下全部失效
+> （KPI 卡片一张一行、行高巨大、没有六列栅格）。`fnos-1.7.24` 的样式表是 `670/670` 配平，
+> `fnos-1.7.30` 起变成 `722/721`，所以 1.7.30 / 1.7.33 两个包都带着它。修法：补回那个 `}`，
+> 让 `#pageAnalytics` / `.wb-help` / `#cockpitRealm` / `#cards` 回到嵌套深度 0；新增
+> `tests/_test_dashboard_css.py`（4 项）钉死「括号等量 + 关键字面规则在深度 0 + 深度大于 0 的
+> 规则只能待在 `@media`/`@keyframes`/`@supports` 里」——这类缺陷不会让任何断言变红（字符串还在，
+> 只是位置错了），必须单独钉一层。
+>
+> **版本口径**：包版本仍是上游最新三段 release tag（`v1.8.0`），套件里 `PKG_VERSION` 也按
+> `newest_upstream_release()` 解析，所以**不引入 1.8.1 这种 fork 私有版本号**；同一版本号换资产
+> 的代价是「已经装过旧 1.8.0 的机器不会自动收到更新」，需要手动覆盖安装一次——本轮设备装的是
+> 1.7.33，不受影响。
+> **已发布（本轮实测）**：tag `fnos-1.8.0` 指向**双亲合并提交**「Merge upstream/main (v1.8.0) into the fnOS fork」（两个父 `dce80d2` + `4f7ae6f`），且 `refs/heads/main` 与它同一个提交（发布态：`git describe --tags` 就在 `fnos-1.8.0` 上）；Release **423127766**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.8.0>）非草稿、标题已改为「数据看板已修」，两资产 `uploaded`（`1027104` B / `98` B），从资产端点下载回本地与 `dist/` **逐字节相同**（sha256 `3f98610c…`）。`bash scripts/verify-fpk.sh` = **71 passed / 0 failed**（tag 在 HEAD 上，那条 SKIP 消失）。
+> **发布后实测**：`python3 tests/run_all.py --jobs 4` = **237 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=359 FAIL=0）。
+> **FnDepot 源已更新**：`ccrabit/FnDepot` 提交 `6922063`「WorkBuddy2API-Hub 1.8.0 应用源（重打包：看板样式修复）」，单键 `1.8.0`、`updated_at 2026-10-25T17:44:35+08:00`；`download_url` 实测 HTTP 200 / `1027104` B / sha256 一致；`tests/_test_fndepot_source.py` = PASS=77 FAIL=0 SKIP=0 NOTES=3（用临时克隆的中心仓库 `generate_sources.py` 当校验器）。
+> **两处踩坑记录**：① 发布 tag 必须指向**双亲合并提交**且标题写明并入 `upstream/main`，否则 E13/E16 立刻红——本轮先把 tag 指到修复提交（单亲）被套件拦下，改成「用 `git commit-tree <tree> -p <旧 main> -p <upstream head>` 造一个树与构建态一致的双亲合并」才通过；② 这台机器上 **`/tmp` 在每次 bash 调用之间不保留**，`.stage` 之类的中间态要放到 `/vol2/1000/AgentWork/2api/.stage/`（FnDepot 暂存源与中心仓库校验器都放那里）。
+> **设备现状**：设备当前装的是 1.7.33（用户自己从 FnDepot 点的升级，manifest `version = 1.7.33`、
+> `checksum = ce408dc0…`，其 `server/dashboard.html` 正是 `722/721` 的坏样式表）。本轮我方对设备
+> **只做只读核查**，没有 install/upgrade/uninstall。
+> **tag 与已发布元数据**：tag `fnos-1.8.0` 指向「本轮最终提交」（含样式修复与回填），所以那棵树里的
+> `fnpack.json` 与已发布资产一致，`verify-fpk.sh` 的那条 SKIP 不再出现。
+> 历史内容（Phase F/G/H/I/J/K/L/M/N/O/P）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
-## 1. 包与已发布资产（1.8.0，本轮）
+## 1. 包与已发布资产（1.8.0，本轮重打包）
 
 | 项 | 值 |
 |---|---|
 | 文件 | `dist/WorkBuddy2API-Hub_1.8.0_all.fpk` |
-| 大小 | 1024941 B |
-| sha256 | `cc19a71fa6b80c6f8695c3cb22602aca323d2e9f8e6412c554f9a93faf31bbe9` |
-| manifest checksum | `20a84d687ca21e7b812f392cd1a95f8a`（= 包内 `app.tgz` 的 md5） |
-| 载荷 | **51 个文件 + 15 个目录**（本轮没有新顶层模块；`logs/`、`tools/`、`ops/`、`catalog/` 一律不入包） |
+| 大小 | 1027104 B |
+| sha256 | `3f98610c77d0375c909be14d15972c9752f98846c5f27aeb8dd1de63580d329f` |
+| manifest checksum | `d3739a61a5faa8e4b7651499d83957e5`（= 包内 `app.tgz` 的 md5） |
+| 载荷 | **51 个文件 + 15 个目录**；与上一次 1.8.0 打包相比唯一差异是 `server/dashboard.html`（补回 `}`，样式表 `722/722` 配平） |
 | 版本 / appname | `1.8.0` / `workbuddy2api`（appname 故意不改） |
-| 冲突解决 | **只有 `README.md` 一个文件**（套件数按合并后的树重算为 **236 = 175 Python + 61 JS**，上游侧那 11 行历史数字继续作废；变更记录段新增 Phase P 条目）。`wb_proxy.py` / `wb_accounts.py` / `dashboard.html` 全部自动合并。 |
-| 打包侧 | 无需改动：本轮唯一的 `tests/_test_daily_chat_activity_fallback.py` 是套件而不是模块；`build-fpk.sh` 的守卫名单与 `PKG_MODULES` 与 1.7.33 相同 |
+| 冲突解决 | 本轮合并只有 `README.md` 一个冲突文件（套件数按合并后的树重算为 **237 = 176 Python + 61 JS**，上游侧那 11 行历史数字继续作废）；`wb_proxy.py` / `wb_accounts.py` / `dashboard.html` 全部自动合并 |
+| 打包侧 | 无需改动（本轮没有新顶层模块） |
 
 # 以下为 Phase F/G 历史记录（1.6.19）
 

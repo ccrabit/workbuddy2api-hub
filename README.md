@@ -176,7 +176,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 236 个套件：175 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 237 个套件：176 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
@@ -509,6 +509,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 <!-- 发版时：把下面的 Unreleased 段落整理成新版本号（## vX.Y.Z），整体移入 docs/CHANGELOG.md 顶部 -->
 
 - **v1.8.0 发布**：汇总 v1.7.33 之后的 #640、#642、#643、#645/#647，并补齐 #578、#618、#625 的发布记录。完整变更、验证范围与已知限制见 **[docs/CHANGELOG.md](docs/CHANGELOG.md#v180)**；下一版的改动继续写在本段。
+- **修复数据看板在桌面上只显示一列（1.8.1 热修）**：上游 v1.7.30 在统计条上加的 `@media (max-width: 860px)` 与本层的移动端兜底规则在同一位置合并时少了一个收尾的 `}`，于是它把**后面全部规则**（整个 `#pageAnalytics` 看板设计、`.wb-help` 使用说明）都吞进了「窄屏才生效」的分支。症状不是报错而是静默降级：宽屏下类看板没有六列栅格，KPI 卡片一张一行、行高巨大，「请求数 / 生成速度 / 积分消耗」被拉开到屏幕各处。修法是补回那个 `}`（让 `#pageAnalytics`、`.wb-help`、`#cockpitRealm`、`#cards` 都回到嵌套深度 0），并新增 `tests/_test_dashboard_css.py` 钉死三件事：每个 `<style>` 块的 `{`/`}` 必须等量、关键字面规则必须在深度 0、深度大于 0 的规则只能待在 `@media`/`@keyframes`/`@supports` 里面（漏一个括号就会在下一轮静默复发）。
 - **飞牛 fnOS 这一层：并入上游 v1.8.0（Phase P）**：合并基从 `47775c5`（v1.7.33）推进到 `4f7ae6f`（`release: v1.8.0`，该 tag 就是上游 `main` 的头），共 **5 个提交、16 个文件、+823/-60**，全部是修 bug：国际版沙箱证书失败时降级到活跃上报（`#647`）、`stderr` 日志通道不再阻塞请求线程（`#644`，日志写失败不再拖住整条请求）、桌面 chat 可选协议一致性（`#643`，`/v1/chat/completions` 的 `protocol` 与客户端身份对齐）、更新检查超时放宽到 10 秒（`#640`）。新增套件只有 `tests/_test_daily_chat_activity_fallback.py` 一个，**不需要动打包侧**（没有新顶层模块，`build-fpk.sh` 的守卫名单与 `PKG_MODULES` 原样）。合并侧只有 `README.md` 一个冲突文件：套件数按合并后的树重算为 **236 = 175 Python + 61 JS**（上游侧那 11 行历史数字继续作废），变更记录段保留本仓库的 Phase 条目并新增本条。上一轮把流式心跳交给上游 `SSEHeartbeat` 之后，本层没有新的重复实现要合。
 - **飞牛 fnOS 这一层：并入上游 v1.7.30–v1.7.33（Phase O）**：合并基从 `af37786`（v1.7.29）推进到 `47775c5`（`release: v1.7.33`，该 tag 就是上游 `main` 的头），共 **15 个提交、26 个文件、+3005/-1336**，覆盖 v1.7.31 / v1.7.32 / v1.7.33 三个 release。上游这一批的主线是「网页活跃的收尾与流式心跳转正」：每日活跃重构为「一个预算 + 一个候选序列」（`#632`），失败收尾登记保留并迁移旧配置（`#638`），登记表与被放弃的线程都加上界（内存不再随失败次数增长），网页会话收尾不再依赖卡住的那条线程；模型级 429 冷却窗口重启后能恢复、成功请求会解除凭证失效标记；`responses` 补发工具调用首段参数增量；面板校正调色对比度并提示 HTTP 入口；网关恢复模型别名并**自己补上了流式 SSE 心跳**（`#578`，`SSEHeartbeat`，默认 15 秒）。心跳这块因此由「本仓库独有」变成「上游实现 + 本仓库的旋钮」：删掉本层那份 `StreamKeepalive`，改用上游的 `SSEHeartbeat`（`with heartbeat:` 收尾、三个流式出口一致），只把 `WB_STREAM_KEEPALIVE_SECONDS` 保留成覆盖默认值的旋钮（0 关闭、上限 300 秒），并给上游的 `tests/_test_stream_keepalive.py` 追加了一节旋钮断言。合并侧 3 个冲突：`README.md`（套件数按合并后的树重算为 **235 = 174 Python + 61 JS**；上游侧那 11 行历史套件数全部作废；指针改为 `v1.4.5 ~ v1.7.33`）、`tests/_test_stream_keepalive.py`（add/add —— 两边都新增了同名文件，取上游那份当基线 + 追加本层的旋钮用例）、`wb_proxy.py`（6 段全是 `keepalive` ↔ `heartbeat`，一律取上游结构，并删掉本层残留的两处重复构造）。打包侧本轮**无需新增模块**（上游这 15 个提交没有新顶层文件），`tools/`/`ops/`/`catalog/`/`logs/` 的排除与守卫名单照旧。
 - **v1.7.33 已于 2026-10-23 发布**：本版集成 #630、#632、#635、#638，并自本版起进入低频维护。完整变更与验证记录见 **[docs/CHANGELOG.md](docs/CHANGELOG.md#v173)**；下一版的改动继续写在本段。
