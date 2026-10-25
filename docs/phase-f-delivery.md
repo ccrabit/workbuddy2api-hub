@@ -4,6 +4,9 @@
 > **版本口径**：包版本取上游最新 release tag 的三段号 = `1.8.0`（上游从 `1.7.33` 直接跳到 `1.8.0`，没有 `1.7.34`）。这一批改动：`#647` 国际版沙箱证书失败时降级到活跃上报（不再整批失败）、`#644` `stderr` 日志通道不再阻塞请求线程（日志写不动时不会拖住整条请求）、`#643` 桌面 chat 的可选协议一致性、`#640` 更新检查超时放宽到 10 秒。
 > **流式心跳的归属（上一轮已移交）**：上游 v1.7.33（`#578`）自己实现了 `SSEHeartbeat`，本仓库那份 `StreamKeepalive` 已在 Phase O 删除；本层只保留 `WB_STREAM_KEEPALIVE_SECONDS` 覆盖默认 15 秒（0 关闭、上限 300 秒）。本轮 `wb_proxy.py` 与上游自动合并成功，没有再出现重复实现。
 > **上游同步的本地自动化已移除（2026-10-23，按用户要求）**：`wb-auto-sync` 那一套（cron 条目、`scripts/auto-sync-upstream.sh`、`scripts/auto_sync_fixups.py`、`tests/_test_auto_sync.py`、`docs/phase-n-automation.md`）整体删除，之后的上游同步由人工按 `docs/phase-g-local-release.md` 的 runbook 执行。
+> **已发布（本轮实测）**：`refs/heads/main` = `1ec9e57`，`refs/tags/fnos-1.8.0` = tag 对象 `0497741f`（peel 后 = 合并提交 `62af384`）；Release **423127766**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.8.0>）非草稿、正文非模板（2887 字符），两个资产 `uploaded`（**1024941 B / 98 B**，sidecar 自身 sha256 `7af20f20…`）。从 `api.github.com` 的资产端点下载回本地与 `dist/WorkBuddy2API-Hub_1.8.0_all.fpk` **逐字节相同**（sha256 `cc19a71f…`）。
+> **发布后实测**：`run_all --jobs 4` = **236 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=390 FAIL=0 SKIP=2）；`verify-fpk.sh` = 70 passed / 0 failed。
+> **FnDepot 源已更新（同一轮）**：`ccrabit/FnDepot` 提交 `345342f`「WorkBuddy2API-Hub 1.8.0 应用源」，线上 `fnpack.json` 与仓库根那份逐字节相同、单键 `1.8.0`、`updated_at 2026-10-25T11:33:35+08:00`；`download_url` 实测 HTTP 200 / 1024941 B / sha256 一致；`tests/_test_fndepot_source.py` PASS=77 FAIL=0 NOTES=3。该仓库仍需 `/root/.gh-token-classic`（细粒度 token 没有它的写权限）。
 > **设备现状**：设备当前装的是 1.7.33 —— 用户自己从 FnDepot 客户端点的升级（manifest `version = 1.7.33`、`checksum = ce408dc0…`）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
 > **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向构建用的那个提交 `62af384`，那棵树里的 `fnpack.json` 仍 advertise `1.7.33`；已发布元数据在 `main` 上。
 > 历史内容（Phase F/G/H/I/J/K/L/M/N/O）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
