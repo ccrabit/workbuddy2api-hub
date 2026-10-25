@@ -1,28 +1,25 @@
-# Phase F 交付说明：WorkBuddy2API-Hub 1.7.33（飞牛包）
+# Phase F 交付说明：WorkBuddy2API-Hub 1.8.0（飞牛包）
 
-> 本轮（2026-10-24）：并入上游 `upstream/main` = `47775c5`（`release: v1.7.33`，该 tag 就是上游 `main` 的头），合并基 `af37786`（v1.7.29）→ **15 个提交、26 个文件、+3005 −1336**，覆盖 v1.7.31 / v1.7.32 / v1.7.33 三个 release；合并提交 `6ed40b2`，发布 tag **`fnos-1.7.33`** 指向该合并提交。发布走本地流程（本仓库没有 CI）：构建 → `verify-fpk.sh` → `run_all` → 上传两资产 → 回填 `fnpack.json` → 推送 `ccrabit/FnDepot`。**本轮没有动设备**（此前手工替载荷再手工起服务，导致应用中心记录的运行态与真实进程不一致，用户据此要求启停只走应用中心）。
-> **版本口径**：包版本取上游最新 release tag 的三段号 = `1.7.33`。上游这一批的主线是「网页活跃收尾与心跳转正」：每日活跃重构成「一个预算 + 一个候选序列」（`#632`）、失败收尾登记保留并迁移旧配置（`#638`）、登记表与被放弃线程都加上界、收尾不再依赖卡住的那条线程；模型级 429 冷却窗口重启可恢复、成功请求解除凭证失效标记；`responses` 补发工具调用首段参数增量；面板校正调色对比度并提示 HTTP 入口；**网关自己补上流式 SSE 心跳**（`#578`，`SSEHeartbeat`，默认 15 秒）。
-> **心跳这块的所有权变了（本轮唯一的实现级冲突）**：本仓库在 v1.7.18 那轮自己写过 `StreamKeepalive`（默认 10 秒），上游 v1.7.33 用 `SSEHeartbeat` 实现了同一件事。合并时**改用上游那份**（三个流式出口统一 `with heartbeat:` 收尾），删掉本层的类与两处重复构造；只保留 `WB_STREAM_KEEPALIVE_SECONDS` 作为覆盖默认值的旋钮（0 关闭、上限 300 秒），并在上游 `tests/_test_stream_keepalive.py` 后追加一节旋钮断言（18 项全绿）。
+> 本轮（2026-10-25）：并入上游 `upstream/main` = `4f7ae6f`（`release: v1.8.0`，该 tag 就是上游 `main` 的头），合并基 `47775c5`（v1.7.33）→ **5 个提交、16 个文件、+823 −60**，全部是修 bug；合并提交 `62af384`，发布 tag **`fnos-1.8.0`** 指向该合并提交。发布走本地流程（本仓库没有 CI）：构建 → `verify-fpk.sh` → `run_all` → 上传两资产 → 回填 `fnpack.json` → 推送 `ccrabit/FnDepot`。**本轮没有动设备**。
+> **版本口径**：包版本取上游最新 release tag 的三段号 = `1.8.0`（上游从 `1.7.33` 直接跳到 `1.8.0`，没有 `1.7.34`）。这一批改动：`#647` 国际版沙箱证书失败时降级到活跃上报（不再整批失败）、`#644` `stderr` 日志通道不再阻塞请求线程（日志写不动时不会拖住整条请求）、`#643` 桌面 chat 的可选协议一致性、`#640` 更新检查超时放宽到 10 秒。
+> **流式心跳的归属（上一轮已移交）**：上游 v1.7.33（`#578`）自己实现了 `SSEHeartbeat`，本仓库那份 `StreamKeepalive` 已在 Phase O 删除；本层只保留 `WB_STREAM_KEEPALIVE_SECONDS` 覆盖默认 15 秒（0 关闭、上限 300 秒）。本轮 `wb_proxy.py` 与上游自动合并成功，没有再出现重复实现。
 > **上游同步的本地自动化已移除（2026-10-23，按用户要求）**：`wb-auto-sync` 那一套（cron 条目、`scripts/auto-sync-upstream.sh`、`scripts/auto_sync_fixups.py`、`tests/_test_auto_sync.py`、`docs/phase-n-automation.md`）整体删除，之后的上游同步由人工按 `docs/phase-g-local-release.md` 的 runbook 执行。
-> **已发布（本轮实测）**：`refs/heads/main` = `69b3dd9`，`refs/tags/fnos-1.7.33` peel 后 = 合并提交 `6ed40b2`；Release **422488638**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.7.33>）非草稿、正文非模板，两个资产 `uploaded`（1023096 B / 99 B，sidecar 自身 sha256 `f6223a02…`）。从 `api.github.com` 的资产端点下载回本地与 `dist/WorkBuddy2API-Hub_1.7.33_all.fpk` **逐字节相同**（sha256 `fe4193de…`）。
-> **发布后实测**：`run_all --jobs 4` = **235 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=390 FAIL=0 SKIP=2）；`verify-fpk.sh` = 70 passed / 0 failed；`tests/_test_stream_keepalive.py` = PASS=18 FAIL=0（含本层旋钮 9 项）。
-> **FnDepot 源已更新（同一轮）**：`ccrabit/FnDepot` 提交 `ff25d17`「WorkBuddy2API-Hub 1.7.33 应用源」，线上 `fnpack.json` 与仓库根那份逐字节相同、单键 `1.7.33`、`updated_at 2026-10-24T11:22:16+08:00`；`download_url` 实测 HTTP 200 / 1023096 B / sha256 一致；`tests/_test_fndepot_source.py` PASS=77 FAIL=0 NOTES=3。该仓库仍需 `/root/.gh-token-classic`（细粒度 token 没有它的写权限）。
-> **设备现状**：设备当前装的是 1.7.30 —— 用户自己从 FnDepot 客户端点的升级。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall，也没有再手工替载荷。
-> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向构建用的那个提交 `6ed40b2`，那棵树里的 `fnpack.json` 仍 advertise `1.7.30`；已发布元数据在 `main` 上。
-> 历史内容（Phase F/G/H/I/J/K/L/M/N）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
+> **设备现状**：设备当前装的是 1.7.33 —— 用户自己从 FnDepot 客户端点的升级（manifest `version = 1.7.33`、`checksum = ce408dc0…`）。本轮我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
+> **一个已知特性（tag 的树 ≠ 已发布的元数据）**：tag 指向构建用的那个提交 `62af384`，那棵树里的 `fnpack.json` 仍 advertise `1.7.33`；已发布元数据在 `main` 上。
+> 历史内容（Phase F/G/H/I/J/K/L/M/N/O）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
 
-## 1. 包与已发布资产（1.7.33，本轮）
+## 1. 包与已发布资产（1.8.0，本轮）
 
 | 项 | 值 |
 |---|---|
-| 文件 | `dist/WorkBuddy2API-Hub_1.7.33_all.fpk` |
-| 大小 | 1023096 B |
-| sha256 | `fe4193de2156585ac93b946714b1b2c5a4ab29e5821ab02353b5763501a60c74` |
-| manifest checksum | `ce408dc0d1abbba88eeb9220321ad7b7`（= 包内 `app.tgz` 的 md5） |
-| 载荷 | **51 个文件 + 15 个目录**（上游这 15 个提交没有新增顶层模块；`logs/`、`tools/`、`ops/`、`catalog/` 一律不入包） |
-| 版本 / appname | `1.7.33` / `workbuddy2api`（appname 故意不改） |
-| 冲突解决 | **3 个**。`README.md`（套件数按合并后的树重算为 **235 = 174 Python + 61 JS**，上游侧那 11 行历史套件数全部作废；新增 Phase O 条目；指针 `v1.4.5 ~ v1.7.33`）、`tests/_test_stream_keepalive.py`（add/add：两边都新增了同名文件，取上游那份作基线并追加本层旋钮断言）、`wb_proxy.py`（6 段全是 `keepalive` ↔ `heartbeat`，一律取上游 `with heartbeat:` 结构，并删掉本层残留的两处重复构造）。另修了一处本层套件与新上游的冲突：`tests/_test_gateway_ui.js` 原来禁止页面写任何 `window.__WB_*__`，上游 477ba36 加了页面自己的 `__WB_THEME_STYLES__`，断言收窄为只盯服务端注入的 `__WB_BASE__` / `__WB_VIA_GATEWAY__`。 |
-| 打包侧 | 无需新增模块；`scripts/build-fpk.sh` 的守卫名单与 `tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 未变（上一轮已经补到 5 个更新模块 + `wb_tiers.py` / `wb_webprompts.py`） |
+| 文件 | `dist/WorkBuddy2API-Hub_1.8.0_all.fpk` |
+| 大小 | 1024941 B |
+| sha256 | `cc19a71fa6b80c6f8695c3cb22602aca323d2e9f8e6412c554f9a93faf31bbe9` |
+| manifest checksum | `20a84d687ca21e7b812f392cd1a95f8a`（= 包内 `app.tgz` 的 md5） |
+| 载荷 | **51 个文件 + 15 个目录**（本轮没有新顶层模块；`logs/`、`tools/`、`ops/`、`catalog/` 一律不入包） |
+| 版本 / appname | `1.8.0` / `workbuddy2api`（appname 故意不改） |
+| 冲突解决 | **只有 `README.md` 一个文件**（套件数按合并后的树重算为 **236 = 175 Python + 61 JS**，上游侧那 11 行历史数字继续作废；变更记录段新增 Phase P 条目）。`wb_proxy.py` / `wb_accounts.py` / `dashboard.html` 全部自动合并。 |
+| 打包侧 | 无需改动：本轮唯一的 `tests/_test_daily_chat_activity_fallback.py` 是套件而不是模块；`build-fpk.sh` 的守卫名单与 `PKG_MODULES` 与 1.7.33 相同 |
 
 # 以下为 Phase F/G 历史记录（1.6.19）
 
