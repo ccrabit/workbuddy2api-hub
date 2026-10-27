@@ -38,16 +38,18 @@ GENERATOR_CANDIDATES = [
 
 EXPECTED_APP = "workbuddy2api"          # == fnos/manifest appname
 EXPECTED_DISPLAY = "WorkBuddy2API-Hub"
-EXPECTED_VERSION = "1.8.0"            # 当前发布版本（phase-f 版本政策：包版本 = 上游最新 release tag 三段号）
+# Phase Q hot-fix: the fourth number exists only so appcenter installs new bytes
+# over an already-published upstream version (see docs/phase-f-delivery.md).
+EXPECTED_VERSION = "1.8.0.1"          # 当前发布版本（上游 1.8.0 + fork 私有热修号）
 EXPECTED_URL = ("https://github.com/ccrabit/workbuddy2api-hub/releases/download/"
-                "fnos-1.8.0/WorkBuddy2API-Hub_1.8.0_all.fpk")
+                "fnos-1.8.0.1/WorkBuddy2API-Hub_1.8.0.1_all.fpk")
 
 # The nine fixed categories (spec §4.2) and the allowed platform/arch values.
 CATEGORIES = ("影音娱乐", "系统工具", "编程开发", "AI赋能", "生活服务",
               "智能智控", "教育学习", "游戏地带", "硬件驱动")
 PLATFORMS = ("all", "x86", "arm")
 ARCHS = ("all", "x86", "arm")
-SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 PASS = 0

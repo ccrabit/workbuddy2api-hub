@@ -1,5 +1,30 @@
 # Phase F 交付说明：WorkBuddy2API-Hub 1.8.0（飞牛包，看板样式已修）
 
+> **Phase Q 热修（2026-10-27，11128 渠道校验；包版本 `1.8.0.1`）**：上游 10-27 下午起对 Web 凭证加大渠道校验，
+> 返回 HTTP 400 `code=11128 Illegal API invocation from an unapproved channel`；实测为**抽样判定**
+> （同一会话 `msgs=95` 在 22:28:39 被拒、22:28:40 立刻成功），而旧版 `open_upstream()` 对 400
+> 一律原样透传、不换号，于是一次抽样就打死整轮。本轮改动：`wb_proxy.py` 的 400 分支先解析
+> `upstream_error_code`，命中 `WAF_TRANSIENT_ERROR_CODES = frozenset((11128,))` 且预算未用完时
+> 换号重试（默认 2 次，`WB_WAF_RETRY_ATTEMPTS` 可调，0 = 关），被拒账号**不记账、不冷却**；
+> 新增套件 `tests/_test_waf_channel_retry.py`（5 项）。
+>
+> **版本口径（Phase Q 的有意偏离，用户明确要求）**：用户原话「版本号不更新，应用中心无法安装，
+> 为了区别上游版本，这个版本号按照 `1.8.0.1` 这样的方式命名」。所以 1.8.0 的「包版本 ≡ 上游最新
+> 三段 tag」政策**本轮显式豁免**：`manifest` 的 `version`、`wb_proxy.py` 的 `server_version` /
+> `/overview` 版本串、发布 tag（`fnos-1.8.0.1`）与 `fnpack.json` 的版本键统一为 **`1.8.0.1`**。
+> 理由纯粹是机械的：应用中心不会把「同版本号、新字节」的包当成升级，装不进去。它**不是** Phase E
+> 那个「上游 1.6.10 + 我们第 N 次发布」的 ordinal 机制（那个仍然删除，`build-fpk.sh` 里没有
+> `next_release_ordinal`），只是一个热修计数；上游下一个 release（`v1.8.1`）回到三段号。
+> `scripts/build-fpk.sh` / `scripts/verify-fpk.sh` 的版本正则因此放宽为「三段 + 可选第四段」
+> （`(\.[0-9]+){2,3}`），`tests/_test_phase_e_verify.py` 里「包版本 = 上游最新 tag」的断言与
+> `tests/_test_fndepot_source.py` 的 SemVer 断言同步放宽，均登记为本轮的有意偏离。
+>
+> **本包指纹（本轮实测）**：`dist/WorkBuddy2API-Hub_1.8.0.1_all.fpk` = **`1020826` B** /
+> sha256 `900757ae9847c4d1a82f9e2aa9a56adbb0e820f7dd9c19e8468138997d7b0b63`，包内 `app.tgz`
+> 的 md5（即 manifest 的 `checksum`）= `a3e136953862d08dc956259bfb9d7547`。
+> `fnpack.json` 已按此回填；**Release 尚未发布**（推送 `ccrabit/FnDepot` 之前必须先上传资产，
+> 否则源里的 `download_url` 会 404）。
+
 > 本轮：并入上游 `upstream/main` = `4f7ae6f`（`release: v1.8.0`，tag 就是上游 `main` 的头），
 > 合并基 `47775c5`（v1.7.33）→ **5 个提交、16 个文件、+823 −60**，全部是修 bug；合并提交
 > `62af384`。随后用户在 1.7.33 上反馈「数据看板显示不全」，定位到**本仓库自 1.7.30 起带进来的
@@ -17,17 +42,17 @@
 > 规则只能待在 `@media`/`@keyframes`/`@supports` 里」——这类缺陷不会让任何断言变红（字符串还在，
 > 只是位置错了），必须单独钉一层。
 >
-> **版本口径**：包版本仍是上游最新三段 release tag（`v1.8.0`），套件里 `PKG_VERSION` 也按
-> `newest_upstream_release()` 解析，所以**不引入 1.8.1 这种 fork 私有版本号**；同一版本号换资产
-> 的代价是「已经装过旧 1.8.0 的机器不会自动收到更新」，需要手动覆盖安装一次——本轮设备装的是
-> 1.7.33，不受影响。
+> **版本口径**：1.8.0 按「包版本 = 上游最新三段 release tag（`v1.8.0`）」发布，套件里 `PKG_VERSION`
+> 也按 `newest_upstream_release()` 解析；Phase Q 热修按用户要求改用第四段 `1.8.0.1`（见顶部「版本
+> 口径」段），跑门禁时用 `WB_PKG_VERSION=1.8.0.1` 覆盖该解析值。同一版本号换资产的代价是「已经装过
+> 旧 1.8.0 的机器不会自动收到更新」——这正是本轮必须换号的原因：应用中心只按版本号判断升级。
 > **已发布（本轮实测）**：tag `fnos-1.8.0` 指向**双亲合并提交**「Merge upstream/main (v1.8.0) into the fnOS fork」（两个父 `dce80d2` + `4f7ae6f`），且 `refs/heads/main` 与它同一个提交（发布态：`git describe --tags` 就在 `fnos-1.8.0` 上）；Release **423127766**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.8.0>）非草稿、标题已改为「数据看板已修」，两资产 `uploaded`（`1027104` B / `98` B），从资产端点下载回本地与 `dist/` **逐字节相同**（sha256 `3f98610c…`）。`bash scripts/verify-fpk.sh` = **71 passed / 0 failed**（tag 在 HEAD 上，那条 SKIP 消失）。
 > **发布后实测**：`python3 tests/run_all.py --jobs 4` = **237 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=359 FAIL=0）。
 > **FnDepot 源已更新**：`ccrabit/FnDepot` 提交 `6922063`「WorkBuddy2API-Hub 1.8.0 应用源（重打包：看板样式修复）」，单键 `1.8.0`、`updated_at 2026-10-25T17:44:35+08:00`；`download_url` 实测 HTTP 200 / `1027104` B / sha256 一致；`tests/_test_fndepot_source.py` = PASS=77 FAIL=0 SKIP=0 NOTES=3（用临时克隆的中心仓库 `generate_sources.py` 当校验器）。
 > **两处踩坑记录**：① 发布 tag 必须指向**双亲合并提交**且标题写明并入 `upstream/main`，否则 E13/E16 立刻红——本轮先把 tag 指到修复提交（单亲）被套件拦下，改成「用 `git commit-tree <tree> -p <旧 main> -p <upstream head>` 造一个树与构建态一致的双亲合并」才通过；② 这台机器上 **`/tmp` 在每次 bash 调用之间不保留**，`.stage` 之类的中间态要放到 `/vol2/1000/AgentWork/2api/.stage/`（FnDepot 暂存源与中心仓库校验器都放那里）。
-> **设备现状**：设备当前装的是 1.7.33（用户自己从 FnDepot 点的升级，manifest `version = 1.7.33`、
-> `checksum = ce408dc0…`，其 `server/dashboard.html` 正是 `722/721` 的坏样式表）。本轮我方对设备
-> **只做只读核查**，没有 install/upgrade/uninstall。
+> **设备现状**：设备当前装的是 **1.8.0**（用户自己从 FnDepot 点的升级，manifest `version = 1.8.0`、
+> `checksum = d3739a61a5faa8e4b7651499d83957e5`，与本轮发布资产一致，`server/dashboard.html` 已是
+> `722/722` 配平的修好版本）。我方对设备**只做只读核查**，没有 install/upgrade/uninstall。
 > **tag 与已发布元数据**：tag `fnos-1.8.0` 指向「本轮最终提交」（含样式修复与回填），所以那棵树里的
 > `fnpack.json` 与已发布资产一致，`verify-fpk.sh` 的那条 SKIP 不再出现。
 > 历史内容（Phase F/G/H/I/J/K/L/M/N/O/P）保留在下方原章节，仅 §1 指纹已按本轮覆盖。

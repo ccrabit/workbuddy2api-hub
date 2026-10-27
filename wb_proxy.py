@@ -10251,7 +10251,7 @@ def runtime_settings_view():
         "accounts_dir": ACCOUNTS_DIR,
         "usage_dir": USAGE_DIR,
         "settings_file": wb_settings.settings_path(ACCOUNTS_DIR),
-        "version": "1.8.0",
+        "version": "1.8.0.1",
     }
 def current_account():
     """Account used for display purposes (health / usage summaries)."""
@@ -13986,6 +13986,35 @@ def is_transient(exc):
 # model not available, 11129 = invalid function parameters.
 MODEL_SCOPED_ERROR_CODES = frozenset((11102, 11129, 11134, 11150, 11158))
 
+#: Codes the upstream WAF puts in an HTTP 400 body when it decides a request did
+#: not come from an approved channel (#562 / #674 / #675 / #677): "Illegal API
+#: invocation from an unapproved channel". The verdict is *sampled*, not
+#: deterministic - the identical body refused at 22:28:39 is served at 22:28:40,
+#: and the displayMsg literally reads "Please send it again". A 400 is otherwise
+#: handed back to the client untouched, so without a rotation here one sampled
+#: verdict kills the whole turn even though the neighbouring account would serve
+#: it. Rotating is also the only lever the gateway honestly has: it never fakes
+#: TLS / egress / device fingerprints (see #603).
+WAF_TRANSIENT_ERROR_CODES = frozenset((11128,))
+#: Default number of extra accounts one request may try on a channel-check 400.
+WAF_RETRY_ATTEMPTS_DEFAULT = 2
+
+
+def waf_retry_attempts():
+    """How many extra accounts a channel-check 400 may rotate through.
+
+    ``WB_WAF_RETRY_ATTEMPTS`` overrides it (0 disables the rotation and restores
+    the plain "400 is the client's fault" behaviour).
+    """
+    raw = os.environ.get("WB_WAF_RETRY_ATTEMPTS", "")
+    text = str(raw).strip()
+    if not text:
+        return WAF_RETRY_ATTEMPTS_DEFAULT
+    try:
+        return max(0, int(text))
+    except (TypeError, ValueError):
+        return WAF_RETRY_ATTEMPTS_DEFAULT
+
 
 def upstream_error_code(detail):
     """The numeric code field of an upstream error body, or None."""
@@ -14588,6 +14617,10 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
     degraded_retried = False
     # 一次请求里因为 11140 换过的号数：默认 0，即第一个号被限制就停手。
     restricted_rotations = 0
+    # 渠道校验 400（11128）换过的号数：上游是抽样判定，同形状同秒内既 200 又
+    # 400，所以允许换一两个号再试，试完仍失败才把原始 400 交回去。
+    waf_retries = 0
+    waf_retry_budget = waf_retry_attempts()
     # 本机断网的次数：这一轮里只要出现过，最终报错就按「网络不可用」报，不按
     # 「上游不稳」报——两者的处置完全相反（去查本机网络 vs 去查账号/上游）。
     local_net_hits = 0
@@ -14945,6 +14978,24 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
                 # catalogue label; the tier map from `/v3/config` now drives
                 # both the scheduler and that label, so the request never gets
                 # this far for a gated model.
+                #
+                # The one exception is the upstream WAF's channel check, which
+                # rides in a 400 body as code 11128. It is a sampled verdict
+                # (#674 / #677: the same body refused once is served seconds
+                # later), so spend a bounded rotation on it instead of failing
+                # the turn. http_error_detail caches the bytes on the exception,
+                # so the HTTP handler that re-reads this body still sees it.
+                if waf_retries < waf_retry_budget:
+                    waf_code = upstream_error_code(http_error_detail(exc))
+                    if waf_code in WAF_TRANSIENT_ERROR_CODES:
+                        waf_retries += 1
+                        log("upstream 400 (code %s, channel check) for '%s'; "
+                            "rotating to another account (attempt %d/%d)"
+                            % (waf_code, model, waf_retries, waf_retry_budget))
+                        if session_key and POOL:
+                            POOL.affinity.demote(session_key, account.uid)
+                        last_error = exc
+                        continue
                 raise
             if exc.code >= 500:
                 detail = http_error_detail(exc)
@@ -18386,7 +18437,7 @@ class Handler(BaseHTTPRequestHandler):
             super().finish()
         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
             pass
-    server_version = "wb-proxy/1.8.0"
+    server_version = "wb-proxy/1.8.0.1"
     def log_message(self, fmt, *args):
         # 静默过滤前端看板高频定时心跳的正常 200 GET 请求（/logs、/usage、/accounts 轮询等）
         # 避免自增死循环刷屏与日志污染。遇 4xx/5xx 异常或所有非 GET 业务操作依然如实记录。

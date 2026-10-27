@@ -176,7 +176,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 237 个套件：176 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 238 个套件：177 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
@@ -508,6 +508,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 <!-- 发版时：把下面的 Unreleased 段落整理成新版本号（## vX.Y.Z），整体移入 docs/CHANGELOG.md 顶部 -->
 
+- **1.8.0.1 热修（Phase Q）：11128 渠道校验 400 时换号重试**：上游 2026-10-27 下午起对 Web 凭证加抽样渠道校验（HTTP 400 `code=11128 Illegal API invocation from an unapproved channel`，issue #674/#675/#676/#677），同一会话 `msgs=95` 在 22:28:39 被拒、22:28:40 立刻成功——**判定是抽样，不是内容指纹**（21 次对照探针全部 200）。旧实现把 400 一律原样透传，于是一次抽样就打死整轮。现在 `open_upstream()` 的 400 分支先 `upstream_error_code()` 解析正文，命中 `WAF_TRANSIENT_ERROR_CODES = frozenset((11128,))` 且预算未用完时换号重试（`WB_WAF_RETRY_ATTEMPTS`，默认 2，`0` 关回旧行为），被拒账号**不记账、不冷却**（它没做错什么），预算用完仍把原始 400 交回客户端且正文可读；其它 400 一次出站、立即抛出。新增 `tests/_test_waf_channel_retry.py`（5 项）。**包版本按用户要求改为第四段 `1.8.0.1`**：应用中心不会把「同版本号、新字节」当成升级、装不进去，所以 1.8.0 的「包版本 ≡ 上游最新三段 tag」政策本轮显式豁免（不是 Phase E 那个 ordinal 机制，上游下一个 release 回到三段号），`build-fpk.sh` / `verify-fpk.sh` 与相关套件的版本正则放宽为「三段 + 可选第四段」。装机走应用中心/`trim-cli app install-fpk`，数据目录不碰。
 - **v1.8.0 发布**：汇总 v1.7.33 之后的 #640、#642、#643、#645/#647，并补齐 #578、#618、#625 的发布记录。完整变更、验证范围与已知限制见 **[docs/CHANGELOG.md](docs/CHANGELOG.md#v180)**；下一版的改动继续写在本段。
 - **修复数据看板在桌面上只显示一列（1.8.1 热修）**：上游 v1.7.30 在统计条上加的 `@media (max-width: 860px)` 与本层的移动端兜底规则在同一位置合并时少了一个收尾的 `}`，于是它把**后面全部规则**（整个 `#pageAnalytics` 看板设计、`.wb-help` 使用说明）都吞进了「窄屏才生效」的分支。症状不是报错而是静默降级：宽屏下类看板没有六列栅格，KPI 卡片一张一行、行高巨大，「请求数 / 生成速度 / 积分消耗」被拉开到屏幕各处。修法是补回那个 `}`（让 `#pageAnalytics`、`.wb-help`、`#cockpitRealm`、`#cards` 都回到嵌套深度 0），并新增 `tests/_test_dashboard_css.py` 钉死三件事：每个 `<style>` 块的 `{`/`}` 必须等量、关键字面规则必须在深度 0、深度大于 0 的规则只能待在 `@media`/`@keyframes`/`@supports` 里面（漏一个括号就会在下一轮静默复发）。
 - **飞牛 fnOS 这一层：并入上游 v1.8.0（Phase P）**：合并基从 `47775c5`（v1.7.33）推进到 `4f7ae6f`（`release: v1.8.0`，该 tag 就是上游 `main` 的头），共 **5 个提交、16 个文件、+823/-60**，全部是修 bug：国际版沙箱证书失败时降级到活跃上报（`#647`）、`stderr` 日志通道不再阻塞请求线程（`#644`，日志写失败不再拖住整条请求）、桌面 chat 可选协议一致性（`#643`，`/v1/chat/completions` 的 `protocol` 与客户端身份对齐）、更新检查超时放宽到 10 秒（`#640`）。新增套件只有 `tests/_test_daily_chat_activity_fallback.py` 一个，**不需要动打包侧**（没有新顶层模块，`build-fpk.sh` 的守卫名单与 `PKG_MODULES` 原样）。合并侧只有 `README.md` 一个冲突文件：套件数按合并后的树重算为 **236 = 175 Python + 61 JS**（上游侧那 11 行历史数字继续作废），变更记录段保留本仓库的 Phase 条目并新增本条。上一轮把流式心跳交给上游 `SSEHeartbeat` 之后，本层没有新的重复实现要合。

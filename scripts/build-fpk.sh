@@ -26,6 +26,16 @@
 # the device runs" means exactly what it says - including that commits merged
 # after upstream's release do not move the version until upstream releases again.
 #
+# Phase Q added one exception to that rule, for the fork's own hot-fix only: a
+# package built from an unchanged upstream number that carries different bytes
+# (the 11128 channel-check retry) may add a fourth number, fnos-1.8.0.1. The
+# reason is mechanical - appcenter refuses to install a package whose version is
+# not newer than the installed one, so "same version, new bytes" is not
+# installable in the app centre at all. It is a hot-fix counter, not Phase E's
+# "how many releases of ours sit on this upstream version" ordinal (that
+# mechanism stays deleted), and upstream's next release returns to three
+# components (fnos-1.8.1).
+#
 # The tag deliberately does not look like upstream's. Upstream tags "v*" and
 # ships .github/workflows/release.yml, which runs on `push: tags: ["v*"]` and
 # opens a draft release; a "v*" tag of ours would set that off in this fork, and
@@ -118,12 +128,17 @@ owner_of_github_url() {
 # A release tag of this fork sitting exactly on HEAD ("fnos-1.6.19"). When there
 # is one it is the answer: the tag is the release intent, and unlike the
 # fallbacks below it does not care which remote tags this checkout happens to
-# see. Three components - upstream's own - so the package version is the upstream
-# version, and the -alpha<k> process builds (which always carry a suffix) can
-# never be mistaken for a release.
+# see. Three components for a release of an upstream version, plus the optional
+# fourth component Phase Q gave the fork for a hot-fix of an already-published
+# upstream number (fnos-1.8.0.1: "1.8.0 plus our first hot-fix"). The four-part
+# form is not a release ordinal - Phase E's "1.6.10 plus the Nth release" is
+# gone - it exists only so appcenter sees a *newer* version when the bytes
+# change under an unchanged upstream number, and upstream's next release (1.8.1)
+# is still three components. The -alpha<k> process builds (which always carry a
+# suffix) can never be mistaken for either form.
 head_release_tag() {
     git -C "$REPO_ROOT" tag --points-at HEAD 2>/dev/null \
-        | grep -E '^fnos-[0-9]+(\.[0-9]+){2}$' \
+        | grep -E '^fnos-[0-9]+(\.[0-9]+){2,3}$' \
         | sort -V \
         | tail -1
 }
@@ -133,7 +148,7 @@ head_release_tag() {
 # before cutting the next release. Anywhere in the history, not just on HEAD.
 last_release_version() {
     git -C "$REPO_ROOT" tag --list 'fnos-*' 2>/dev/null \
-        | grep -E '^fnos-[0-9]+(\.[0-9]+){2}$' \
+        | grep -E '^fnos-[0-9]+(\.[0-9]+){2,3}$' \
         | sed 's/^fnos-//' \
         | sort -V \
         | tail -1

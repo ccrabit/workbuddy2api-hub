@@ -55,8 +55,8 @@ GH_RELEASE = os.path.join("scripts", "gh-release.py")
 RUNBOOK = os.path.join("docs", "phase-g-local-release.md")
 GH_SUBCOMMANDS = ("sha256", "release-get", "release-create", "release-upload",
                   "release-edit", "tag-create")
-RELEASE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-PROCESS_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+-alpha[0-9]+$")
+RELEASE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$")
+PROCESS_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?-alpha[0-9]+$")
 
 # What the merged workflow looked like before phase F. Kept as text so the
 # static gate can be shown to reject it: it pushes upstream's tags into this
@@ -208,7 +208,7 @@ class FixtureTests(unittest.TestCase):
         """
         path = os.path.join(tree, SCRIPT)
         text = read_text(path)
-        reverted = text.replace(r"^fnos-[0-9]+(\.[0-9]+){2}$", r"^v[0-9]+(\.[0-9]+){3}$")
+        reverted = text.replace(r"^fnos-[0-9]+(\.[0-9]+){2,3}$", r"^v[0-9]+(\.[0-9]+){3}$")
         reverted = reverted.replace("${head_tag#fnos-}", "${head_tag#v}")
         self.assertNotEqual(text, reverted, "this gate has to change the script it is checking")
         write_text(path, reverted)

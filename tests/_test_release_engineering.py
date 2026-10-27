@@ -75,8 +75,9 @@ class LocalReleaseTests(unittest.TestCase):
         text = read("scripts", "build-fpk.sh")
         self.assertIn("head_release_tag", text, "the build script has to read the tag on HEAD")
         self.assertIn(
-            r"^fnos-[0-9]+(\.[0-9]+){2}$", text,
-            "only fnos-X.Y.Z is a release of this fork; no fourth component",
+            r"^fnos-[0-9]+(\.[0-9]+){2,3}$", text,
+            "only fnos-X.Y.Z (plus Phase Q's hot-fix fourth number) is a release "
+            "of this fork",
         )
         self.assertIn("--print-version", text, "the derived version has to be readable back")
         runbook = read(RUNBOOK)

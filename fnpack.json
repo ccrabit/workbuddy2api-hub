@@ -29,14 +29,14 @@
       "is_docker": false,
       "service_port": "8788",
       "releases": {
-        "1.8.0": {
-          "changelog": "1.8.0（重打包）：修掉数据看板在宽屏下只显示一列的问题——上游 v1.7.30 的 @media (max-width:860px) 与本层移动端兜底合并时漏了一个 }，把整个看板样式吞进了窄屏分支；同时新增 tests/_test_dashboard_css.py 防止复发。其余内容与上游 v1.8.0 一致（#647 沙箱证书失败降级、#644 stderr 不阻塞请求线程、#643 可选协议、#640 更新检查超时 10 秒）。",
-          "updated_at": "2026-10-25T17:43:02+08:00",
+        "1.8.0.1": {
+          "changelog": "1.8.0.1（Phase Q 热修）：上游 10-27 下午起对 Web 凭证加抽样渠道校验（HTTP 400 code=11128 Illegal API invocation from an unapproved channel），旧版对 400 一律原样透传、不换号，一次抽样判定就打死整轮；本版在 400 分支解析错误码，命中 11128 且预算未用完时换号重试（默认 2 次，WB_WAF_RETRY_ATTEMPTS 可调，0 = 关），被拒账号不记账不冷却（tests/_test_waf_channel_retry.py）。版本号按用户要求采用 fork 私有第四段 1.8.0.1，仅用于让应用中心把「同版本号、新字节」识别成升级；其余内容与 1.8.0（看板宽屏修复）一致。",
+          "updated_at": "2026-10-27T23:41:15+08:00",
           "packages": {
             "all": {
-              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.8.0/WorkBuddy2API-Hub_1.8.0_all.fpk",
-              "sha256": "3f98610c77d0375c909be14d15972c9752f98846c5f27aeb8dd1de63580d329f",
-              "size": 1027104
+              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.8.0.1/WorkBuddy2API-Hub_1.8.0.1_all.fpk",
+              "sha256": "900757ae9847c4d1a82f9e2aa9a56adbb0e820f7dd9c19e8468138997d7b0b63",
+              "size": 1020826
             }
           }
         }

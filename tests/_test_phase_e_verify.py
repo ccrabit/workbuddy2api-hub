@@ -400,7 +400,8 @@ def newest_merge(cwd=None):
 
 
 def release_tags(cwd=None):
-    """{version: commit} for every release tag (`fnos-X.Y.Z`) in this checkout."""
+    """{version: commit} for every release tag (`fnos-X.Y.Z`, or Phase Q's
+    `fnos-X.Y.Z.N` hot-fix form) in this checkout."""
     if not HAS_GIT:
         return {}
     rc, out = git_text(["tag", "--list", "fnos-*"], cwd=cwd)
@@ -408,7 +409,7 @@ def release_tags(cwd=None):
         return {}
     found = {}
     for name in (t.strip() for t in out.splitlines()):
-        if not re.match(r"^fnos-[0-9]+(\.[0-9]+){2}$", name):
+        if not re.match(r"^fnos-[0-9]+(\.[0-9]+){2,3}$", name):
             continue
         rc_c, commit = git_text(["rev-parse", "--verify", "--quiet",
                                  "refs/tags/%s^{commit}" % name], cwd=cwd)
@@ -2252,8 +2253,8 @@ def e8_delivery():
             # `push: tags: ["v*"]` and would cut a second draft release. The
             # Phase E-era assertion named `v1.6.17.1` literally, which only ever
             # fired when HEAD *was* the tagged commit - i.e. exactly in CI.
-            check("HEAD 上的 tag %r 用 fnos-X.Y.Z 命名空间（不是 v*）" % tag,
-                  re.match(r"^fnos-[0-9]+(\.[0-9]+){2}$", tag) is not None, tag)
+            check("HEAD 上的 tag %r 用 fnos-X.Y.Z[.N] 命名空间（不是 v*）" % tag,
+                  re.match(r"^fnos-[0-9]+(\.[0-9]+){2,3}$", tag) is not None, tag)
             kind = git_run(["cat-file", "-t", tag]).stdout.decode().strip()
             if shallow:
                 skip("tag %s 是 annotated（cat-file -t 应为 tag）" % tag,
@@ -3238,12 +3239,17 @@ def e13_release_pipeline():
           all(re.search(r"(?m)^%s\(\)" % name, script) is not None
               for name in ("head_release_tag", "last_release_version",
                            "upstream_version", "manifest_version", "derive_version")))
-    four_part = [ln for ln in code_lines if "{3}" in ln and "[0-9]" in ln]
-    check("四段发布号机制已从代码里删干净（没有 ordinal / 四段 tag 正则）",
+    # Phase E's ordinal mechanism is gone for good: no `next_release_ordinal`,
+    # and no `(\.[0-9]+){3}` four-part tag regex. Phase Q's 1.8.0.1 is *not*
+    # that mechanism coming back - it is a hot-fix counter on one already
+    # published upstream number (appcenter will not install "same version, new
+    # bytes"), so the only allowed extra is the optional trailing `{2,3}`.
+    four_part = [ln for ln in code_lines if "[0-9]+){3}" in ln]
+    check("四段发布号机制已从代码里删干净（没有 ordinal / 四段 tag 正则；Phase Q 的 1.8.0.1 是热修号）",
           "next_release_ordinal" not in code and four_part == [], four_part[:3])
-    check("release 版本优先取 HEAD 上的 fnos-X.Y.Z tag，且只认这一个命名空间",
+    check("release 版本优先取 HEAD 上的 fnos-X.Y.Z[.N] tag，且只认这一个命名空间",
           "tag --points-at HEAD" in script
-          and r"^fnos-[0-9]+(\.[0-9]+){2}$" in script)
+          and r"^fnos-[0-9]+(\.[0-9]+){2,3}$" in script)
     check("没有 fnos tag 时的回落链：最近一次 fnos 发布 → 本树可见的上游 release → manifest",
           all(s in script for s in ("last_release_version",
                                     "ls-remote --tags --refs upstream",
