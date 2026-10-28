@@ -10251,7 +10251,7 @@ def runtime_settings_view():
         "accounts_dir": ACCOUNTS_DIR,
         "usage_dir": USAGE_DIR,
         "settings_file": wb_settings.settings_path(ACCOUNTS_DIR),
-        "version": "1.8.0.2",
+        "version": "1.8.0.3",
     }
 def current_account():
     """Account used for display purposes (health / usage summaries)."""
@@ -13997,7 +13997,18 @@ MODEL_SCOPED_ERROR_CODES = frozenset((11102, 11129, 11134, 11150, 11158))
 #: TLS / egress / device fingerprints (see #603).
 WAF_TRANSIENT_ERROR_CODES = frozenset((11128,))
 #: Default number of extra accounts one request may try on a channel-check 400.
-WAF_RETRY_ATTEMPTS_DEFAULT = 2
+#: 2 → 3（1.8.0.3）：真机 09:22:56 的两个请求在 1.3 秒内把预算打完，三次尝试
+#: 全部 11128，客户端看到的是 400；抽样判定的收手概率与尝试次数直接相关，多给
+#: 一次机会比把整轮对话打回去便宜。
+WAF_RETRY_ATTEMPTS_DEFAULT = 3
+#: 第 n 次换号前等多久（秒）。抽样判定不是「同内容第二次必然放行」，真机现场三
+#: 次尝试的间隔只有 0.4 / 0.6 秒——判定器还没换采样点。给它时间差，顺便让下一次
+#: 出站落进新的秒级窗口。
+WAF_RETRY_DELAYS = (0.5, 1.5, 3.5)
+#: 11128 现场抓不到正文就只能靠猜内容指纹。每次被拒把「这条请求长什么样」落到
+#: 这里（不写数据目录），路径可用 ``WB_WAF_DUMP_DIR`` 覆盖。
+WAF_DUMP_DIR = os.environ.get("WB_WAF_DUMP_DIR", "/tmp/wb-waf-dumps")
+WAF_DUMP_KEEP = 24
 
 #: `upstream_error_code` 的兜底：正文被截断、`json.loads` 失败时按头部正则捞 code。
 #: `http_error_detail` 只留 600 字节，而上游错误信封自带 displayMsg + displayTips
@@ -14025,6 +14036,80 @@ def waf_retry_attempts():
         return max(0, int(text))
     except (TypeError, ValueError):
         return WAF_RETRY_ATTEMPTS_DEFAULT
+
+
+def waf_retry_delay(attempt):
+    """Seconds to wait before rotation ``attempt`` (1-based); 0 when out of table."""
+    try:
+        idx = int(attempt) - 1
+    except (TypeError, ValueError):
+        return 0.0
+    if idx < 0:
+        return 0.0
+    if idx >= len(WAF_RETRY_DELAYS):
+        return WAF_RETRY_DELAYS[-1]
+    return WAF_RETRY_DELAYS[idx]
+
+
+def waf_dump_request(payload, upstream_body, account, model, waf_code, attempt):
+    """Record the shape of a channel-check-rejected request (best effort).
+
+    Never raises and never touches the data directory: the point is to have the
+    next rejection's fingerprint on hand instead of guessing which sentence the
+    upstream WAF disliked. Only the system prompt head, per-message sizes and
+    the body hash are kept - enough to diff a rejected request against a served
+    one from the same session.
+    """
+    try:
+        directory = WAF_DUMP_DIR
+        os.makedirs(directory, exist_ok=True)
+        msgs = upstream_body.get("messages") or []
+        system_text = ""
+        system_role = ""
+        for msg in msgs:
+            role = str(msg.get("role") or "")
+            if role in ("system", "developer"):
+                system_text = str(msg.get("content") or "")
+                system_role = role
+                break
+        try:
+            body_bytes = encode_upstream_body(upstream_body)
+        except Exception:
+            body_bytes = b""
+        record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "model": model,
+            "waf_code": waf_code,
+            "attempt": attempt,
+            "account": str(getattr(account, "uid", ""))[:8],
+            "realm": str(getattr(account, "realm", "")),
+            "product": str(getattr(account, "product", "")),
+            "stream": bool(payload.get("stream")) if isinstance(payload, dict) else None,
+            "msgs": len(msgs),
+            "body_bytes": len(body_bytes),
+            "body_sha256": hashlib.sha256(body_bytes).hexdigest() if body_bytes else "",
+            "system_role": system_role,
+            "system_len": len(system_text),
+            "system_sha256": hashlib.sha256(system_text.encode("utf-8")).hexdigest() if system_text else "",
+            "system_head": system_text[:8192],
+            "system_tail": system_text[-2048:],
+            "tail_msgs": [[str(m.get("role") or ""), len(str(m.get("content") or ""))]
+                          for m in msgs[-10:]],
+        }
+        name = "waf-%d-%s.json" % (int(time.time() * 1000),
+                                   (record["body_sha256"] or "nobody")[:8])
+        path = os.path.join(directory, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, ensure_ascii=False, indent=1)
+        try:
+            kept = sorted(n for n in os.listdir(directory) if n.startswith("waf-"))
+            for stale in kept[:-WAF_DUMP_KEEP]:
+                os.unlink(os.path.join(directory, stale))
+        except Exception:
+            pass
+        log("channel check dump: %s" % path)
+    except Exception:
+        pass
 
 
 def upstream_error_code(detail):
@@ -15010,9 +15095,9 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
                 # later), so spend a bounded rotation on it instead of failing
                 # the turn. http_error_detail caches the bytes on the exception,
                 # so the HTTP handler that re-reads this body still sees it.
-                if waf_retries < waf_retry_budget:
-                    waf_code = upstream_error_code(http_error_detail(exc))
-                    if waf_code in WAF_TRANSIENT_ERROR_CODES:
+                waf_code = upstream_error_code(http_error_detail(exc))
+                if waf_code in WAF_TRANSIENT_ERROR_CODES:
+                    if waf_retries < waf_retry_budget:
                         waf_retries += 1
                         log("upstream 400 (code %s, channel check) for '%s'; "
                             "rotating to another account (attempt %d/%d)"
@@ -15020,6 +15105,30 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
                         if session_key and POOL:
                             POOL.affinity.demote(session_key, account.uid)
                         last_error = exc
+                        waf_dump_request(payload, upstream_body, account, model,
+                                         waf_code, waf_retries)
+                        delay = waf_retry_delay(waf_retries)
+                        if delay:
+                            log("channel check: waiting %.1fs before rotation "
+                                "attempt %d/%d" % (delay, waf_retries + 1,
+                                                   waf_retry_budget + 1))
+                            time.sleep(delay)
+                        continue
+                    # 预算打完仍被拒，说明换号不是杠杆：三个不同账号在同一条正文上
+                    # 给出同一个判定，指纹只可能在内容里（而抽样窗口已经换过好几
+                    # 次）。这时走 403 内容审查已经验证过的兜底——把系统提示换成中
+                    # 性提示再试一次。自定义模式是用户明确选择的提示，不自动动它。
+                    if (not degraded_retried
+                            and prompt_mode_config().get("mode")
+                            in ("passthrough", "append")):
+                        PROMPT_DEGRADE.trigger()
+                        degraded_retried = True
+                        upstream_body = build_upstream_body(payload)
+                        tried.discard(account.uid)
+                        last_error = exc
+                        log("upstream 400 (code %s, channel check) survived %d "
+                            "rotation(s) -> degraded prompt retry"
+                            % (waf_code, waf_retries))
                         continue
                 raise
             if exc.code >= 500:
@@ -18462,7 +18571,7 @@ class Handler(BaseHTTPRequestHandler):
             super().finish()
         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
             pass
-    server_version = "wb-proxy/1.8.0.2"
+    server_version = "wb-proxy/1.8.0.3"
     def log_message(self, fmt, *args):
         # 静默过滤前端看板高频定时心跳的正常 200 GET 请求（/logs、/usage、/accounts 轮询等）
         # 避免自增死循环刷屏与日志污染。遇 4xx/5xx 异常或所有非 GET 业务操作依然如实记录。

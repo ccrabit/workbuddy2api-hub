@@ -145,21 +145,27 @@ class WafRetryTests(unittest.TestCase):
     def setUp(self):
         self.old_pool = P.POOL
         self.old_budget = os.environ.get("WB_WAF_RETRY_ATTEMPTS")
+        self.old_prompt_mode = P.prompt_mode_config
+        # 默认把提示模式钉在 custom：降级兜底是用户没选的路径，其余用例只测换号。
+        P.prompt_mode_config = lambda: {"mode": "custom", "file": "", "text": ""}
+        P.PROMPT_DEGRADE.reset()
 
     def tearDown(self):
         P.POOL = self.old_pool
+        P.prompt_mode_config = self.old_prompt_mode
+        P.PROMPT_DEGRADE.reset()
         if self.old_budget is None:
             os.environ.pop("WB_WAF_RETRY_ATTEMPTS", None)
         else:
             os.environ["WB_WAF_RETRY_ATTEMPTS"] = self.old_budget
 
-    def _run(self, accounts, script):
+    def _run(self, accounts, script, payload=None):
         P.POOL = StubPool(accounts)
         upstream = ScriptedUpstream(script)
         real_urlopen = wb_accounts.urlopen
         wb_accounts.urlopen = upstream
         try:
-            result = P.open_upstream(dict(PAYLOAD), target_realm="intl")
+            result = P.open_upstream(dict(payload or PAYLOAD), target_realm="intl")
             raised = None
         except Exception as exc:
             result = None
@@ -210,14 +216,14 @@ class WafRetryTests(unittest.TestCase):
         self.assertEqual(len(upstream.calls), 1)
 
     def test_default_budget_and_code_table(self):
-        self.assertEqual(P.WAF_RETRY_ATTEMPTS_DEFAULT, 2)
+        self.assertEqual(P.WAF_RETRY_ATTEMPTS_DEFAULT, 3)
         self.assertIn(11128, P.WAF_TRANSIENT_ERROR_CODES)
         detail = WAF_BODY.decode("utf-8")
         self.assertEqual(P.upstream_error_code(detail), 11128)
         os.environ["WB_WAF_RETRY_ATTEMPTS"] = ""
-        self.assertEqual(P.waf_retry_attempts(), 2)
+        self.assertEqual(P.waf_retry_attempts(), 3)
         os.environ["WB_WAF_RETRY_ATTEMPTS"] = "junk"
-        self.assertEqual(P.waf_retry_attempts(), 2)
+        self.assertEqual(P.waf_retry_attempts(), 3)
 
     # 1.8.0.1 装到设备后补丁没生效：真实正文比 600 字节的留存上限长，截断后的
     # JSON 解析不出来，11128 被当成「普通 400」原样透传。下面三条把它钉死。
@@ -266,6 +272,86 @@ class WafRetryTests(unittest.TestCase):
         self.assertIsNone(P.upstream_error_code(""))
         self.assertIsNone(P.upstream_error_code('{"msg":"no code here"}'))
         self.assertIsNone(P.upstream_error_code("internal server error"))
+
+
+    # 1.8.0.3（Phase S）：真机 09:22 两个请求 1.3 秒内把预算打完，三个账号全被拒。
+    # 抽样判定的收手概率随时间/次数上升，所以换号之间要留时间差，预算再大一格，
+    # 并且把「这条被拒的请求长什么样」落到 /tmp（数据目录不碰），最后才是降级提示。
+
+    def test_rotation_waits_between_attempts(self):
+        """每次换号前按 WAF_RETRY_DELAYS 等，不再 1.3 秒内把预算打光。"""
+        accounts = [make_account("s%d" % i) for i in range(5)]
+        script = [http_error(400, WAF_BODY) for _ in range(P.WAF_RETRY_ATTEMPTS_DEFAULT)]
+        script.append(FakeResp())
+        slept = []
+        real_sleep = P.time.sleep
+        P.time.sleep = lambda seconds: slept.append(seconds)
+        try:
+            upstream, result, raised = self._run(accounts, list(script))
+        finally:
+            P.time.sleep = real_sleep
+        self.assertIsNone(raised, "多等一会儿就该换到能服务的号")
+        self.assertEqual(len(upstream.calls), P.WAF_RETRY_ATTEMPTS_DEFAULT + 1)
+        waf_waits = [s for s in slept if s >= min(P.WAF_RETRY_DELAYS)]
+        self.assertEqual(waf_waits, list(P.WAF_RETRY_DELAYS[:P.WAF_RETRY_ATTEMPTS_DEFAULT]),
+                         "换号等待必须逐次拉长")
+        self.assertEqual(P.waf_retry_delay(1), P.WAF_RETRY_DELAYS[0])
+        self.assertEqual(P.waf_retry_delay(99), P.WAF_RETRY_DELAYS[-1])
+        self.assertEqual(P.waf_retry_delay(0), 0.0)
+
+    def test_budget_exhausted_falls_back_to_degraded_prompt(self):
+        """预算打完仍被拒 → 换中性系统提示再试一次（403 内容审查同款兜底）。"""
+        P.prompt_mode_config = lambda: {"mode": "passthrough", "file": "", "text": ""}
+        accounts = [make_account("g%d" % i) for i in range(5)]
+        script = [http_error(400, WAF_BODY_REAL[:300])
+                  for _ in range(P.WAF_RETRY_ATTEMPTS_DEFAULT + 1)]
+        script.append(FakeResp())
+        upstream, result, raised = self._run(accounts, list(script))
+        self.assertIsNone(raised, "降级提示后应该能过")
+        self.assertEqual(len(upstream.calls), P.WAF_RETRY_ATTEMPTS_DEFAULT + 2,
+                         "换号预算 + 一次降级重试都要真的出站")
+        self.assertTrue(P.PROMPT_DEGRADE.active(), "降级必须记进进程级窗口")
+
+    def test_degraded_prompt_retry_is_only_tried_once(self):
+        """降级之后还被拒就交回原始 400，不无限重试。"""
+        P.prompt_mode_config = lambda: {"mode": "append", "file": "", "text": ""}
+        accounts = [make_account("h%d" % i) for i in range(8)]
+        script = [http_error(400, WAF_BODY) for _ in range(12)]
+        upstream, result, raised = self._run(accounts, list(script))
+        self.assertIsNone(result)
+        self.assertIsInstance(raised, urllib.error.HTTPError)
+        self.assertEqual(raised.code, 400)
+        self.assertEqual(len(upstream.calls), P.WAF_RETRY_ATTEMPTS_DEFAULT + 2,
+                         "预算 + 一次降级重试，不能再多")
+
+    def test_rejection_dump_records_the_system_prompt_shape(self):
+        """被拒时把请求形状（不写数据目录）落盘，下次现场直接比对。"""
+        dump_dir = os.path.join(_TMP, "waf-dumps")
+        old_dir = P.WAF_DUMP_DIR
+        P.WAF_DUMP_DIR = dump_dir
+        try:
+            payload = {"model": "deepseek-v4.1-flash",
+                       "messages": [{"role": "system", "content": "S" * 400},
+                                    {"role": "user", "content": "hi"}]}
+            accounts = [make_account("d1"), make_account("d2")]
+            upstream, result, raised = self._run(
+                accounts, [http_error(400, WAF_BODY_REAL), FakeResp()],
+                payload=payload)
+        finally:
+            P.WAF_DUMP_DIR = old_dir
+        self.assertIsNone(raised)
+        names = sorted(n for n in os.listdir(dump_dir) if n.startswith("waf-"))
+        self.assertEqual(len(names), 1, "一次被拒一条 dump")
+        record = json.load(open(os.path.join(dump_dir, names[0]), encoding="utf-8"))
+        self.assertEqual(record["waf_code"], 11128)
+        self.assertEqual(record["msgs"], 2)
+        self.assertEqual(record["system_role"], "system")
+        # 出站正文里的 system 已经过提示模式处理，长度与入站不同，只钉形状。
+        self.assertGreater(record["system_len"], 0)
+        self.assertEqual(len(record["system_head"]), record["system_len"])
+        self.assertTrue(record["body_sha256"])
+        self.assertEqual(record["tail_msgs"][-1], ["user", 2])
+        self.assertNotIn("ACCOUNTS_DIR", json.dumps(record), "dump 不该带路径")
 
 
 if __name__ == "__main__":
