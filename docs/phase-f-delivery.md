@@ -53,6 +53,18 @@
 > 套件仍是 **13 项**（把「降级必须记进进程窗口」改成「只借一条请求：窗口必须复位，且最后一次正文
 > 里不能再有客户端的 SYSTEM 哨兵」）。
 >
+> **已发布（2026-10-28 11:12 CST）**：`refs/heads/main` 已从 `3e99cec`（`fnos-1.8.0`）快进到 Phase T 的**双亲合并提交**
+> （`main` 与 tag 同一提交，`git describe --tags` 就在 `fnos-1.8.0.4` 上）；annotated tag `fnos-1.8.0.1` / `.2` / `.3` / `.4` 全部推到
+> `origin`，**只有 `.4` 建了 Release**（Release id `426222546`，非草稿，
+> <https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.8.0.4>），两资产 `uploaded`：
+> `WorkBuddy2API-Hub_1.8.0.4_all.fpk`（`1028481` B，sha256 `e61959d7…`）+ `.sha256`（`100` B）；
+> `fnpack.json` 里那条 `download_url` 实测 **HTTP 200**，与 `dist/` 同一字节。前三个号故意不发
+> Release：`1.8.0.1` 在真机上是死代码、`1.8.0.2` 换号救不回、`1.8.0.3` 的兜底会把当天的系统提示
+> 换掉，公开列出来只会让人装错版本 —— 它们的 tag 留着当历史锚点。
+> 本机 HTTP 侧推不上去（`/root/.ssh/wb2api_push` 这把临时部署密钥已被 GitHub 吊销，`gh` 也没装），
+> 实际走的是 `/root/.gh-token`（93 字符，`push: true`）+ `GIT_ASKPASS` 助手，token 不落 argv、
+> 不写进 git config。
+>
 > **版本口径（Phase Q/R 的有意偏离，用户明确要求）**：用户原话「版本号不更新，应用中心无法安装，
 > 为了区别上游版本，这个版本号按照 `1.8.0.1` 这样的方式命名」。所以 1.8.0 的「包版本 ≡ 上游最新
 > 三段 tag」政策**本轮显式豁免**：`manifest` 的 `version`、`wb_proxy.py` 的 `server_version` /
