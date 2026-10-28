@@ -14046,26 +14046,36 @@ MODEL_SCOPED_ERROR_CODES = frozenset((11102, 11129, 11134, 11150, 11158))
 
 #: Codes the upstream WAF puts in an HTTP 400 body when it decides a request did
 #: not come from an approved channel (#562 / #674 / #675 / #677): "Illegal API
-#: invocation from an unapproved channel". The verdict is *sampled*, not
-#: deterministic - the identical body refused at 22:28:39 is served at 22:28:40,
-#: and the displayMsg literally reads "Please send it again". A 400 is otherwise
-#: handed back to the client untouched, so without a rotation here one sampled
-#: verdict kills the whole turn even though the neighbouring account would serve
-#: it. Rotating is also the only lever the gateway honestly has: it never fakes
-#: TLS / egress / device fingerprints (see #603).
+#: invocation from an unapproved channel". Two different verdicts hide behind it:
+#:
+#:   * *By content* - a fingerprint sentence is refused on every account, every
+#:     time. 1.8.0.x 以为它纯属抽样；1.9.0.1 用三组对照探针证伪：把 DSH 的 ``@``
+#:     文件引用段原样放进 system，三个账号连拒三次（20:06:16/16/18，407 字），
+#:     只插入一个 "that" 就一次过。这类判定换号完全无效，解法是清洗掉它
+#:     （见 SANITIZE_DSH_FILEREF_RE）。
+#:   * *By sampling* - the identical body refused at 22:28:39 is served at
+#:     22:28:40, and the displayMsg literally reads "Please send it again".
+#:     这类只能靠换号 + 退避撞采样点。
+#:
+#: 所以下面的旋转是**抽样那一类**的杠杆，不是内容指纹的解药；两类都只给有界
+#: 预算。网关始终不伪造 TLS / 出口 / 设备指纹（#603）。
 WAF_TRANSIENT_ERROR_CODES = frozenset((11128,))
 #: Default number of extra accounts one request may try on a channel-check 400.
-#: 2 → 3（1.8.0.3）：真机 09:22:56 的两个请求在 1.3 秒内把预算打完，三次尝试
-#: 全部 11128，客户端看到的是 400；抽样判定的收手概率与尝试次数直接相关，多给
-#: 一次机会比把整轮对话打回去便宜。
-WAF_RETRY_ATTEMPTS_DEFAULT = 3
+#: 3 → 2（1.9.0.1）：每次换号都要把整条正文重传一遍（真机实测 633 KB / 次），
+#: 而内容指纹那一类换多少次都是同一个判定。上游把已知指纹清洗掉之后，抽样一类
+#: 给两次机会 + 一次性中性提示兜底就够，最坏出站数从 5 次降到 3 次。
+WAF_RETRY_ATTEMPTS_DEFAULT = 2
 #: 第 n 次换号前等多久（秒）。抽样判定不是「同内容第二次必然放行」，真机现场三
 #: 次尝试的间隔只有 0.4 / 0.6 秒——判定器还没换采样点。给它时间差，顺便让下一次
 #: 出站落进新的秒级窗口。
 WAF_RETRY_DELAYS = (0.5, 1.5, 3.5)
-#: 11128 现场抓不到正文就只能靠猜内容指纹。每次被拒把「这条请求长什么样」落到
-#: 这里（不写数据目录），路径可用 ``WB_WAF_DUMP_DIR`` 覆盖。
-WAF_DUMP_DIR = os.environ.get("WB_WAF_DUMP_DIR", "/tmp/wb-waf-dumps")
+#: 11-128 现场的形状快照。**默认关**：1.8.0.3–1.8.0.4 默认往 /tmp/wb-waf-dumps
+#: 抓现场，代价是把整包请求的形状（system 头/尾、逐条消息长度、正文 sha256）留在
+#: 磁盘上——真机单份 dump 对应的正文是 637 KB、system 41k 字符，含用户项目内容，
+#: 24 份上限接近 15 MB。根因（DSH 文件引用段）已经确证并进了清洗规则，所以默认
+#: 不再采集；复查时显式 ``WB_WAF_DUMP_DIR=/tmp/wb-waf-dumps`` 打开即可（不写
+#: 数据目录，只留 system 头尾与长度，不落 messages 原文）。
+WAF_DUMP_DIR = os.environ.get("WB_WAF_DUMP_DIR", "")
 WAF_DUMP_KEEP = 24
 
 #: `upstream_error_code` 的兜底：正文被截断、`json.loads` 失败时按头部正则捞 code。
@@ -14118,6 +14128,8 @@ def waf_dump_request(payload, upstream_body, account, model, waf_code, attempt):
     the body hash are kept - enough to diff a rejected request against a served
     one from the same session.
     """
+    if not WAF_DUMP_DIR:
+        return
     try:
         directory = WAF_DUMP_DIR
         os.makedirs(directory, exist_ok=True)
@@ -15166,11 +15178,11 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
                 # this far for a gated model.
                 #
                 # The one exception is the upstream WAF's channel check, which
-                # rides in a 400 body as code 11128. It is a sampled verdict
-                # (#674 / #677: the same body refused once is served seconds
-                # later), so spend a bounded rotation on it instead of failing
-                # the turn. http_error_detail caches the bytes on the exception,
-                # so the HTTP handler that re-reads this body still sees it.
+                # rides in a 400 body as code 11-128. 已知的指纹句在出站前就被清洗掉
+                # 了（SANITIZE_DSH_FILEREF_RE 等），所以走到这里的要么是抽样判定
+                # （#674 / #677：同一条正文被拒一次、几秒后放行），要么是还没进目录的
+                # 指纹。先花有界预算换号，再借一次中性提示重试，不把整轮对话打回去。
+                # http_error_detail 把字节缓存在异常上，HTTP handler 之后重读仍然看得见。
                 waf_code = upstream_error_code(http_error_detail(exc))
                 if waf_code in WAF_TRANSIENT_ERROR_CODES:
                     if waf_retries < waf_retry_budget:
@@ -15190,11 +15202,12 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
                                                    waf_retry_budget + 1))
                             time.sleep(delay)
                         continue
-                    # 预算打完仍被拒，说明换号不是杠杆：三个不同账号在同一条正文上
-                    # 给出同一个判定，指纹可能在内容里。这时借 403 内容审查那套中性
-                    # 提示再试一次——注意只借**这一条请求**：触发后立刻把窗口复位，
-                    # 否则客户端的系统提示会被这一天的其余请求悄悄换掉。自定义模式
-                    # 是用户明确选择的提示，不自动动它。
+                # 预算打完仍被拒，说明换号不是杠杆：不同账号在同一条正文上给出同一个
+                # 判定，指纹在内容里。已知指纹由清洗规则中和（1.9.0.1 起含 DSH 文件引用
+                # 段），这里是给**还没进目录**的指纹留的最后一张网：借 403 内容审查那套
+                # 中性提示再试一次——只借**这一条请求**，触发后立刻把窗口复位，否则
+                # 客户端的系统提示会在这一天的其余请求里被悄悄换掉。自定义模式是用户明确
+                # 选择的提示，不自动动它。
                     if (not degraded_retried
                             and prompt_mode_config().get("mode")
                             in ("passthrough", "append")):

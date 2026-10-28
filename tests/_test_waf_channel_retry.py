@@ -8,8 +8,10 @@
                         blocked. Please send it again"}}
     22:28:40  chat: msgs=95 effort=high stream=True -> 200 acct=7e54d1a9
 
-同一形状、同一秒，一条被拒一条通过 —— 微信上游的渠道校验是**抽样**判定，不是
-确定性的内容指纹。上游自己的文案就是「Please send it again」。
+同一形状、同一秒，一条被拒一条通过 —— 这一类判定是**抽样**的，上游自己的文案
+就是「Please send it again」。另一类则完全确定：1.9.0.1 用三组对照探针证实，
+DSH 的 ``@`` 文件引用段进 system 就被三个账号连拒三次，加一个 "that" 即放行，
+那种只能清洗（上游 SANITIZE_DSH_FILEREF_RE），换号再多也没用。
 
 旧实现里 400 一律原样透传（见 open_upstream 的 400 分支），于是一次抽样判定
 就把整轮对话打死，而隔壁账号两条街外就能服务。这里钉住修法：
@@ -21,8 +23,9 @@
   3. 预算用完仍失败、且提示模式是 passthrough/append → 只借这一条请求换成中性
      系统提示再试一次（自定义提示不动，进程级降级窗口立刻复位，不波及后续请求）；
   4. 仍失败 → 把原始 400 交回去，且正文对 HTTP handler 仍可读；
-  5. 每次被拒把请求形状落到 WB_WAF_DUMP_DIR（默认 /tmp/wb-waf-dumps），
-     下次现场直接比对，不必再猜指纹；
+  5. 默认不落盘；显式设 WB_WAF_DUMP_DIR 才把请求形状写到那个目录（真机单份
+     dump 对应的正文 637 KB、system 41k 字符，含用户内容，所以不做默认采集），
+     复查现场时直接比对，不必再猜指纹；
   6. 其它 400（客户端自己的错）保持原样：一次出站、立即抛出；
   7. WB_WAF_RETRY_ATTEMPTS=0 关掉换号，恢复旧行为。
 
@@ -228,14 +231,27 @@ class WafRetryTests(unittest.TestCase):
         self.assertEqual(len(upstream.calls), 1)
 
     def test_default_budget_and_code_table(self):
-        self.assertEqual(P.WAF_RETRY_ATTEMPTS_DEFAULT, 3)
+        # 3 → 2（1.9.0.1）：每次换号都重传整包，已知指纹由清洗规则中和之后，
+        # 抽样一类给两次机会 + 一次性中性提示兜底即可。
+        self.assertEqual(P.WAF_RETRY_ATTEMPTS_DEFAULT, 2)
         self.assertIn(11128, P.WAF_TRANSIENT_ERROR_CODES)
         detail = WAF_BODY.decode("utf-8")
         self.assertEqual(P.upstream_error_code(detail), 11128)
         os.environ["WB_WAF_RETRY_ATTEMPTS"] = ""
-        self.assertEqual(P.waf_retry_attempts(), 3)
+        self.assertEqual(P.waf_retry_attempts(), 2)
         os.environ["WB_WAF_RETRY_ATTEMPTS"] = "junk"
-        self.assertEqual(P.waf_retry_attempts(), 3)
+        self.assertEqual(P.waf_retry_attempts(), 2)
+        # dump 默认关：模块导入时的取值只可能来自显式环境变量（setUp 会把它
+        # 换成临时目录，所以看 setUp 存下来的原值），没给目录时采集直接返回。
+        self.assertEqual(self.old_dump_dir,
+                         os.environ.get("WB_WAF_DUMP_DIR", ""))
+        saved = P.WAF_DUMP_DIR
+        P.WAF_DUMP_DIR = ""
+        try:
+            self.assertIsNone(P.waf_dump_request({}, {"messages": []}, None,
+                                                 "m", 11-128, 1))
+        finally:
+            P.WAF_DUMP_DIR = saved
 
     # 1.8.0.1 装到设备后补丁没生效：真实正文比 600 字节的留存上限长，截断后的
     # JSON 解析不出来，11128 被当成「普通 400」原样透传。下面三条把它钉死。
