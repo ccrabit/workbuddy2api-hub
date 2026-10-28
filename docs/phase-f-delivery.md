@@ -65,14 +65,51 @@
 > 实际走的是 `/root/.gh-token`（93 字符，`push: true`）+ `GIT_ASKPASS` 助手，token 不落 argv、
 > 不写进 git config。
 >
+> **Phase U 整合（2026-10-28，并入上游 v1.9.0；包版本 `1.9.0.1`）**：`git merge upstream/main`
+> （`a6a967e`，25 个提交 / 10 个 PR / 19 个文件）落进本树，冲突只有 4 处（`README.md` 的套件数与
+> Unreleased 段、`wb_proxy.py` 的两个版本串），`dashboard.html`（我们约 40 个 hunk 与上游 8 个不
+> 重叠）与 `wb_accounts.py`（我们只加 `IMPORT_FIELD_ALIASES`）自动合并，合并后看板 `<style>` 括号
+> 728/728 平衡，套件 **243 = 182 Python + 61 JS**。
+>
+> 上游这一版最要紧的是把 11-128 的根因讲清楚了：`#677` / `#675` / `#680` / `#684` 认定问题出在
+> **DSH 的文件引用段**（`Tokens prefixed with @ are paths the user explicitly referenced…`），
+> 新增 `SANITIZE_DSH_FILEREF_RE` 在出站前把它改成带 `that` 的版本
+> （`are paths **that** the user explicitly referenced`），再挂进 `has_fingerprint` 与 `sanitize_text`。
+> 我们用三组对照探针在设备网关上复核了这条结论（同一条 `deepseek-v4.1-flash` 流式请求、`max_tokens
+> 32`）：28 字对照 **200** 一次过；407 字的原始引用段在 `20:06:16/16/18` 被**三个不同账号连拒三次**
+> `11-128`（dump `waf-1793189176027/176731/178485`，`body_bytes 666`、`system_len 407`）→ `20:06:22`
+> `survived 3 rotation(s) -> one-shot neutral prompt retry` → `20:06:23` **200**；同一段只插一个
+> `that` → `20:06:25` **200**，一秒内、零旋转。**结论：1.8.0.1 写的「判定是抽样」只对一部分请求
+> 成立，另一部分是确定性内容指纹，换号对它无效、只能清洗。** 这同时解释了 1.8.0.3 那次真机现场
+> 为什么三次换号全被拒、要靠中性提示兜底才救回来。
+>
+> 据此次重估三处：① 现场 dump **默认关**（`WB_WAF_DUMP_DIR` 显式给目录才采集；真机单份 dump 对应
+> `body_bytes` 637 KB、`system_len` 41k 字符，含用户项目内容，根因已确证，不再默认落盘）；
+> ② `WAF_RETRY_ATTEMPTS_DEFAULT` **3 → 2**（每次换号都要重传整条正文，实测 633 KB/次；指纹那一类
+> 换多少次都是同一个判定，抽样一类两次 + 一次性中性提示兜底足够，最坏出站数 5 → 3）；
+> ③ 代码注释、`tests/_test_waf_channel_retry.py` 的说明与断言同步更正（「抽样论」→「两类判定」），
+> 中性提示兜底的定位改为「还没进目录的指纹」的安全网。套件仍 **13 项**。
+>
+> 同一批上游改动还带来可观测性的口径：`/health` 增 `accounts_by_realm` / `accounts_ready_by_realm` /
+> `accounts_ready_current_realm` / `models_ready`（旧 `accounts` / `accounts_ready` 语义不变）、池空回
+> `429` + `Retry-After` 而不是 `503`、收费模型撞 `6004` 时保住「配额用尽」并把窗口落到
+> `accounts/model_windows.json`（重启后 `restore_window_cooldowns()` 恢复）、401 认
+> `WWW-Authenticate`、`11140` 限制持久化到 `restrictedUntil`。本层的 `/health` 验收因此多看一眼
+> 区域字段，老字段保持向后兼容。
+>
+> **本包指纹（1.9.0.1 实测）**：`dist/WorkBuddy2API-Hub_1.9.0.1_all.fpk` = **`1030102` B** /
+> sha256 `5b126a3734b948f6013ab54375cd78af9fca61870bbebf94cbeafd991e271b91`，包内 `app.tgz` 的
+> md5（= manifest 的 `checksum`）= `64e27bbcc9d1d73ee8611f6ec5884422`。`fnpack.json` 已按此回填。
+>
 > **版本口径（Phase Q/R 的有意偏离，用户明确要求）**：用户原话「版本号不更新，应用中心无法安装，
 > 为了区别上游版本，这个版本号按照 `1.8.0.1` 这样的方式命名」。所以 1.8.0 的「包版本 ≡ 上游最新
 > 三段 tag」政策**本轮显式豁免**：`manifest` 的 `version`、`wb_proxy.py` 的 `server_version` /
 > `/overview` 版本串、发布 tag（`fnos-1.8.0.2`）与 `fnpack.json` 的版本键统一为 **`1.8.0.2`**
 > （`1.8.0.1` 是同一套第四段热修计数，已被 1.8.0.2 取代）。理由纯粹是机械的：应用中心只按版本号
 > 判断升级，同版本新字节装不进去。它**不是** Phase E 那个「上游 1.6.10 + 我们第 N 次发布」的
-> ordinal 机制（那个仍然删除，`build-fpk.sh` 里没有 `next_release_ordinal`），只是热修计数；上游
-> 下一个 release（`v1.8.1`）回到三段号。`scripts/build-fpk.sh` / `scripts/verify-fpk.sh` 的版本
+> ordinal 机制（那个仍然删除，`build-fpk.sh` 里没有 `next_release_ordinal`），只是热修计数。
+> 已经发生的两例：上游 `v1.8.0` 的热修走 `1.8.0.1` ~ `1.8.0.4`；上游 `v1.9.0` 并入后的整合版
+> 是 `1.9.0.1`（第四段同样只是「同一上游版本换了资产」的机械计数，不是 Phase E ordinal）。`scripts/build-fpk.sh` / `scripts/verify-fpk.sh` 的版本
 > 正则因此放宽为「三段 + 可选第四段」（`(\.[0-9]+){2,3}`），`tests/_test_phase_e_verify.py` 里
 > 「包版本 = 上游最新 tag」的断言与 `tests/_test_fndepot_source.py` 的 SemVer 断言同步放宽，均登记
 > 为本轮的有意偏离。
@@ -122,18 +159,28 @@
 > **发布后实测**：`python3 tests/run_all.py --jobs 4` = **237 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=359 FAIL=0）。
 > **FnDepot 源已更新**：`ccrabit/FnDepot` 提交 `6922063`「WorkBuddy2API-Hub 1.8.0 应用源（重打包：看板样式修复）」，单键 `1.8.0`、`updated_at 2026-10-25T17:44:35+08:00`；`download_url` 实测 HTTP 200 / `1027104` B / sha256 一致；`tests/_test_fndepot_source.py` = PASS=77 FAIL=0 SKIP=0 NOTES=3（用临时克隆的中心仓库 `generate_sources.py` 当校验器）。
 > **两处踩坑记录**：① 发布 tag 必须指向**双亲合并提交**且标题写明并入 `upstream/main`，否则 E13/E16 立刻红——本轮先把 tag 指到修复提交（单亲）被套件拦下，改成「用 `git commit-tree <tree> -p <旧 main> -p <upstream head>` 造一个树与构建态一致的双亲合并」才通过；② 这台机器上 **`/tmp` 在每次 bash 调用之间不保留**，`.stage` 之类的中间态要放到 `/vol2/1000/AgentWork/2api/.stage/`（FnDepot 暂存源与中心仓库校验器都放那里）。
-> **设备现状（2026-10-28 10:45 实测，已装 1.8.0.4）**：设备 = 本机，`appcenter-cli list` /
-> `trim-cli app status` 都是 `workbuddy2api │ WorkBuddy2API-Hub │ 1.8.0.4 │ running`；
-> `/var/apps/workbuddy2api/manifest` 的 `version = 1.8.0.4`、`checksum =
-> 5439b5a1e11228f4de384223df87566f`（= 本包 `app.tgz` 的 md5）；`/vol1/@appcenter/workbuddy2api/server/wb_proxy.py`
-> 与本仓库工作树 `diff` **IDENTICAL**，banner 为 `wb-proxy/1.8.0.4`、内含 `_UPSTREAM_CODE_RE`、
-> `WAF_RETRY_DELAYS` 与一次性 `waf_dump_request`。
+> **设备现状（2026-10-28 20:27 实测，已装 1.9.0.1）**：设备 = 本机，`appcenter-cli list` /
+> `trim-cli app status` 都是 `workbuddy2api │ WorkBuddy2API-Hub │ 1.9.0.1 │ running`；
+> `/var/apps/workbuddy2api/manifest` 的 `version = 1.9.0.1`、`checksum =
+> 64e27bbcc9d1d73ee8611f6ec5884422`（= 本包 `app.tgz` 的 md5）；`/vol1/@appcenter/workbuddy2api/server/wb_proxy.py`
+> 与本仓库工作树 `diff` **IDENTICAL**，banner 为 `wb-proxy/1.9.0.1`，内含上游的
+> `SANITIZE_DSH_FILEREF_RE`（8 处 `SANITIZE_DSH_FILEREF_RE` / `WAF_TRANSIENT_ERROR_CODES` 命中）与本轮的
+> `WAF_RETRY_ATTEMPTS_DEFAULT = 2`、`WAF_DUMP_DIR = os.environ.get("WB_WAF_DUMP_DIR", "")`。
 > 升级路径：1.8.0（用户自己从 FnDepot 装的）→ 1.8.0.1（Phase Q）→ 1.8.0.2（Phase R）→
-> 1.8.0.3（Phase S）→ **1.8.0.4（Phase T，本轮）**，四次都由我方经应用中心的 `update/task` RPC 完成
-> （见顶部「装机路线」，没有手工 start/stop）。
-> **装机后验收（1.8.0.4 实测）**：`curl /health` → `{"ok": true, "realm": "cn", "accounts": 9,
-> "accounts_ready": 7, "api_key_required": true}`；非流式 `deepseek-v4.1-flash` max_tokens 32 →
-> **200**，内容「收到」，usage `prompt 41 / completion 2 / total 43`。
+> 1.8.0.3（Phase S）→ 1.8.0.4（Phase T）→ **1.9.0.1（Phase U，本轮）**，五次都由我方经应用中心的
+> `update/task` RPC 完成（见顶部「装机路线」，没有手工 start/stop）。
+> **装机后验收（1.9.0.1 实测）**：`curl /health` → `{"ok": true, "realm": "cn", "accounts": 9,
+> "accounts_ready": 7, "accounts_by_realm": {"intl": 2, "cn": 7}, "accounts_ready_by_realm":
+> {"intl": 2, "cn": 5}, "accounts_ready_current_realm": 5, "models_ready": {"deepseek-v4.1-flash":
+> {"intl": 2, "cn": 5}, ...}, "api_key_required": true}`（上游新增字段都在，旧字段语义不变）；
+> 非流式 `deepseek-v4.1-flash` max_tokens 32 → **200**、`acct=5a9580bb`、usage `45 / 32 / 77`
+> （32 个 token 全被思考吃掉，`reasoning_tokens=32`）；流式同模型 max_tokens 256 → **200**，
+> 47 个 `data:` 帧 + 末尾 usage 帧 + `[DONE]`，正文「我现在正在工作。」、usage `42 / 40 / 82`。
+> **Phase U 的关键验收：同一条 407 字的 DSH 文件引用段（1.9.0.1 之前要连拒三次、靠中性提示兜底才
+> 200）现在一次过** —— `20:27:21` 的 `msgs=2` 请求（system 为该引用段）**200**、`acct=5a9580bb`、
+> `145 tokens`，20:26:55 重启之后的日志里 `rotating to another account` / `one-shot neutral prompt`
+> **0 命中**，`/tmp/wb-waf-dumps` **0 个新文件**（dump 默认关已实测生效，进程 env 里也没有
+> `WB_WAF_DUMP_DIR`）。
 > **真机 11128 首次被救回（Phase S 装的 1.8.0.3 现场）**：`10:33:43` 的 `msgs=83` 请求三次换号全拒
 > 后，`10:33:51` 中性提示重试 → `10:33:56` **200**、`tokens=207568`。
 > 数据目录 `/vol1/@appdata/workbuddy2api/`（accounts/、usage/）在四次升级里都原样保留。

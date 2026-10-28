@@ -40,9 +40,9 @@ EXPECTED_APP = "workbuddy2api"          # == fnos/manifest appname
 EXPECTED_DISPLAY = "WorkBuddy2API-Hub"
 # Phase Q hot-fix: the fourth number exists only so appcenter installs new bytes
 # over an already-published upstream version (see docs/phase-f-delivery.md).
-EXPECTED_VERSION = "1.8.0.4"          # 当前发布版本（上游 1.8.0 + fork 私有热修号）
+EXPECTED_VERSION = "1.9.0.1"          # 当前发布版本（上游 1.9.0 + fork 私有热修号）
 EXPECTED_URL = ("https://github.com/ccrabit/workbuddy2api-hub/releases/download/"
-                "fnos-1.8.0.4/WorkBuddy2API-Hub_1.8.0.4_all.fpk")
+                "fnos-1.9.0.1/WorkBuddy2API-Hub_1.9.0.1_all.fpk")
 
 # The nine fixed categories (spec §4.2) and the allowed platform/arch values.
 CATEGORIES = ("影音娱乐", "系统工具", "编程开发", "AI赋能", "生活服务",
