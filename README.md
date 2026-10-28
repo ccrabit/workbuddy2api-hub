@@ -22,7 +22,7 @@
 This project is for protocol research and personal use only. Prefer the official client, do not use your primary account, and do not resell or share access.
 
 <p align="center">
-  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.8.0-2496ED?style=flat-square" alt="Version 1.8.0"></a>
+  <a href="https://github.com/ardeyouxipianyi/workbuddy2api-hub/releases"><img src="https://img.shields.io/badge/Release-v1.9.0-2496ED?style=flat-square" alt="Version 1.9.0"></a>
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square" alt="Python">
   <img src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square" alt="OpenAI API">
   <img src="https://img.shields.io/badge/Dual_Realm-Intl_&_CN-0DBD8B?style=flat-square" alt="Dual Realm">
@@ -176,7 +176,7 @@ python tests/run_all.py            # 全部套件
 python tests/run_all.py realm      # 只跑名字里含 realm 的
 ```
 
-- 238 个套件：177 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
+- 243 个套件：182 个 Python + 61 个 JS；JS 需要 PATH 上有 `node`，缺失时会跳过并提示。
 - `tests/_mobile_check.py` 是独立的 Playwright 手机/桌面布局检查器（需自行安装 Playwright），按需手动运行，不在上面的套件集里。
 - 本仓库**没有 CI**：Phase G 起删掉了全部自建 workflow，上面这条命令改为在本地跑（发布步骤见 [`docs/phase-g-local-release.md`](docs/phase-g-local-release.md)）。唯一留下的 `.github/workflows/release.yml` 是上游文件，只在 `v*` tag 上触发——本仓库的发布 tag 是 `fnos-X.Y.Z`，所以它永不运行。tag 与源码版本是否一致，现在由本地发布流程里的 `scripts/verify-fpk.sh` 与 `tests/_test_release_pipeline.py` 兜住。
 
@@ -508,6 +508,8 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 
 <!-- 发版时：把下面的 Unreleased 段落整理成新版本号（## vX.Y.Z），整体移入 docs/CHANGELOG.md 顶部 -->
 
+- **1.9.0.1（Phase U）：并入上游 v1.9.0 + 11-128 真因确证**（占位，稍后补全）
+- **v1.9.0 发布**：汇总 v1.8.0 之后的 10 个社区 PR（#649、#650、#652、#653、#669、#670、#671、#672、#684、#686）。完整变更、验证范围与已知限制见 **[docs/CHANGELOG.md](docs/CHANGELOG.md#v190)**；下一版的改动继续写在本段。
 - **1.8.0.4 修正（Phase T）：1.8.0.3 的兜底救回了请求，但顺手把整天的系统提示换掉了**：1.8.0.3 装上去十分钟内就抓到一次真实 11128 —— `10:33:43` 的 `msgs=83` 请求三次换号（间隔 0.5 / 1.5 / 3.5 秒，全被拒）之后，`10:33:51` 的中性提示重试在 `10:33:56` 把它救回成 **200**（`tokens=207568`），用户侧不再以 400 结束。但那次兜底触发的是**进程级**降级窗口（照抄 403 内容审查的语义，到次日 00:00 CST 才复位），于是当天其余 `passthrough`/`append` 请求的系统提示全被换成 28 字中性提示 —— 对一个靠系统提示干活的编码 agent 来说这是悄无声息的降级。本版改成**只借这一条请求**：`PROMPT_DEGRADE.trigger()` → `build_upstream_body()` → 立刻 `reset()`（若进分支前窗口本来就是活的则不动，保住 403 那条保护），`custom` 模式依旧永不降级。同时修掉 dump 写不进去的隐患：应用以 `workbuddy2api`（uid 946）运行，`/tmp/wb-waf-dumps` 若是 root 建的 0755 目录就写不进、异常被吞（真机现场一条 dump 都没有），现在套件自己在 `mkdtemp` 里跑，`/tmp/wb-waf-dumps` 只留真机现场（宿主机上已改为 1777 供应用写入）。包版本 `1.8.0.4`，装机走应用中心 `update/task` RPC；装机后 `/health`、非流式（41/2/43 tokens）实测 200。
 - **1.8.0.3 热修（Phase S）：换号真的换了，但三个账号都被同一条正文拒**：1.8.0.2 装到设备后换号日志终于出现（`09:22:56 ... rotating to another account (attempt 1/2)`、`(2/2)`），可客户端拿到的还是 400——三次尝试在 **1.3 秒**内打完，`open_upstream()` 的 `tried.add(account.uid)` 保证换到的是不同账号，而三个不同账号对同一条正文给出同一个判定，说明判定随**内容**走；同时 `usage.jsonl` 里 27–28 日 1829 条请求中 `n_msgs>=100` 的请求绝大多数 completed（最高 550 条消息 / 521k tokens），所以体积/条数也不是触发条件。本版三处改动：① 换号预算 `WAF_RETRY_ATTEMPTS_DEFAULT` 2 → 3；② 每次换号前按 `WAF_RETRY_DELAYS = (0.5, 1.5, 3.5)` 退避（`waf_retry_delay()`），不再一秒内连打三次，给抽样判定留出不同的采样点；③ 预算耗尽仍被拒、且提示模式是 `passthrough`/`append`（不是用户自定义提示）时，触发一次 `PROMPT_DEGRADE` 中性提示重试——403 内容审查的兜底早就这么做，这里只试一次。另外每次被拒把请求形状（`system` 头 8 KB + 尾 2 KB、逐条消息长度、正文 sha256、账号/`realm`/`product`/模型/流式）落到 `/tmp/wb-waf-dumps/`（`WB_WAF_DUMP_DIR` 可改，最多 24 份，**不写数据目录、不落 messages 原文**），下次现场直接比对。`tests/_test_waf_channel_retry.py` 9 → **13 项**（换号等待逐次拉长、预算耗尽降级重试、降级只试一次、dump 形状）。包版本进到 `1.8.0.3`，装机走应用中心 `update/task` RPC，装机后 `/health`、非流式（41/2/43 tokens）、流式（53 帧）实测均 200。
 - **1.8.0.2 热修（Phase R）：修 1.8.0.1 那个「装了也不生效」的换号重试**：1.8.0.1 装到设备后，2026-10-28 08:52 两次真实 11128 仍然原样透传 400，日志里**一条换号记录都没有**。根因是 `upstream_error_code()` 走 `json.loads`，而 `http_error_detail(exc)` 只留 **600 字节**——上游错误信封自带 `displayMsg` + `displayTips`（en/zh/zh-hant）再加 `actions`，实测同款 `11101` 正文就是 **684 字节**，截断后 JSON 必然解析失败、code 变成 `None`，`WAF_TRANSIENT_ERROR_CODES` 永远不命中。现在解析失败时按头部正则 `_UPSTREAM_CODE_RE`（只扫前 512 字符）兜底——code 永远是信封第一个字段，403 的 `restriction_is_account_level` 早就这么做了；同一个兜底也让 5xx 的模型级错误、11140 的账号级限制在长正文上不再漏判。`tests/_test_waf_channel_retry.py` 5 → **9 项**（真实现场长度正文、半截 UTF-8/半截 JSON 正文、截断正文下预算依旧有界、`upstream_error_code` 直接断言）。包版本进到第四段 `1.8.0.2`（应用中心只按版本号判断升级）；装机走应用中心的 `update/task` RPC——`trim-cli app install-fpk` 对已装应用永远 `10236`（app already installed）、`trim-cli app update` 强制先做云下载 `10030`，细节见 `docs/phase-f-delivery.md` 顶部「装机路线」。装机后 `/health`、非流式、流式实测均 200。
@@ -532,7 +534,7 @@ export ANTHROPIC_API_KEY="你在看板设置中添加并绑定的API_Key"
 - **飞牛 fnOS 这一层：并入上游 v1.7.11–v1.7.13 及 v1.7.13 之后的 44 个提交（Phase J）**：合并基从 `7e5c38d`（v1.7.10）推进到 `fe30fa0`，共 63 个提交、69 个文件、+9626/-492；包版本按版本号规则取上游最新 release tag 的三段号 → `1.7.13`，发布 tag `fnos-1.7.13`（该 tag 指向的合并提交因此包含 v1.7.13 之后仍未发版的那 20 个上游提交，与上游 `main` 对齐）。上游这一批长出四个新顶层文件与一个运维目录：`wb_quota_scan.py`（模型额度定时主动查询，状态落 `accounts/quota_scan.json`）、`wb_window_probe.py`（配额窗口探针，状态落 `accounts/model_windows.json`）、`wb_update_request.py`（阿里云 systemd 更新服务的面板侧请求桥，`wb_proxy.py` 顶层 `import`，缺它网关启动即 ImportError）、`console_tail.py`（便携包日志窗口）；`ops/aliyun/` 是 root 级 updater 单元，根目录维护脚本按上游 #398 归档进 `tools/`。打包侧随之跟上：`scripts/build-fpk.sh` 的载荷守卫名单补 `wb_quota_scan.py` / `wb_window_probe.py` / `wb_update_request.py`（漏一个就是「装完启动即死」），tar 排除列表把已失效的单文件 `./_fixbats.py` 换成整目录 `./tools` + `./ops`（上游把脚本搬进 `tools/` 后旧规则不再命中，且新目录不该进包），`tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 同步这三项；面板侧 `postJSON` 同时保留上游的「服务已关闭直接报错」与飞牛的 `wbUrl()` 网关前缀，`release/portable_runtime.py` 的必需文件表取并集（上游新增 `Lib/stat.py`、`Lib/platform.py`，飞牛仍要 `Lib/socketserver.py`、`Lib/struct.py`）。新增运行时状态全部落在 `accounts/`（本来就 `mkdir -p` + `chmod 700`），fnOS 侧不需要新目录，`WB_PROXY_CATALOG_DIR` 的修复照旧生效。 已发布版本的完整记录（v1.4.5 ~ v1.7.30，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
 - **飞牛 fnOS 这一层：并入上游 v1.7.30（Phase N）**：合并基从 `af37786`（v1.7.29）推进到 `84dbc99`（`release: v1.7.30`，该 tag 就是上游 `main` 的头部），共 **34 个提交、32 个文件、+4954/-427**。上游这一批 15 笔社区改动的主线是「判定与面板」：调度器日志与区域风控闸门改取正在运行的 `wb_proxy`（#594，`python wb_proxy.py` 下 `import wb_proxy` 会再加载一份副本，副本的 `LOG_STORE` 是 None、暂停状态也是另一份）；签到不再把 `200 + code 10001` 的失败回执记成成功（#596）；一键签到按 `tasksEnabled` 选号（#598）；Token 保活提前量改成 48 小时（#600，旧值 2 小时远小于 24 小时巡检间隔）；下拉框自绘（#601）；每日活跃建会话失败后按 `phase` 补退避（#605）；面板闸门 fail-closed 修首帧闪烁与 `?pwd=` 卡死（#606）；一次流式回复只带一个 chunk id（#607）；面板 POST 的空 body 会被排空（#608，修同连接下一个请求 501）；**Pro Only 标注改由目录 `modelTiers` 驱动（#609）——上游因此删掉了 `wb_entitlements.py` 与其套件**；Codex 远程压缩 v2（#610）；账号级并发上限与会话粘滞键（#612，默认关）；静态 API Key 账号（#620）；账号行显示会员档位胶囊（#621）；每日活跃网页会话跑完即释放（#623，修 10105）。合并侧 4 个冲突：`README.md`、`dashboard.html`（上游的「先摘 `html.wb-panel-session`」与飞牛的「网关模式摘掉闸门并提示重开」两段都留：先摘类，再按网关模式提前返回）、`release/portable.txt` 与 `wb_proxy.py`（`wb_entitlements.py` 已被上游删除，这里跟着删掉 import 与清单项，只保留本层的 `wb_export.py`）。打包侧同步：`scripts/build-fpk.sh` 守卫名单与 `tests/_test_phase_e_verify.py` 的 `PKG_MODULES` 去掉 `wb_entitlements.py`。
 
-已发布版本的完整记录（v1.4.5 ~ v1.8.0，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
+已发布版本的完整记录（v1.4.5 ~ v1.9.0，含每版的 PR 归属）见 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**。
 
 
 ## 七、致谢与引用声明 (Credits & References)
