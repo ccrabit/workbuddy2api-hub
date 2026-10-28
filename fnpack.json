@@ -29,14 +29,14 @@
       "is_docker": false,
       "service_port": "8788",
       "releases": {
-        "1.8.0.2": {
-          "changelog": "1.8.0.2（Phase R 热修，修 1.8.0.1 的失效补丁）：1.8.0.1 的 11128 换号重试在真机上从未触发——上游错误信封自带 displayMsg + displayTips（en/zh/zh-hant）+ actions，实测同款 11101 正文 684 字节，而 http_error_detail 只留 600 字节，截断后的 JSON 解析失败、code 解析成 None，于是 11128 又被当成普通 400 原样透传。本版让 upstream_error_code 在 JSON 解析失败时按头部正则兜底（code 永远在信封第一位），并把套件从 5 项扩到 9 项钉住「长正文 / 半截正文仍要换号」。版本号沿用 fork 私有第四段（1.8.0.1 → 1.8.0.2），因为应用中心只按版本号判断升级，同版本新字节装不进去；其余内容与 1.8.0（看板宽屏修复）+ 1.8.0.1（11128 换号）一致。",
-          "updated_at": "2026-10-28T09:16:00+08:00",
+        "1.8.0.3": {
+          "changelog": "1.8.0.3（Phase S 热修，修 1.8.0.2 在真机上「换号了但救不回来」）：1.8.0.2 装机后换号日志终于出现，但三个账号在 1.3 秒内被依次拒绝同一条正文，客户端仍然拿到 400。根因是判定随内容走而不随账号走，而旧预算 2 次、无间隔，采样点几乎没变。本版：换号预算 2 → 3；每次换号前按 0.5s / 1.5s / 3.5s 退避，不再一秒内连打；预算耗尽仍被拒且提示模式是 passthrough/append 时，触发一次性降级提示（中性系统提示）再试；同时把每次被拒的请求形状（system 头尾、逐条消息长度、正文 sha256、账号/realm/product/模型/流式）落到 /tmp/wb-waf-dumps/，便于下次现场比对（不写数据目录）。套件 9 → 13 项。版本号沿用 fork 私有第四段（1.8.0.1 → 1.8.0.2 → 1.8.0.3），因为应用中心只按版本号判断升级，同版本新字节装不进去。",
+          "updated_at": "2026-10-28T10:25:00+08:00",
           "packages": {
             "all": {
-              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.8.0.2/WorkBuddy2API-Hub_1.8.0.2_all.fpk",
-              "sha256": "cbb3c42ec78336edcdc3f74a7c4dd2059b93312825b85a730c0c69638ce516be",
-              "size": 1020595
+              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.8.0.3/WorkBuddy2API-Hub_1.8.0.3_all.fpk",
+              "sha256": "406a62ce76f18a12cbc417c2af15d0365c863ce53e29acfe98800c11011745c7",
+              "size": 1020748
             }
           }
         }

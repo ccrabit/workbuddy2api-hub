@@ -22,6 +22,20 @@
 > （691 B，取自上游 `11101` 正文、只换 code/msg）复现：**修前** `upstream_calls=1 raised=HTTPError`，
 > **修后** `upstream_calls=2`、请求在第二个账号上成功。
 >
+> **Phase S 热修（2026-10-28，1.8.0.2 装机后仍 400；包版本 `1.8.0.3`）**：1.8.0.2 装到设备后换号日志
+> 终于出现了（`09:22:56 upstream 400 (code 11128, channel check) ... rotating to another account (attempt
+> 1/2)`、`09:22:57 ... (2/2)`），但**三个账号依次拒绝同一条正文**，客户端拿到的还是 400。反证数据：
+> `usage.jsonl` 里 27–28 日 1829 条请求中 `n_msgs>=100` 的请求绝大多数 completed（最高 550 条消息 /
+> 521k tokens），所以「体积 / 消息条数」不是触发条件；同时 `open_upstream()` 的 `tried.add(account.uid)`
+> 保证换号真的换了不同账号 —— 判定随**内容**走、不随账号走，而 1.8.0.2 的换号在 **1.3 秒**内就把预算
+> 打光，判定器连采样点都没换。改三处：① `WAF_RETRY_ATTEMPTS_DEFAULT` **2 → 3**；② 每次换号前按
+> `WAF_RETRY_DELAYS = (0.5, 1.5, 3.5)` 等待（`waf_retry_delay()`），不再一秒内连打三次；③ 预算用完
+> 仍被拒时，若提示模式是 `passthrough` / `append`（非用户自定义），触发 `PROMPT_DEGRADE` 换成中性系统
+> 提示再试一次 —— 这是 403 内容审查早就验证过的兜底，且只试一次。诊断：每次被拒把请求形状
+> （`system` 提示头 8 KB + 尾 2 KB、逐条消息长度、正文 sha256、账号/`realm`/`product`/模型/流式）落到
+> `/tmp/wb-waf-dumps/`（**不写数据目录**，`WB_WAF_DUMP_DIR` 可覆盖，最多留 24 份），下次现场直接比对，
+> 不必再靠猜指纹。套件 9 → **13 项**（换号等待逐次拉长、预算耗尽降级重试、降级只试一次、dump 形状）。
+>
 > **版本口径（Phase Q/R 的有意偏离，用户明确要求）**：用户原话「版本号不更新，应用中心无法安装，
 > 为了区别上游版本，这个版本号按照 `1.8.0.1` 这样的方式命名」。所以 1.8.0 的「包版本 ≡ 上游最新
 > 三段 tag」政策**本轮显式豁免**：`manifest` 的 `version`、`wb_proxy.py` 的 `server_version` /
@@ -34,9 +48,10 @@
 > 「包版本 = 上游最新 tag」的断言与 `tests/_test_fndepot_source.py` 的 SemVer 断言同步放宽，均登记
 > 为本轮的有意偏离。
 >
-> **本包指纹（本轮实测）**：`dist/WorkBuddy2API-Hub_1.8.0.2_all.fpk` = **`1020595` B** /
-> sha256 `cbb3c42ec78336edcdc3f74a7c4dd2059b93312825b85a730c0c69638ce516be`，包内 `app.tgz`
-> 的 md5（即 manifest 的 `checksum`）= `f87d9b082962cbebd8a74367ca6ceae8`。
+> **本包指纹（本轮实测）**：`dist/WorkBuddy2API-Hub_1.8.0.3_all.fpk` = **`1020748` B** /
+> sha256 `406a62ce76f18a12cbc417c2af15d0365c863ce53e29acfe98800c11011745c7`，包内 `app.tgz`
+> 的 md5（即 manifest 的 `checksum`）= `54431bccd04d31f1622060ebde7d9753`。上一版 `1.8.0.2`
+> 是 `1020595` B / sha256 `cbb3c42e…` / app.tgz `f87d9b08…`（Phase R）。
 > `fnpack.json` 已按此回填；**Release 尚未发布**（推送 `ccrabit/FnDepot` 之前必须先上传资产，
 > 否则源里的 `download_url` 会 404）。
 >
@@ -71,24 +86,27 @@
 > 只是位置错了），必须单独钉一层。
 >
 > **版本口径**：1.8.0 按「包版本 = 上游最新三段 release tag（`v1.8.0`）」发布，套件里 `PKG_VERSION`
-> 也按 `newest_upstream_release()` 解析；Phase Q/R 热修按用户要求改用第四段 `1.8.0.2`（见顶部
-> 「版本口径」段），跑门禁时用 `WB_PKG_VERSION=1.8.0.2` 覆盖该解析值。同一版本号换资产的代价是「已经装过
+> 也按 `newest_upstream_release()` 解析；Phase Q/R/S 热修按用户要求改用第四段 `1.8.0.3`（见顶部
+> 「版本口径」段），跑门禁时用 `WB_PKG_VERSION=1.8.0.3` 覆盖该解析值。同一版本号换资产的代价是「已经装过
 > 旧 1.8.0 的机器不会自动收到更新」——这正是本轮必须换号的原因：应用中心只按版本号判断升级。
 > **已发布（本轮实测）**：tag `fnos-1.8.0` 指向**双亲合并提交**「Merge upstream/main (v1.8.0) into the fnOS fork」（两个父 `dce80d2` + `4f7ae6f`），且 `refs/heads/main` 与它同一个提交（发布态：`git describe --tags` 就在 `fnos-1.8.0` 上）；Release **423127766**（<https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.8.0>）非草稿、标题已改为「数据看板已修」，两资产 `uploaded`（`1027104` B / `98` B），从资产端点下载回本地与 `dist/` **逐字节相同**（sha256 `3f98610c…`）。`bash scripts/verify-fpk.sh` = **71 passed / 0 failed**（tag 在 HEAD 上，那条 SKIP 消失）。
 > **发布后实测**：`python3 tests/run_all.py --jobs 4` = **237 passed / 0 failed / 0 skipped**（`_test_phase_e_verify.py` PASS=359 FAIL=0）。
 > **FnDepot 源已更新**：`ccrabit/FnDepot` 提交 `6922063`「WorkBuddy2API-Hub 1.8.0 应用源（重打包：看板样式修复）」，单键 `1.8.0`、`updated_at 2026-10-25T17:44:35+08:00`；`download_url` 实测 HTTP 200 / `1027104` B / sha256 一致；`tests/_test_fndepot_source.py` = PASS=77 FAIL=0 SKIP=0 NOTES=3（用临时克隆的中心仓库 `generate_sources.py` 当校验器）。
 > **两处踩坑记录**：① 发布 tag 必须指向**双亲合并提交**且标题写明并入 `upstream/main`，否则 E13/E16 立刻红——本轮先把 tag 指到修复提交（单亲）被套件拦下，改成「用 `git commit-tree <tree> -p <旧 main> -p <upstream head>` 造一个树与构建态一致的双亲合并」才通过；② 这台机器上 **`/tmp` 在每次 bash 调用之间不保留**，`.stage` 之类的中间态要放到 `/vol2/1000/AgentWork/2api/.stage/`（FnDepot 暂存源与中心仓库校验器都放那里）。
-> **设备现状（2026-10-28 09:13 实测，已装 1.8.0.2）**：设备 = 本机，`appcenter-cli list` /
-> `trim-cli app status` 都是 `workbuddy2api │ WorkBuddy2API-Hub │ 1.8.0.2 │ running`；
-> `/var/apps/workbuddy2api/manifest` 的 `version = 1.8.0.2`、`checksum =
-> f87d9b082962cbebd8a74367ca6ceae8`（= 本包 `app.tgz` 的 md5）；`/vol1/@appcenter/workbuddy2api/server/wb_proxy.py`
-> 与本仓库工作树 `diff` **IDENTICAL**，banner 为 `wb-proxy/1.8.0.2`、内含 `_UPSTREAM_CODE_RE`。
-> 升级路径：1.8.0（用户自己从 FnDepot 装的）→ 1.8.0.1（Phase Q）→ **1.8.0.2（Phase R，本轮）**，
-> 两次都由我方经应用中心的 `update/task` RPC 完成（见顶部「装机路线」，没有手工 start/stop）。
-> **装机后验收（1.8.0.2 实测）**：`curl /health` → `{"ok": true, "realm": "cn", "accounts": 9,
-> "accounts_ready": 7}`；非流式 `deepseek-v4.1-flash` max_tokens 32 → **200**，usage `prompt 40 /
-> completion 2 / total 42`；流式 → **200**，29 个 `data:` 帧 + 末尾 usage 帧 + `data: [DONE]`。
-> 数据目录 `/vol1/@appdata/workbuddy2api/`（accounts/、usage/）在两次升级里都原样保留。
+> **设备现状（2026-10-28 10:24 实测，已装 1.8.0.3）**：设备 = 本机，`appcenter-cli list` /
+> `trim-cli app status` 都是 `workbuddy2api │ WorkBuddy2API-Hub │ 1.8.0.3 │ running`；
+> `/var/apps/workbuddy2api/manifest` 的 `version = 1.8.0.3`、`checksum =
+> 54431bccd04d31f1622060ebde7d9753`（= 本包 `app.tgz` 的 md5）；`/vol1/@appcenter/workbuddy2api/server/wb_proxy.py`
+> 与本仓库工作树 `diff` **IDENTICAL**，banner 为 `wb-proxy/1.8.0.3`、内含 `_UPSTREAM_CODE_RE` 与
+> `WAF_RETRY_DELAYS` / `waf_dump_request`。
+> 升级路径：1.8.0（用户自己从 FnDepot 装的）→ 1.8.0.1（Phase Q）→ 1.8.0.2（Phase R）→
+> **1.8.0.3（Phase S，本轮）**，三次都由我方经应用中心的 `update/task` RPC 完成（见顶部「装机路线」，
+> 没有手工 start/stop）。
+> **装机后验收（1.8.0.3 实测）**：`curl /health` → `{"ok": true, "realm": "cn", "accounts": 9,
+> "accounts_ready": 7, "api_key_required": true}`；非流式 `deepseek-v4.1-flash` max_tokens 32 →
+> **200**，内容「收到」，usage `prompt 41 / completion 2 / total 43`；流式 → **200**，53 个 `data:`
+> 帧 + 末尾 usage 帧 + `data: [DONE]`。
+> 数据目录 `/vol1/@appdata/workbuddy2api/`（accounts/、usage/）在三次升级里都原样保留。
 > **tag 与已发布元数据**：tag `fnos-1.8.0` 指向「本轮最终提交」（含样式修复与回填），所以那棵树里的
 > `fnpack.json` 与已发布资产一致，`verify-fpk.sh` 的那条 SKIP 不再出现。
 > 历史内容（Phase F/G/H/I/J/K/L/M/N/O/P）保留在下方原章节，仅 §1 指纹已按本轮覆盖。
