@@ -53,6 +53,29 @@ PLAIN_400_BODY = json.dumps({
     "code": 11135, "msg": "invalid image data",
 }).encode("utf-8")
 
+#: 现场真正的信封形状（同款 11101 正文实测 684 字节）：displayMsg + displayTips
+#: 各三种语言，再加 actions。`http_error_detail` 只留 600 字节，所以真实 11128 正文
+#: **一定**被截断、`json.loads` 一定失败——1.8.0.1 就是在这里悄无声息地失效的
+#: （2026-10-28 08:52 设备上两次真实 11128 都原样透传，一条换号日志都没有）。
+WAF_BODY_REAL = json.dumps({
+    "code": 11128,
+    "msg": "Illegal API invocation from an unapproved channel",
+    "requestId": "01a17ffe29a47839bac0153ac3d510cb",
+    "displayMsg": {
+        "en": "Request blocked. Please send it again",
+        "zh": "请求被拦截，请重新发送",
+        "zh-hant": "請求被封鎖，請重新傳送",
+    },
+    "displayTips": {
+        "en": ("The server rejected the request, possibly because required "
+               "information is missing. Please retry; if it keeps failing, "
+               "submit feedback."),
+        "zh": "服务端检查请求没通过，可能缺少必要信息。请重试，一直失败请提交反馈。",
+        "zh-hant": "服務端檢查請求未通過，可能缺少必要資訊。請重試，持續失敗請提交回饋。",
+    },
+    "actions": ["RETRY", "SUBMIT_FEEDBACK"],
+}).encode("utf-8")
+
 
 def http_error(code, body):
     return urllib.error.HTTPError("https://upstream/chat", code, "err", {},
@@ -195,6 +218,54 @@ class WafRetryTests(unittest.TestCase):
         self.assertEqual(P.waf_retry_attempts(), 2)
         os.environ["WB_WAF_RETRY_ATTEMPTS"] = "junk"
         self.assertEqual(P.waf_retry_attempts(), 2)
+
+    # 1.8.0.1 装到设备后补丁没生效：真实正文比 600 字节的留存上限长，截断后的
+    # JSON 解析不出来，11128 被当成「普通 400」原样透传。下面三条把它钉死。
+
+    def test_real_length_envelope_still_rotates(self):
+        """真实现场长度的 11128 正文（>600 字节）仍然要换号。"""
+        self.assertGreater(len(WAF_BODY_REAL), 600,
+                           "这条用例的意义就在于正文超过留存上限")
+        head = WAF_BODY_REAL.decode("utf-8")[:600]
+        with self.assertRaises(Exception):
+            json.loads(head)  # 截断后确实不是合法 JSON，这正是旧实现的死因
+        self.assertEqual(P.upstream_error_code(head), 11128)
+        first = make_account("r1-first")
+        second = make_account("r2-second")
+        upstream, result, raised = self._run(
+            [first, second], [http_error(400, WAF_BODY_REAL), FakeResp()])
+        self.assertIsNone(raised, "字节变长不该让换号失效")
+        self.assertEqual(len(upstream.calls), 2, "应当换一个账号重试")
+        self.assertEqual(result[1].uid, "r2-second")
+
+    def test_truncated_envelope_still_rotates(self):
+        """正文在半截 UTF-8 / 半截 JSON 处被截断，也要认得 11128。"""
+        first = make_account("t1-first")
+        second = make_account("t2-second")
+        upstream, result, raised = self._run(
+            [first, second], [http_error(400, WAF_BODY_REAL[:300]), FakeResp()])
+        self.assertIsNone(raised, "截断后的正文仍要按 11128 处理")
+        self.assertEqual(len(upstream.calls), 2, "应当换一个账号重试")
+        self.assertEqual(result[1].uid, "t2-second")
+
+    def test_truncated_envelope_budget_still_bounded(self):
+        """截断正文上的预算同样有界，用完把原始 400 交回去。"""
+        accounts = [make_account("u%d" % i) for i in range(4)]
+        upstream, result, raised = self._run(
+            accounts, [http_error(400, WAF_BODY_REAL[:300]) for _ in range(4)])
+        self.assertIsNone(result)
+        self.assertIsInstance(raised, urllib.error.HTTPError)
+        self.assertEqual(len(upstream.calls), P.WAF_RETRY_ATTEMPTS_DEFAULT + 1)
+
+    def test_error_code_survives_truncation(self):
+        """`upstream_error_code` 对截断正文按头部兜底，其它垃圾仍返回 None。"""
+        full = WAF_BODY_REAL.decode("utf-8")
+        self.assertEqual(P.upstream_error_code(full), 11128)
+        self.assertEqual(P.upstream_error_code(full[:250]), 11128)
+        self.assertEqual(P.upstream_error_code(full[:600]), 11128)
+        self.assertIsNone(P.upstream_error_code(""))
+        self.assertIsNone(P.upstream_error_code('{"msg":"no code here"}'))
+        self.assertIsNone(P.upstream_error_code("internal server error"))
 
 
 if __name__ == "__main__":

@@ -10251,7 +10251,7 @@ def runtime_settings_view():
         "accounts_dir": ACCOUNTS_DIR,
         "usage_dir": USAGE_DIR,
         "settings_file": wb_settings.settings_path(ACCOUNTS_DIR),
-        "version": "1.8.0.1",
+        "version": "1.8.0.2",
     }
 def current_account():
     """Account used for display purposes (health / usage summaries)."""
@@ -13999,6 +13999,17 @@ WAF_TRANSIENT_ERROR_CODES = frozenset((11128,))
 #: Default number of extra accounts one request may try on a channel-check 400.
 WAF_RETRY_ATTEMPTS_DEFAULT = 2
 
+#: `upstream_error_code` 的兜底：正文被截断、`json.loads` 失败时按头部正则捞 code。
+#: `http_error_detail` 只留 600 字节，而上游错误信封自带 displayMsg + displayTips
+#: （en / zh / zh-hant）再加 actions —— 实测 11101 的正文就是 684 字节，11128 同款信封
+#: 同样超长。截断后的字节丢掉了收尾的 `"}`，于是 11128 被解析成 None、渠道校验的换号
+#: 重试在真机上从来没触发过（1.8.0.1 装到设备后 08:52 两次真实 11128 都原样透传）。
+#: code 永远是信封第一个字段，所以拿不到完整 JSON 时按头部正则兜底；403 的
+#: `restriction_is_account_level` 早就这么做了（见 `_RESTRICTED_403_CODE_RE`）。
+_UPSTREAM_CODE_RE = re.compile(r'"code"\s*:\s*(-?[0-9]{1,6})')
+#: 头部正则只扫正文最前面这一截，避免命中 displayTips 里的嵌套文本。
+_UPSTREAM_CODE_HEAD = 512
+
 
 def waf_retry_attempts():
     """How many extra accounts a channel-check 400 may rotate through.
@@ -14017,15 +14028,29 @@ def waf_retry_attempts():
 
 
 def upstream_error_code(detail):
-    """The numeric code field of an upstream error body, or None."""
+    """The numeric code field of an upstream error body, or None.
+
+    The body is often handed in already truncated (`http_error_detail` keeps 600
+    bytes, less than one of these displayMsg + displayTips envelopes), so a JSON
+    that fails to parse is not the same thing as a body without a code: fall back
+    to a head scan before giving up.
+    """
     try:
         payload = json.loads(detail or "")
     except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        try:
+            return int(payload.get("code"))
+        except (TypeError, ValueError):
+            pass
+    if not detail:
         return None
-    if not isinstance(payload, dict):
+    match = _UPSTREAM_CODE_RE.search(str(detail)[:_UPSTREAM_CODE_HEAD])
+    if match is None:
         return None
     try:
-        return int(payload.get("code"))
+        return int(match.group(1))
     except (TypeError, ValueError):
         return None
 
@@ -18437,7 +18462,7 @@ class Handler(BaseHTTPRequestHandler):
             super().finish()
         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
             pass
-    server_version = "wb-proxy/1.8.0.1"
+    server_version = "wb-proxy/1.8.0.2"
     def log_message(self, fmt, *args):
         # 静默过滤前端看板高频定时心跳的正常 200 GET 请求（/logs、/usage、/accounts 轮询等）
         # 避免自增死循环刷屏与日志污染。遇 4xx/5xx 异常或所有非 GET 业务操作依然如实记录。
