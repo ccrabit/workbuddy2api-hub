@@ -29,14 +29,14 @@
       "is_docker": false,
       "service_port": "8788",
       "releases": {
-        "1.8.0.3": {
-          "changelog": "1.8.0.3（Phase S 热修，修 1.8.0.2 在真机上「换号了但救不回来」）：1.8.0.2 装机后换号日志终于出现，但三个账号在 1.3 秒内被依次拒绝同一条正文，客户端仍然拿到 400。根因是判定随内容走而不随账号走，而旧预算 2 次、无间隔，采样点几乎没变。本版：换号预算 2 → 3；每次换号前按 0.5s / 1.5s / 3.5s 退避，不再一秒内连打；预算耗尽仍被拒且提示模式是 passthrough/append 时，触发一次性降级提示（中性系统提示）再试；同时把每次被拒的请求形状（system 头尾、逐条消息长度、正文 sha256、账号/realm/product/模型/流式）落到 /tmp/wb-waf-dumps/，便于下次现场比对（不写数据目录）。套件 9 → 13 项。版本号沿用 fork 私有第四段（1.8.0.1 → 1.8.0.2 → 1.8.0.3），因为应用中心只按版本号判断升级，同版本新字节装不进去。",
-          "updated_at": "2026-10-28T10:25:00+08:00",
+        "1.8.0.4": {
+          "changelog": "1.8.0.4（Phase T 修正）：1.8.0.3 装上去十分钟内就抓到一次真实 11128 —— 三次换号（间隔 0.5/1.5/3.5 秒）全拒后，中性提示重试在 10:33:56 把这一轮救回成 200（207568 tokens）。但 1.8.0.3 的兜底触发的是进程级降级窗口（到次日 00:00 才复位），会把当天其余 passthrough/append 请求的系统提示悄悄换成 28 字中性提示；本版改成只借这一条请求：trigger → 重建出站正文 → 立刻 reset（若窗口本来就活则不动，保住 403 内容审查那条保护），自定义提示模式永不降级。另外修掉 dump 写不进去的隐患：应用以 workbuddy2api（uid 946）运行，而 /tmp/wb-waf-dumps 若是 root 建的 0755 目录就写不进、异常被吞；现在套件自己在临时目录里跑，/tmp/wb-waf-dumps 只留真机现场。套件 13 项不变。版本号沿用 fork 私有第四段。",
+          "updated_at": "2026-10-28T10:46:00+08:00",
           "packages": {
             "all": {
-              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.8.0.3/WorkBuddy2API-Hub_1.8.0.3_all.fpk",
-              "sha256": "406a62ce76f18a12cbc417c2af15d0365c863ce53e29acfe98800c11011745c7",
-              "size": 1020748
+              "download_url": "https://github.com/ccrabit/workbuddy2api-hub/releases/download/fnos-1.8.0.4/WorkBuddy2API-Hub_1.8.0.4_all.fpk",
+              "sha256": "e61959d7df9a53703dccfa12e54c74f851f37bf0dbc9b1432141e8ad7fcaa6b0",
+              "size": 1028481
             }
           }
         }
