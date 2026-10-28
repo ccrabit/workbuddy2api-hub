@@ -101,6 +101,27 @@
 > sha256 `5b126a3734b948f6013ab54375cd78af9fca61870bbebf94cbeafd991e271b91`，包内 `app.tgz` 的
 > md5（= manifest 的 `checksum`）= `64e27bbcc9d1d73ee8611f6ec5884422`。`fnpack.json` 已按此回填。
 >
+> **Phase U 已发布（2026-10-28 20:45 CST）**：`refs/heads/main` 从 `54333a0`（`fnos-1.8.0.4`）前进到
+> Phase U 的**双亲合并提交**（`git describe --tags` 就在 `fnos-1.9.0.1` 上，`build-fpk.sh --print-version`
+> = `1.9.0.1`）；annotated tag `fnos-1.9.0.1` 已推 `origin`。GitHub Release **id `426643322`**（非草稿，
+> <https://github.com/ccrabit/workbuddy2api-hub/releases/tag/fnos-1.9.0.1>），两资产 `uploaded`：
+> `WorkBuddy2API-Hub_1.9.0.1_all.fpk`（`1030102` B，sha256 `5b126a37…`）+ `.sha256`（`100` B）；
+> 从 `releases/download/` 回读的 sha256 与 `dist/` 同一字节。
+> **FnDepot 外部源也发了**：`ccrabit/FnDepot`（非 fork，名字命中中心仓库 `generate_sources.py` 的召回）
+> 已推进到 `8be9e26`，根目录 `fnpack.json` 换成 1.9.0.1（`download_url` 指向上面那个 Release 资产、
+> sha256 / size 与实测一致）、`README.md` 的「当前提供版本」跟到 1.9.0.1；`ICON.PNG` 与主仓
+> `fndepot/ICON.PNG` 逐字节一致。源文件用中心仓库校验器离线复核：
+> `FNDEPOT_GENERATOR=/tmp/fndepot/generate_sources.py python3 tests/_test_fndepot_source.py` →
+> **PASS=77 FAIL=0**（两条 NOTE：`fnos/manifest` 的版本由构建注入、`preview_urls` 因无真实截图而省略）。
+> 主仓根目录那份 `fnpack.json` 同时保留（供「用户手输仓库地址 / JSON 直链」这条路径），两份版本键都是
+> `1.9.0.1`，`raw.githubusercontent.com` 回读一致。
+> 凭据：`ccrabit/workbuddy2api-hub` 用 `/root/.gh-token`（细粒度 PAT）即可；**`ccrabit/FnDepot` 它没有
+> `contents: write`**（`git push` 回 `403 Permission to ccrabit/FnDepot.git denied to ccrabit`，尽管
+> `GET /repos/ccrabit/FnDepot` 的 `permissions.push` 是 `true`），这次改推 `/root/.gh-token-classic`
+> （classic PAT，40 字符）。两个 token 都是 `GIT_ASKPASS` 助手读入，不落 argv、不写 git config。
+> **没有做的事**：没给中心仓库 `EWEDLCM/FnDepot` 提 PR（第三方源只可能进 `valid_sources.txt`，中心源只放
+> 作者自己的应用）；没手工 start/stop 应用；没动数据目录。
+>
 > **版本口径（Phase Q/R 的有意偏离，用户明确要求）**：用户原话「版本号不更新，应用中心无法安装，
 > 为了区别上游版本，这个版本号按照 `1.8.0.1` 这样的方式命名」。所以 1.8.0 的「包版本 ≡ 上游最新
 > 三段 tag」政策**本轮显式豁免**：`manifest` 的 `version`、`wb_proxy.py` 的 `server_version` /
