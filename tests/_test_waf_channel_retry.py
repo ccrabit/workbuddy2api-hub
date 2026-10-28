@@ -14,17 +14,24 @@
 旧实现里 400 一律原样透传（见 open_upstream 的 400 分支），于是一次抽样判定
 就把整轮对话打死，而隔壁账号两条街外就能服务。这里钉住修法：
 
-  1. 400 里 code=11128 → 换一个账号重试，最多 WB_WAF_RETRY_ATTEMPTS（默认 2）次；
-  2. 换号不记账：被拒的账号既不加 fails 也不进冷却（它没做错什么，是抽样）；
-  3. 预算用完仍失败 → 把原始 400 交回去，且正文对 HTTP handler 仍可读；
-  4. 其它 400（客户端自己的错）保持原样：一次出站、立即抛出；
-  5. WB_WAF_RETRY_ATTEMPTS=0 关掉换号，恢复旧行为。
+  1. 400 里 code=11128 → 换一个账号重试，最多 WB_WAF_RETRY_ATTEMPTS（默认 3）次，
+     每次换号前按 WAF_RETRY_DELAYS 退避（真机 1.3 秒内连打三次全被拒，采样点
+     根本没换）；
+  2. 换号不记账：被拒的账号既不加 fails 也不进冷却（它没做错什么）；
+  3. 预算用完仍失败、且提示模式是 passthrough/append → 只借这一条请求换成中性
+     系统提示再试一次（自定义提示不动，进程级降级窗口立刻复位，不波及后续请求）；
+  4. 仍失败 → 把原始 400 交回去，且正文对 HTTP handler 仍可读；
+  5. 每次被拒把请求形状落到 WB_WAF_DUMP_DIR（默认 /tmp/wb-waf-dumps），
+     下次现场直接比对，不必再猜指纹；
+  6. 其它 400（客户端自己的错）保持原样：一次出站、立即抛出；
+  7. WB_WAF_RETRY_ATTEMPTS=0 关掉换号，恢复旧行为。
 
     python tests/_test_waf_channel_retry.py
 """
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -146,6 +153,9 @@ class WafRetryTests(unittest.TestCase):
         self.old_pool = P.POOL
         self.old_budget = os.environ.get("WB_WAF_RETRY_ATTEMPTS")
         self.old_prompt_mode = P.prompt_mode_config
+        self.old_dump_dir = P.WAF_DUMP_DIR
+        self.dump_dir = tempfile.mkdtemp(prefix="waf-dump-test-")
+        P.WAF_DUMP_DIR = self.dump_dir
         # 默认把提示模式钉在 custom：降级兜底是用户没选的路径，其余用例只测换号。
         P.prompt_mode_config = lambda: {"mode": "custom", "file": "", "text": ""}
         P.PROMPT_DEGRADE.reset()
@@ -153,6 +163,8 @@ class WafRetryTests(unittest.TestCase):
     def tearDown(self):
         P.POOL = self.old_pool
         P.prompt_mode_config = self.old_prompt_mode
+        P.WAF_DUMP_DIR = self.old_dump_dir
+        shutil.rmtree(self.dump_dir, ignore_errors=True)
         P.PROMPT_DEGRADE.reset()
         if self.old_budget is None:
             os.environ.pop("WB_WAF_RETRY_ATTEMPTS", None)
@@ -299,18 +311,25 @@ class WafRetryTests(unittest.TestCase):
         self.assertEqual(P.waf_retry_delay(99), P.WAF_RETRY_DELAYS[-1])
         self.assertEqual(P.waf_retry_delay(0), 0.0)
 
-    def test_budget_exhausted_falls_back_to_degraded_prompt(self):
-        """预算打完仍被拒 → 换中性系统提示再试一次（403 内容审查同款兜底）。"""
+    def test_budget_exhausted_borrows_the_neutral_prompt_once(self):
+        """预算打完仍被拒 → 只借这一条请求换中性系统提示，窗口立刻复位。"""
         P.prompt_mode_config = lambda: {"mode": "passthrough", "file": "", "text": ""}
         accounts = [make_account("g%d" % i) for i in range(5)]
+        payload = {"model": "deepseek-v4.1-flash",
+                   "messages": [{"role": "system", "content": "SENTINEL-SYSTEM"},
+                                {"role": "user", "content": "hi"}]}
         script = [http_error(400, WAF_BODY_REAL[:300])
                   for _ in range(P.WAF_RETRY_ATTEMPTS_DEFAULT + 1)]
         script.append(FakeResp())
-        upstream, result, raised = self._run(accounts, list(script))
-        self.assertIsNone(raised, "降级提示后应该能过")
+        upstream, result, raised = self._run(accounts, list(script), payload=payload)
+        self.assertIsNone(raised, "中性提示重试后应该能过")
         self.assertEqual(len(upstream.calls), P.WAF_RETRY_ATTEMPTS_DEFAULT + 2,
-                         "换号预算 + 一次降级重试都要真的出站")
-        self.assertTrue(P.PROMPT_DEGRADE.active(), "降级必须记进进程级窗口")
+                         "换号预算 + 一次中性提示重试都要真的出站")
+        first, last = upstream.calls[0].data, upstream.calls[-1].data
+        self.assertIn(b"SENTINEL-SYSTEM", first, "前几次必须用客户端自己的系统提示")
+        self.assertNotIn(b"SENTINEL-SYSTEM", last, "最后一次必须换成中性提示")
+        self.assertFalse(P.PROMPT_DEGRADE.active(),
+                         "只借这一条请求：不能把整天其余请求的提示也换掉")
 
     def test_degraded_prompt_retry_is_only_tried_once(self):
         """降级之后还被拒就交回原始 400，不无限重试。"""

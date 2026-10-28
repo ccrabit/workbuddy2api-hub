@@ -10251,7 +10251,7 @@ def runtime_settings_view():
         "accounts_dir": ACCOUNTS_DIR,
         "usage_dir": USAGE_DIR,
         "settings_file": wb_settings.settings_path(ACCOUNTS_DIR),
-        "version": "1.8.0.3",
+        "version": "1.8.0.4",
     }
 def current_account():
     """Account used for display purposes (health / usage summaries)."""
@@ -15115,19 +15115,25 @@ def open_upstream(payload, session_key=None, target_realm=None, prebuilt_body=No
                             time.sleep(delay)
                         continue
                     # 预算打完仍被拒，说明换号不是杠杆：三个不同账号在同一条正文上
-                    # 给出同一个判定，指纹只可能在内容里（而抽样窗口已经换过好几
-                    # 次）。这时走 403 内容审查已经验证过的兜底——把系统提示换成中
-                    # 性提示再试一次。自定义模式是用户明确选择的提示，不自动动它。
+                    # 给出同一个判定，指纹可能在内容里。这时借 403 内容审查那套中性
+                    # 提示再试一次——注意只借**这一条请求**：触发后立刻把窗口复位，
+                    # 否则客户端的系统提示会被这一天的其余请求悄悄换掉。自定义模式
+                    # 是用户明确选择的提示，不自动动它。
                     if (not degraded_retried
                             and prompt_mode_config().get("mode")
                             in ("passthrough", "append")):
+                        was_degraded = PROMPT_DEGRADE.active()
                         PROMPT_DEGRADE.trigger()
+                        try:
+                            upstream_body = build_upstream_body(payload)
+                        finally:
+                            if not was_degraded:
+                                PROMPT_DEGRADE.reset()
                         degraded_retried = True
-                        upstream_body = build_upstream_body(payload)
                         tried.discard(account.uid)
                         last_error = exc
                         log("upstream 400 (code %s, channel check) survived %d "
-                            "rotation(s) -> degraded prompt retry"
+                            "rotation(s) -> one-shot neutral prompt retry"
                             % (waf_code, waf_retries))
                         continue
                 raise
@@ -18571,7 +18577,7 @@ class Handler(BaseHTTPRequestHandler):
             super().finish()
         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
             pass
-    server_version = "wb-proxy/1.8.0.3"
+    server_version = "wb-proxy/1.8.0.4"
     def log_message(self, fmt, *args):
         # 静默过滤前端看板高频定时心跳的正常 200 GET 请求（/logs、/usage、/accounts 轮询等）
         # 避免自增死循环刷屏与日志污染。遇 4xx/5xx 异常或所有非 GET 业务操作依然如实记录。
