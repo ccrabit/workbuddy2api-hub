@@ -122,6 +122,45 @@
 > **没有做的事**：没给中心仓库 `EWEDLCM/FnDepot` 提 PR（第三方源只可能进 `valid_sources.txt`，中心源只放
 > 作者自己的应用）；没手工 start/stop 应用；没动数据目录。
 >
+> **Phase V 整合（2026-10-30，并入上游 v1.9.1 / v1.9.2；包版本 `1.9.2.1`）**：
+> `git merge upstream/main`（`736d08e`，8 个提交、11 个文件、+473/-25，覆盖 `v1.9.1` 与 `v1.9.2`
+> 两个 release）落进本树。冲突只有 2 个文件 / 4 处：`README.md`（套件数与 Unreleased 段）与
+> `wb_proxy.py`（`runtime_settings_view` 与 `Handler.server_version` 两个版本串、`read_http_error()`
+> 的缓存分支、`_get_panel_status()` 的字段并集）；`dashboard.html`（上游 4 个 hunk：登录页密码框、
+> `crypto_ok` 警告块、更新卡片提示、`loadRange` 的 pending 去重）全部自动合并，合并后看板 `<style>`
+> 括号 728/728 平衡，本层的网关隐藏闸门、`wbUrl()` 前缀、`__WB_BASE__` / `__WB_VIA_GATEWAY__` 注入未受影响。
+>
+> 上游这一批两条主线，都只加开关、默认关：① `WB_STOP_AT_SSE_DONE=1` 让聚合、Responses、Chat 三条
+> 流式路径在收到上游 `[DONE]` 后立即停止读取（#692）；`WB_CACHE_HTTP_ERROR_BODY=1` 把首次读到的错误
+> 正文缓存到 `exc.wb_body`，后续读者不再读到被提前消费的空正文（#693）。② 面板密码加密链路可诊断
+> （#658）：解释器缺 `hashlib.pbkdf2_hmac` 时（Windows 便携运行时被 Smart Control 拦下
+> `DLLs/_hashlib.pyd` 就是这样）`wb_settings._digest()` 抛 `PanelPasswordCryptoError`，登录 / 改密 /
+> 改身份版本三处**返回 500 + 排查指引**，不再把异常吞成「密码错误」401；`check_pbkdf2_available()`
+> 在启动自检、`/health`、`/panel/status` 暴露 `crypto_ok`（失败带 `crypto_error`），看板登录页据此
+> 直接显示环境警告。另有看板两条：#656 的「同一时间范围请求未回来时跳过重复轮询」、#696 的
+> 「更新卡片写出安装按钮不可用的原因」。
+>
+> **本层验收（隔离端口 8799，数据目录 `.stage/smoke-v`，生产 8788 全程未动）**：`/panel/status` 同时
+> 返回本层的 `via_gateway` / `gateway_user` / `direct_port` 与上游的 `crypto_ok`；
+> `/health` 带 `crypto_ok` 与 `accounts_by_realm` / `models_ready`；看板 `GET /` 200（`1034168` B）；
+> 非流式 **200**（`41/2/43` tokens，`收到`）、流式 **200**（`60` 帧、以 `data: [DONE]` 收尾、usage 帧
+> 完整）；再以 `WB_STOP_AT_SSE_DONE=1` + `WB_CACHE_HTTP_ERROR_BODY=1` 重启复测，流式仍 60 帧正常收尾、
+> 非流式 200 —— 两个新旋钮打开不影响真实链路。矩阵提交后复跑 **246 passed / 0 failed / 0 skipped**（50.6s，185 Python + 61 JS）；合并提交落盘前
+> `_test_phase_e_verify.py` 必红两处（「upstream/main 已并入 HEAD」「合并提交的标题写明是并入
+> upstream/main 的 fork 合并」），提交并按历史口径把标题写成
+> `Merge upstream/main (v1.9.2) into the fnOS fork (Phase V hot-fix 1.9.2.1)` 之后转绿
+> （该套件单跑 `PASS=298 FAIL=0 SKIP=8`）。
+>
+> **本包指纹（1.9.2.1 实测）**：`dist/WorkBuddy2API-Hub_1.9.2.1_all.fpk` = **`1034285` B** /
+> sha256 `5c6f3fcc9f6b1b14e9c6aa3aaa213c272e9c69cafedd80a1acf651e3db9a5f60`，包内 `app.tgz` 的 md5
+> （= manifest 的 `checksum`）= `d7af3f240d74ab1c0945d9b26a0bd0c4`；`fnpack.json` 与
+> `tests/_test_fndepot_source.py` 的 `EXPECTED_VERSION` / `EXPECTED_URL` 已按 `1.9.2.1` 回填。
+> `scripts/verify-fpk.sh` **70 passed / 1 failed**，唯一红是 `the package is what this tree builds`
+> —— 该断言拿 `build-fpk.sh --print-version`（当前最新 `fnos-*` tag 是 `fnos-1.9.0.1`，于是派生
+> `1.9.0.1`）比对包版本，**打上 `fnos-1.9.2.1` tag 后自动转绿**，属发布前结构性红。
+> **状态**：合并、版本号、包与文档都已落盘并推 `origin`；**tag / Release / FnDepot 源回填未做**，
+> 留给发布步骤（`docs/phase-g-local-release.md`）。
+
 > **版本口径（Phase Q/R 的有意偏离，用户明确要求）**：用户原话「版本号不更新，应用中心无法安装，
 > 为了区别上游版本，这个版本号按照 `1.8.0.1` 这样的方式命名」。所以 1.8.0 的「包版本 ≡ 上游最新
 > 三段 tag」政策**本轮显式豁免**：`manifest` 的 `version`、`wb_proxy.py` 的 `server_version` /
